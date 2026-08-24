@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+repo_root="$(git rev-parse --show-toplevel)"
+readonly repo_root
+exec "${repo_root}/scripts/prepush.sh"

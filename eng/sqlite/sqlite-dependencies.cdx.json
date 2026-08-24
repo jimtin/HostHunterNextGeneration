@@ -1,0 +1,93 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.6",
+  "version": 1,
+  "metadata": {
+    "component": {
+      "type": "application",
+      "bom-ref": "pkg:generic/HostHunterNextGeneration@0.1.0",
+      "name": "HostHunterNextGeneration",
+      "version": "0.1.0"
+    }
+  },
+  "components": [
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/Microsoft.Data.Sqlite.Core@10.0.11",
+      "name": "Microsoft.Data.Sqlite.Core",
+      "version": "10.0.11",
+      "licenses": [{ "license": { "id": "MIT" } }],
+      "purl": "pkg:nuget/Microsoft.Data.Sqlite.Core@10.0.11"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/SQLitePCLRaw.bundle_e_sqlite3@3.0.5",
+      "name": "SQLitePCLRaw.bundle_e_sqlite3",
+      "version": "3.0.5",
+      "licenses": [{ "license": { "id": "Apache-2.0" } }],
+      "purl": "pkg:nuget/SQLitePCLRaw.bundle_e_sqlite3@3.0.5"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/SQLitePCLRaw.config.e_sqlite3@3.0.5",
+      "name": "SQLitePCLRaw.config.e_sqlite3",
+      "version": "3.0.5",
+      "licenses": [{ "license": { "id": "Apache-2.0" } }],
+      "purl": "pkg:nuget/SQLitePCLRaw.config.e_sqlite3@3.0.5"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/SQLitePCLRaw.core@3.0.5",
+      "name": "SQLitePCLRaw.core",
+      "version": "3.0.5",
+      "licenses": [{ "license": { "id": "Apache-2.0" } }],
+      "purl": "pkg:nuget/SQLitePCLRaw.core@3.0.5"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/SQLitePCLRaw.provider.e_sqlite3@3.0.5",
+      "name": "SQLitePCLRaw.provider.e_sqlite3",
+      "version": "3.0.5",
+      "licenses": [{ "license": { "id": "Apache-2.0" } }],
+      "purl": "pkg:nuget/SQLitePCLRaw.provider.e_sqlite3@3.0.5"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/SQLite@3.53.4",
+      "name": "SQLite",
+      "version": "3.53.4",
+      "licenses": [{ "license": { "name": "SQLite blessing" } }],
+      "purl": "pkg:nuget/SQLite@3.53.4"
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "pkg:generic/HostHunterNextGeneration@0.1.0",
+      "dependsOn": [
+        "pkg:nuget/Microsoft.Data.Sqlite.Core@10.0.11",
+        "pkg:nuget/SQLitePCLRaw.bundle_e_sqlite3@3.0.5"
+      ]
+    },
+    {
+      "ref": "pkg:nuget/Microsoft.Data.Sqlite.Core@10.0.11",
+      "dependsOn": ["pkg:nuget/SQLitePCLRaw.core@3.0.5"]
+    },
+    {
+      "ref": "pkg:nuget/SQLitePCLRaw.bundle_e_sqlite3@3.0.5",
+      "dependsOn": [
+        "pkg:nuget/SQLite@3.53.4",
+        "pkg:nuget/SQLitePCLRaw.config.e_sqlite3@3.0.5"
+      ]
+    },
+    {
+      "ref": "pkg:nuget/SQLitePCLRaw.config.e_sqlite3@3.0.5",
+      "dependsOn": ["pkg:nuget/SQLitePCLRaw.provider.e_sqlite3@3.0.5"]
+    },
+    { "ref": "pkg:nuget/SQLitePCLRaw.core@3.0.5", "dependsOn": [] },
+    {
+      "ref": "pkg:nuget/SQLitePCLRaw.provider.e_sqlite3@3.0.5",
+      "dependsOn": ["pkg:nuget/SQLitePCLRaw.core@3.0.5"]
+    },
+    { "ref": "pkg:nuget/SQLite@3.53.4", "dependsOn": [] }
+  ]
+}

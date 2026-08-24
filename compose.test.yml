@@ -1,0 +1,76 @@
+name: hosthunter-next-generation-test
+
+services:
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    image: hosthunter-next-generation-test:local
+    working_dir: /workspace
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    volumes:
+      - .:/workspace:ro
+      - ./.artifacts:/artifacts
+      - ssh-runtime:/run/hosthunter-ssh:ro
+    group_add:
+      - "10002"
+      - "${HH_HOST_GID:-1000}"
+    environment:
+      HOME: /tmp
+      HH_ARTIFACT_ROOT: /artifacts
+      HH_SSH_HOST: ssh-target
+      HH_SSH_PORT: "22"
+      HH_SSH_RUNTIME_DIR: /run/hosthunter-ssh
+    networks:
+      - test
+
+  controller-floor:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+      args:
+        POWERSHELL_VERSION: 7.4.19
+        POWERSHELL_AMD64_SHA256: 1b023e097b0e0546ad9566f7a2126cbe0eb8455fa7b0c5de558e317b8ddc16c8
+        POWERSHELL_ARM64_SHA256: 2b11aafacf574222abaf691a0b3b2d463e617d17fe337343c2fb93ea871a4691
+    image: hosthunter-next-generation-controller-floor:local
+    working_dir: /workspace
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    volumes:
+      - .:/workspace:ro
+      - ./.artifacts:/artifacts
+    group_add:
+      - "${HH_HOST_GID:-1000}"
+    environment:
+      HOME: /tmp
+      HH_ARTIFACT_ROOT: /artifacts
+    networks:
+      - test
+
+  ssh-target:
+    build:
+      context: tests/fixtures/ssh
+      dockerfile: Dockerfile
+    image: hosthunter-next-generation-ssh-fixture:local
+    # The disposable fixture must update /etc/shadow with its run-generated
+    # password. It has no host bind mounts and is destroyed after each gate.
+    tmpfs:
+      - /tmp:mode=1777
+      - /run/sshd:mode=0755
+      - /home/hhfixture:uid=10001,gid=10001,mode=0700
+    volumes:
+      - ssh-runtime:/run/hosthunter-ssh
+    networks:
+      test:
+        aliases:
+          - ssh-target-alt
+
+networks:
+  test:
+    internal: true
+
+volumes:
+  ssh-runtime:

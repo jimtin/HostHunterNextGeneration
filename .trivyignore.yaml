@@ -1,0 +1,9 @@
+misconfigurations:
+  - id: DS-0002
+    paths:
+      - tests/fixtures/ssh/Dockerfile
+    expired_at: 2026-09-06
+    statement: >-
+      Owner: main. The internal-only SSH fixture must start as root to create its
+      runtime password and serve sshd; authenticated sessions run as uid 10001.
+      Reassess before expiry.

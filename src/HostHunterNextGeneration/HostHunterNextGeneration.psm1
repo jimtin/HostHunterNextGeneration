@@ -1,0 +1,23 @@
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+$script:HHModuleRoot = $PSScriptRoot
+
+$privateFiles = @(Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'Private') -Filter '*.ps1' -File |
+        Sort-Object Name)
+$publicFiles = @(Get-ChildItem -LiteralPath (Join-Path $PSScriptRoot 'Public') -Filter '*.ps1' -File |
+        Sort-Object Name)
+
+foreach ($file in @($privateFiles + $publicFiles)) {
+    . $file.FullName
+}
+
+Export-ModuleMember -Function @(
+    'Set-HHTarget'
+    'Get-HHTarget'
+    'Test-HHTarget'
+    'Remove-HHTarget'
+    'Invoke-HHCommand'
+    'Enable-HHSshKeyAuthentication'
+    'Get-HHAuditRecord'
+    'Get-HHAuditOutput'
+)

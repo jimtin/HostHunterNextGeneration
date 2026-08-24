@@ -1,0 +1,8 @@
+*
+!Dockerfile
+!entrypoint.sh
+!fixture-askpass.sh
+!healthcheck.sh
+!reset-authorized-keys.sh
+!rotate-host-key.sh
+!sshd_config

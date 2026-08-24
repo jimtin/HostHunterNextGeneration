@@ -1,0 +1,21 @@
+{
+  "config": {
+    "default": true,
+    "MD013": false,
+    "MD036": false,
+    "MD024": {
+      "siblings_only": true
+    },
+    "MD033": {
+      "allowed_elements": [
+        "oai-mem-citation",
+        "citation_entries",
+        "rollout_ids"
+      ]
+    },
+    "MD060": false
+  },
+  "ignores": [
+    ".artifacts/**"
+  ]
+}

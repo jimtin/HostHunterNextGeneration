@@ -1,0 +1,195 @@
+# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+
+FROM golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36 AS editorconfig
+
+ARG EDITORCONFIG_CHECKER_VERSION=3.11.1
+ARG EDITORCONFIG_CHECKER_SHA256=44d630c12d712cd132764582edb45a2e0db1600a47a87307ee747b4195d06278
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+WORKDIR /src
+
+RUN curl --fail --location --proto '=https' --show-error --silent \
+        "https://codeload.github.com/editorconfig-checker/editorconfig-checker/tar.gz/refs/tags/v${EDITORCONFIG_CHECKER_VERSION}" \
+        --output /tmp/editorconfig-checker.tar.gz \
+    && printf '%s  %s\n' "${EDITORCONFIG_CHECKER_SHA256}" /tmp/editorconfig-checker.tar.gz \
+        | sha256sum --check --strict \
+    && mkdir --parents /out \
+    && tar --extract --gzip --strip-components=1 \
+        --file /tmp/editorconfig-checker.tar.gz --directory /src \
+    && go get golang.org/x/mod@v0.40.0 \
+    && go mod verify \
+    && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' \
+        -o /out/editorconfig-checker ./cmd/editorconfig-checker \
+    && test "$(/out/editorconfig-checker -version)" = "v${EDITORCONFIG_CHECKER_VERSION}"
+FROM koalaman/shellcheck:v0.11.0@sha256:61862eba1fcf09a484ebcc6feea46f1782532571a34ed51fedf90dd25f925a8d AS shellcheck
+FROM hadolint/hadolint:v2.15.1-debian@sha256:9a3944b7fddcb947d1ffd90829ac1a6e5c30479223358f249d8b96c7d0019e27 AS hadolint
+FROM davidanson/markdownlint-cli2:v0.23.2@sha256:839558fd0d36c46da0e01ea84fd1d20a2822b5a8a60c16dc9708f0bb7c9e903b AS markdownlint-package
+FROM node:24.18.0-bookworm-slim@sha256:6f7b03f7c2c8e2e784dcf9295400527b9b1270fd37b7e9a7285cf83b6951452d AS node-runtime
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0.400-noble@sha256:e1ffd2a92ae84c1291bc1b6887501f8af98e6331e7af6d4c8d37168c5e87a64c AS sqlite-dependencies
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+WORKDIR /restore
+
+COPY eng/sqlite/HostHunter.Sqlite.Dependencies.csproj ./
+COPY eng/sqlite/packages.lock.json ./
+
+RUN dotnet restore HostHunter.Sqlite.Dependencies.csproj \
+        --locked-mode \
+        --packages /nuget/packages \
+    && managed_assets=( \
+        /nuget/packages/microsoft.data.sqlite.core/10.0.11/lib/net8.0/Microsoft.Data.Sqlite.dll \
+        /nuget/packages/sqlitepclraw.config.e_sqlite3/3.0.5/lib/net8.0/SQLitePCLRaw.batteries_v2.dll \
+        /nuget/packages/sqlitepclraw.core/3.0.5/lib/net8.0/SQLitePCLRaw.core.dll \
+        /nuget/packages/sqlitepclraw.provider.e_sqlite3/3.0.5/lib/net8.0/SQLitePCLRaw.provider.e_sqlite3.dll \
+    ) \
+    && for rid in linux-arm64 linux-x64 osx-arm64 win-x64; do \
+        install -d -m 0755 "/out/lib/${rid}"; \
+        install -m 0644 "${managed_assets[@]}" "/out/lib/${rid}/"; \
+    done \
+    && install -m 0644 \
+        /nuget/packages/sqlite/3.53.4/runtimes/linux-arm64/native/libe_sqlite3.so \
+        /out/lib/linux-arm64/libe_sqlite3.so \
+    && install -m 0644 \
+        /nuget/packages/sqlite/3.53.4/runtimes/linux-x64/native/libe_sqlite3.so \
+        /out/lib/linux-x64/libe_sqlite3.so \
+    && install -m 0644 \
+        /nuget/packages/sqlite/3.53.4/runtimes/osx-arm64/native/libe_sqlite3.dylib \
+        /out/lib/osx-arm64/libe_sqlite3.dylib \
+    && install -m 0644 \
+        /nuget/packages/sqlite/3.53.4/runtimes/win-x64/native/e_sqlite3.dll \
+        /out/lib/win-x64/e_sqlite3.dll \
+    && test "$(find /out/lib -mindepth 2 -maxdepth 2 -type f | wc -l)" -eq 20
+
+WORKDIR /out
+RUN find lib -type f -print0 | sort -z | xargs -0 sha256sum \
+        > asset-sha256.txt
+
+FROM mcr.microsoft.com/dotnet/sdk:10.0.400-noble@sha256:e1ffd2a92ae84c1291bc1b6887501f8af98e6331e7af6d4c8d37168c5e87a64c AS durability-helper
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+WORKDIR /src
+
+COPY eng/durability/HostHunter.Persistence.Durability.csproj ./
+COPY eng/durability/packages.lock.json ./
+COPY eng/durability/DurablePublisher.cs ./
+
+RUN dotnet restore HostHunter.Persistence.Durability.csproj \
+        --locked-mode \
+        --packages /nuget/packages \
+    && dotnet build HostHunter.Persistence.Durability.csproj \
+        --configuration Release \
+        --no-restore \
+        --output /out \
+    && test -f /out/HostHunter.Persistence.Durability.dll
+
+FROM ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517
+
+ARG TARGETARCH
+ARG DEBIAN_FRONTEND=noninteractive
+ARG POWERSHELL_VERSION=7.6.5
+ARG POWERSHELL_AMD64_SHA256=b34ab3b19acac1d3d4d0d3cfdb02acf62f457b0b6a962ff008132033f7566844
+ARG POWERSHELL_ARM64_SHA256=ed4084f215d8bce2edd23aa7cb1f1e7b0818e41363a635a22065d2701b6141df
+ARG PESTER_VERSION=6.1.0
+ARG PESTER_SHA256=0207a75ea09f81b27c1ded44898b2bb3c845bafa02045bd64a39e26a53ca41b4
+ARG PSSCRIPTANALYZER_VERSION=1.25.0
+ARG PSSCRIPTANALYZER_SHA256=14e634c828eb98efb9f40b2918ba90f139ed5eccdf663a2a747736d996995d60
+ARG YAMLLINT_VERSION=1.38.0
+ARG PYYAML_VERSION=6.0.3
+ARG PATHSPEC_VERSION=1.1.1
+
+ENV LANG=C.UTF-8 \
+    LC_ALL=C.UTF-8 \
+    POWERSHELL_TELEMETRY_OPTOUT=1 \
+    POWERSHELL_UPDATECHECK=Off \
+    PSModuleAnalysisCachePath=/tmp/ModuleAnalysisCache \
+    PATH=/opt/yamllint/bin:/opt/microsoft/powershell/7:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+COPY scripts/toolchain/Test-Toolchain.ps1 /tmp/Test-Toolchain.ps1
+
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes \
+        ca-certificates=20260601~24.04.1 \
+        curl=8.5.0-2ubuntu10.12 \
+        git=1:2.43.0-1ubuntu7.3 \
+        gss-ntlmssp=1.2.0-1build3 \
+        libgcc-s1=14.2.0-4ubuntu2~24.04.1 \
+        libgssapi-krb5-2=1.20.1-6ubuntu2.8 \
+        libicu74=74.2-1ubuntu3.1 \
+        liblttng-ust1t64=2.13.7-1.1ubuntu2 \
+        libssl3t64=3.0.13-0ubuntu3.12 \
+        libstdc++6=14.2.0-4ubuntu2~24.04.1 \
+        libunwind8=1.6.2-3build1.1 \
+        openssh-client=1:9.6p1-3ubuntu13.18 \
+        python3=3.12.3-0ubuntu2.1 \
+        python3-venv=3.12.3-0ubuntu2.1 \
+        unzip=6.0-28ubuntu4.1 \
+        zlib1g=1:1.3.dfsg-3.1ubuntu2.1 \
+    && case "${TARGETARCH}" in \
+        amd64) powershell_arch='x64'; powershell_sha256="${POWERSHELL_AMD64_SHA256}" ;; \
+        arm64) powershell_arch='arm64'; powershell_sha256="${POWERSHELL_ARM64_SHA256}" ;; \
+        *) echo "Unsupported target architecture: ${TARGETARCH}" >&2; exit 1 ;; \
+    esac \
+    && powershell_archive="powershell-${POWERSHELL_VERSION}-linux-${powershell_arch}.tar.gz" \
+    && curl --fail --location --proto '=https' --show-error --silent \
+        "https://github.com/PowerShell/PowerShell/releases/download/v${POWERSHELL_VERSION}/${powershell_archive}" \
+        --output /tmp/powershell.tar.gz \
+    && printf '%s  %s\n' "${powershell_sha256}" /tmp/powershell.tar.gz | sha256sum --check --strict \
+    && mkdir --parents /opt/microsoft/powershell/7 \
+    && tar --extract --gzip --file /tmp/powershell.tar.gz --directory /opt/microsoft/powershell/7 \
+    && chmod 0755 /opt/microsoft/powershell/7/pwsh \
+    && ln --symbolic /opt/microsoft/powershell/7/pwsh /usr/local/bin/pwsh \
+    && curl --fail --location --proto '=https' --show-error --silent \
+        "https://www.powershellgallery.com/api/v2/package/Pester/${PESTER_VERSION}" \
+        --output /tmp/Pester.nupkg \
+    && printf '%s  %s\n' "${PESTER_SHA256}" /tmp/Pester.nupkg | sha256sum --check --strict \
+    && mkdir --parents "/usr/local/share/powershell/Modules/Pester/${PESTER_VERSION}" \
+    && unzip -q /tmp/Pester.nupkg -d "/usr/local/share/powershell/Modules/Pester/${PESTER_VERSION}" \
+    && curl --fail --location --proto '=https' --show-error --silent \
+        "https://www.powershellgallery.com/api/v2/package/PSScriptAnalyzer/${PSSCRIPTANALYZER_VERSION}" \
+        --output /tmp/PSScriptAnalyzer.nupkg \
+    && printf '%s  %s\n' "${PSSCRIPTANALYZER_SHA256}" /tmp/PSScriptAnalyzer.nupkg | sha256sum --check --strict \
+    && mkdir --parents "/usr/local/share/powershell/Modules/PSScriptAnalyzer/${PSSCRIPTANALYZER_VERSION}" \
+    && unzip -q /tmp/PSScriptAnalyzer.nupkg -d "/usr/local/share/powershell/Modules/PSScriptAnalyzer/${PSSCRIPTANALYZER_VERSION}" \
+    && python3 -m venv /opt/yamllint \
+    && /opt/yamllint/bin/pip install --disable-pip-version-check --no-cache-dir \
+        "pathspec==${PATHSPEC_VERSION}" \
+        "PyYAML==${PYYAML_VERSION}" \
+        "yamllint==${YAMLLINT_VERSION}" \
+    && pwsh -NoLogo -NoProfile -NonInteractive -File /tmp/Test-Toolchain.ps1 \
+        -ExpectedPowerShellVersion "${POWERSHELL_VERSION}" \
+    && rm --force /tmp/Test-Toolchain.ps1 /tmp/powershell.tar.gz /tmp/Pester.nupkg /tmp/PSScriptAnalyzer.nupkg \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=editorconfig /out/editorconfig-checker /usr/local/bin/editorconfig-checker
+COPY --from=shellcheck /bin/shellcheck /usr/local/bin/shellcheck
+COPY --from=hadolint /bin/hadolint /usr/local/bin/hadolint
+COPY --from=node-runtime /usr/local/bin/node /usr/local/bin/node
+COPY --from=markdownlint-package /usr/local/lib/node_modules/markdownlint-cli2 /usr/local/lib/node_modules/markdownlint-cli2
+COPY --from=markdownlint-package /usr/local/lib/node_modules/markdownlint-cli2-formatter-default /usr/local/lib/node_modules/markdownlint-cli2-formatter-default
+COPY --from=sqlite-dependencies /out /opt/hosthunter-sqlite
+COPY --from=durability-helper /out/HostHunter.Persistence.Durability.dll /opt/hosthunter-durability/HostHunter.Persistence.Durability.dll
+
+RUN groupadd --gid 10001 hhtest \
+    && useradd --create-home --gid 10001 --no-log-init --shell /bin/bash --uid 10001 hhtest \
+    && mkdir --parents /artifacts \
+    && chown 10001:10001 /artifacts \
+    && ln --symbolic ../lib/node_modules/markdownlint-cli2/markdownlint-cli2-bin.mjs /usr/local/bin/markdownlint-cli2 \
+    && test "$(editorconfig-checker -version)" = 'v3.11.1' \
+    && shellcheck --version | grep --fixed-strings 'version: 0.11.0' \
+    && hadolint --version | grep --fixed-strings '2.15.1' \
+    && test "$(node --version)" = 'v24.18.0' \
+    && test "$(node --print 'require("/usr/local/lib/node_modules/markdownlint-cli2/package.json").version')" = '0.23.2' \
+    && test "$(yamllint --version)" = 'yamllint 1.38.0'
+
+RUN test "$(sha256sum /opt/hosthunter-durability/HostHunter.Persistence.Durability.dll | awk '{print length($1)}')" -eq 64
+
+USER 10001:10001
+WORKDIR /workspace
+
+ENV HH_ARTIFACT_ROOT=/artifacts
+ENV HH_DURABILITY_HELPER_ROOT=/opt/hosthunter-durability
+
+CMD ["pwsh", "-NoLogo", "-NoProfile"]
