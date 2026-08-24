@@ -12,7 +12,12 @@ $ErrorActionPreference = 'Stop'
 if (-not $IsMacOS) { throw 'Native macOS qualification requires macOS.' }
 $manifest = (Resolve-Path -LiteralPath $ModuleManifestPath).Path
 $receipt = [IO.Path]::GetFullPath($ReceiptPath)
-$dataRoot = Join-Path ([IO.Path]::GetTempPath()) (
+$canonicalTempRoot = (& /bin/realpath ([IO.Path]::GetTempPath())).Trim()
+if ([string]::IsNullOrWhiteSpace($canonicalTempRoot) -or
+    -not [IO.Directory]::Exists($canonicalTempRoot)) {
+    throw 'The native macOS qualification temporary root could not be canonicalized.'
+}
+$dataRoot = Join-Path $canonicalTempRoot (
     'hosthunter-native-qualification-' + [Guid]::NewGuid().ToString('N')
 )
 $module = Import-Module $manifest -Force -PassThru
