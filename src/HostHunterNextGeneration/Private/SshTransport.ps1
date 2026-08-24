@@ -574,7 +574,11 @@ function Get-HHWindowsPowerShellCompatibilityEnvelopeScriptBlock {
                         Marker = 'HostHunter.PowerShellIdentity.v1'
                         PSEdition = $PSVersionTable.PSEdition
                         PowerShellVersion = $PSVersionTable.PSVersion.ToString()
-                        ProcessPath = [Diagnostics.Process]::GetCurrentProcess().MainModule.FileName
+                        # Process.MainModule and Get-Process.Path can serialize as empty
+                        # through the nested SSH -> PS7 -> Windows PowerShell remoting path.
+                        # Argument zero is the actual host executable and survives that
+                        # compatibility boundary on Windows PowerShell 5.1.
+                        ProcessPath = [string] [Environment]::GetCommandLineArgs()[0]
                         UserName = [Environment]::UserName
                         MachineName = [Environment]::MachineName
                     }
@@ -1293,7 +1297,14 @@ function Get-HHSshIdentityProbeScriptBlock {
             Marker = 'HostHunter.PowerShellIdentity.v1'
             PSEdition = $PSVersionTable.PSEdition
             PowerShellVersion = $PSVersionTable.PSVersion.ToString()
-            ProcessPath = [Environment]::ProcessPath
+            ProcessPath = if ($PSVersionTable.PSEdition -ceq 'Desktop') {
+                # Environment.ProcessPath does not exist on .NET Framework and
+                # therefore becomes empty inside Windows PowerShell 5.1.
+                [string] [Environment]::GetCommandLineArgs()[0]
+            }
+            else {
+                [string] [Environment]::ProcessPath
+            }
             UserName = [Environment]::UserName
             MachineName = [Environment]::MachineName
         }

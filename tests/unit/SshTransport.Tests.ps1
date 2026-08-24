@@ -2159,6 +2159,40 @@ Describe 'Windows PowerShell 5.1 SSH compatibility bridge' -Tag Unit {
         $envelopes[-1].OutcomeStatus | Should -BeExactly 'Failed'
     }
 
+    It 'uses a compatibility-safe process path probe for Windows PowerShell identity' {
+        $wrapper = Get-HHSshRemoteEnvelopeScriptBlock -PowerShellRuntime WindowsPowerShell51
+        $requestedRuntimeProbeText = (Get-HHSshIdentityProbeScriptBlock).ToString()
+        $script:identityProbeText = $null
+        $envelopes = @(& $wrapper `
+                -CommandText '"unused"' `
+                -SerializedCommandArguments (
+                    [Management.Automation.PSSerializer]::Serialize([object[]]@(), 20)
+                ) `
+                -IsWindowsTarget $true `
+                -CompatibilitySessionFactory { [pscustomobject]@{ Name = 'compatibility' } } `
+                -CompatibilityInvoker {
+                    param($unusedSession, $innerScript, $unusedArguments, $phase)
+                    $null = $unusedSession, $unusedArguments
+                    if ($phase -ceq 'Identity') {
+                        $script:identityProbeText = $innerScript.ToString()
+                        $script:desktopIdentity
+                    }
+                    else {
+                        New-SshTestEnvelope `
+                            -RunspaceId $script:sessionId `
+                            -Sequence 0 `
+                            -Kind Completion
+                    }
+                } `
+                -CompatibilitySessionRemover {})
+
+        $script:identityProbeText | Should -Match 'GetCommandLineArgs\(\)\[0\]'
+        $requestedRuntimeProbeText | Should -Match "PSEdition -ceq 'Desktop'"
+        $requestedRuntimeProbeText | Should -Match 'GetCommandLineArgs\(\)\[0\]'
+        $envelopes[-1].FailureKind | Should -BeNullOrEmpty
+        $envelopes[-1].OutcomeStatus | Should -BeExactly 'Succeeded'
+    }
+
     It 'runs the complete injected bridge lifecycle and closes its one inner session' {
         $wrapper = Get-HHSshRemoteEnvelopeScriptBlock -PowerShellRuntime WindowsPowerShell51
         $script:innerSession = [pscustomobject]@{ Name = 'compatibility' }
