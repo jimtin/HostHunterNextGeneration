@@ -159,6 +159,9 @@ function Write-HHPrivateAuditKeyFile {
             $stream.Dispose()
         }
     }
+    if ($IsWindows) {
+        Protect-HHPrivateFileMode -Path $Path
+    }
     Confirm-HHAuditKeyFileSafety -Path $Path
 }
 

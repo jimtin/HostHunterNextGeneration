@@ -173,6 +173,23 @@ Describe 'HostHunter runtime configuration' -Tag Unit {
             Should -Be ([Convert]::ToHexString($existing))
     }
 
+    It 'hardens a new Windows audit-key file before validating it' -Skip:$IsWindows {
+        $keyPath = Join-Path $TestDrive 'windows.key'
+        $calls = [Collections.Generic.List[string]]::new()
+        Mock Protect-HHPrivateFileMode { $calls.Add('protect') }
+        Mock Confirm-HHAuditKeyFileSafety { $calls.Add('validate') }
+        Set-Variable -Name IsWindows -Scope Script -Value $true -Force
+        try {
+            Write-HHPrivateAuditKeyFile -Path $keyPath -Key ([byte[]](0..31))
+        }
+        finally {
+            Set-Variable -Name IsWindows -Scope Script -Value $false -Force
+        }
+
+        @($calls) | Should -Be @('protect', 'validate')
+        [IO.File]::ReadAllBytes($keyPath) | Should -HaveCount 32
+    }
+
     It 'uses a valid concurrent non-macOS file-provider winner' {
         $winner = [byte[]](64..95)
         $winnerPath = $testKeyPath
