@@ -41,10 +41,15 @@ if ([string]::IsNullOrWhiteSpace($ReceiptPath)) {
 }
 $receipt = [IO.Path]::GetFullPath($ReceiptPath)
 $startedAt = [DateTimeOffset]::UtcNow
-$dataRoot = Join-Path ([IO.Path]::GetTempPath()) (
+$canonicalTempRoot = (& /bin/realpath ([IO.Path]::GetTempPath())).Trim()
+if ([string]::IsNullOrWhiteSpace($canonicalTempRoot) -or
+    -not [IO.Directory]::Exists($canonicalTempRoot)) {
+    throw 'The Windows qualification temporary root could not be canonicalized.'
+}
+$dataRoot = Join-Path $canonicalTempRoot (
     'hosthunter-windows-qualification-' + [Guid]::NewGuid().ToString('N')
 )
-$extractRoot = Join-Path ([IO.Path]::GetTempPath()) (
+$extractRoot = Join-Path $canonicalTempRoot (
     'hosthunter-windows-package-' + [Guid]::NewGuid().ToString('N')
 )
 $remoteArchiveName = 'HostHunterNextGeneration-' + [Guid]::NewGuid().ToString('N') + '.tar.gz'
