@@ -7,10 +7,19 @@ if [[ "$#" -ne 1 ]]; then
     exit 64
 fi
 
-readonly repo_root="$1"
+repo_root="$(cd -- "$1" 2>/dev/null && pwd -P)" || {
+    printf 'refusing invalid repository root: %s\n' "$1" >&2
+    exit 2
+}
+readonly repo_root
 readonly artifact_root="${repo_root}/.artifacts"
 
-[[ -d "${repo_root}/.git" && "${repo_root}" != '/' ]] || {
+resolved_root="$(git -C "${repo_root}" rev-parse --show-toplevel 2>/dev/null)" || {
+    printf 'refusing invalid repository root: %s\n' "${repo_root}" >&2
+    exit 2
+}
+resolved_root="$(cd -- "${resolved_root}" && pwd -P)"
+[[ "${repo_root}" != '/' && "${resolved_root}" == "${repo_root}" ]] || {
     printf 'refusing invalid repository root: %s\n' "${repo_root}" >&2
     exit 2
 }

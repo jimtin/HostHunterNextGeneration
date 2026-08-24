@@ -114,5 +114,6 @@ if [[ ${#shell_paths[@]} -gt 0 ]]; then
   shellcheck --rcfile "$repo_root/.shellcheckrc" "${shell_paths[@]}"
 fi
 
+tests/security/prepare-artifacts-contract.sh
 echo "Static validation passed"
 ) 2>&1 | tee "$artifact_dir/static.log"
