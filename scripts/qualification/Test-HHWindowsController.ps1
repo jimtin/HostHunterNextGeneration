@@ -56,6 +56,8 @@ $remoteArchiveName = 'HostHunterNextGeneration-' + [Guid]::NewGuid().ToString('N
 $module = $null
 $keychainAccount = $null
 $keychainPath = $null
+$auditService = $null
+$anchorService = $null
 $exactInstalledKeyLine = $null
 $remoteKeyRemoved = $false
 $cleanupComplete = $false
@@ -64,6 +66,37 @@ $directResult = $null
 $compatibilityResult = $null
 $mixedResult = @()
 $keyResult = $null
+$transition = $null
+$sshAgentStarted = $false
+$sshAgentKeyAdded = $false
+$sshAgentIdentityRemoved = $false
+$sshAgentStopped = $false
+$originalSshAuthSock = [Environment]::GetEnvironmentVariable('SSH_AUTH_SOCK', 'Process')
+$originalSshAgentPid = [Environment]::GetEnvironmentVariable('SSH_AGENT_PID', 'Process')
+
+function Write-HHQualificationPhase {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet(
+            'NativePackage',
+            'TargetValidation',
+            'DirectPowerShell7',
+            'DirectWindowsPowerShell51',
+            'MixedRuntime',
+            'SshKeyBootstrap',
+            'AgentKeyProof',
+            'PasswordRecovery',
+            'Cleanup'
+        )]
+        [string]$Phase,
+
+        [Parameter(Mandatory)]
+        [ValidateSet('Started', 'Passed')]
+        [string]$Status
+    )
+
+    Write-Output "HH_QUALIFICATION_PHASE|$Phase|$Status"
+}
 
 function Invoke-HHInteractiveNativeProcess {
     param(
@@ -116,6 +149,64 @@ function Invoke-HHQualificationSecurityDelete {
         -ArgumentList @(
             'delete-generic-password', '-s', $Service, '-a', $Account, $LoginKeychain
         ) -CaptureOutput -TimeoutSeconds 15
+}
+
+function Test-HHQualificationSecurityItem {
+    param(
+        [Parameter(Mandatory)][string]$Service,
+        [Parameter(Mandatory)][string]$Account,
+        [Parameter(Mandatory)][string]$LoginKeychain
+    )
+
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = '/usr/bin/security'
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in @(
+            'find-generic-password', '-s', $Service, '-a', $Account, $LoginKeychain
+        )) {
+        $null = $startInfo.ArgumentList.Add($argument)
+    }
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    if (-not $process.Start()) {
+        throw 'The exact Keychain verification process did not start.'
+    }
+    try {
+        if (-not $process.WaitForExit(15000)) {
+            $process.Kill($true)
+            $process.WaitForExit()
+            throw 'The exact Keychain verification process timed out.'
+        }
+        $null = $process.StandardOutput.ReadToEnd()
+        $null = $process.StandardError.ReadToEnd()
+        if ($process.ExitCode -eq 0) { return $true }
+        if ($process.ExitCode -eq 44) { return $false }
+        throw 'The exact Keychain item could not be verified safely.'
+    }
+    finally { $process.Dispose() }
+}
+
+function Invoke-HHQualificationSshAgentStart {
+    $agentOutput = Invoke-HHInteractiveNativeProcess -FileName '/usr/bin/ssh-agent' `
+        -ArgumentList @('-s') -CaptureOutput -TimeoutSeconds 15
+    $socketMatch = [regex]::Match(
+        $agentOutput,
+        '(?m)^SSH_AUTH_SOCK=(?<Value>[^;\r\n]+);'
+    )
+    $pidMatch = [regex]::Match(
+        $agentOutput,
+        '(?m)^SSH_AGENT_PID=(?<Value>[0-9]+);'
+    )
+    if (-not $socketMatch.Success -or -not $pidMatch.Success) {
+        throw 'The run-scoped SSH agent did not publish a valid process contract.'
+    }
+
+    [pscustomobject]@{
+        Socket = $socketMatch.Groups['Value'].Value
+        ProcessId = $pidMatch.Groups['Value'].Value
+    }
 }
 
 function Get-HHRemoteWindowsBootstrapScript {
@@ -185,10 +276,15 @@ try {
     $proof | ConvertTo-Json -Compress
 }
 finally {
-    if ($null -ne $module) { Remove-Module $module -Force -ErrorAction SilentlyContinue }
-    Remove-Item -LiteralPath $dataRoot -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $stageRoot -Recurse -Force -ErrorAction SilentlyContinue
-    Remove-Item -LiteralPath $archivePath -Force -ErrorAction SilentlyContinue
+    if ($null -ne $module) {
+        Remove-Module $module -Force -Confirm:$false -ErrorAction SilentlyContinue
+    }
+    Remove-Item -LiteralPath $dataRoot -Recurse -Force -Confirm:$false `
+        -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $stageRoot -Recurse -Force -Confirm:$false `
+        -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $archivePath -Force -Confirm:$false `
+        -ErrorAction SilentlyContinue
 }
 '@
     return $scriptText.Replace('__ARCHIVE_NAME__', $ArchiveName).
@@ -227,6 +323,7 @@ function Assert-HHRuntimeResult {
 }
 
 try {
+    Write-HHQualificationPhase -Phase NativePackage -Status Started
     [IO.Directory]::CreateDirectory($extractRoot) | Out-Null
     & tar -xzf $archive -C $extractRoot
     if ($LASTEXITCODE -ne 0) { throw 'Candidate package extraction failed.' }
@@ -240,10 +337,14 @@ try {
         [pscustomobject]@{
             Account = Get-HHAuditKeychainAccount -DataRoot $QualificationDataRoot
             KeychainPath = Get-HHMacOSLoginKeychainPath
+            AuditService = $script:HHAuditKeychainService
+            AnchorService = $script:HHPersistenceAnchorKeychainService
         }
     } $dataRoot
     $keychainAccount = [string]$identity.Account
     $keychainPath = [string]$identity.KeychainPath
+    $auditService = [string]$identity.AuditService
+    $anchorService = [string]$identity.AnchorService
 
     $null = Invoke-HHInteractiveNativeProcess -FileName 'scp' -ArgumentList @(
         '-P', [string]$Port, $archive, "${UserName}@${SshHost}:$remoteArchiveName"
@@ -268,7 +369,9 @@ try {
         -not [bool]$nativeProof.DurablePublish) {
         throw 'The native Windows package, provider, ACL, or durability proof failed.'
     }
+    Write-HHQualificationPhase -Phase NativePackage -Status Passed
 
+    Write-HHQualificationPhase -Phase TargetValidation -Status Started
     $null = Set-HHTarget -Name windows-ps7 -HostName $SshHost -Port $Port `
         -UserName $UserName -Authentication Password -PowerShellRuntime PowerShell7 `
         -HostKeyFingerprint $HostKeyFingerprint -Confirm:$false
@@ -276,19 +379,30 @@ try {
         -UserName $UserName -Authentication Password `
         -PowerShellRuntime WindowsPowerShell51 `
         -HostKeyFingerprint $HostKeyFingerprint -Add -Confirm:$false
+    Write-HHQualificationPhase -Phase TargetValidation -Status Passed
 
     $streamCommand = @'
 Write-Output 'output'
 Write-Warning 'warning'
 Write-Verbose 'verbose' -Verbose
-Write-Debug 'debug' -Debug
+& {
+    $DebugPreference = 'Continue'
+    Write-Debug 'debug'
+}
 Write-Information 'information' -InformationAction Continue
 Write-Error 'error' -ErrorAction Continue
 '@
+    Write-HHQualificationPhase -Phase DirectPowerShell7 -Status Started
     $directResult = Invoke-HHCommand -Command $streamCommand -Target windows-ps7
-    $compatibilityResult = Invoke-HHCommand -Command $streamCommand -Target windows-ps51
     Assert-HHRuntimeResult -Result $directResult -Runtime PowerShell7
+    Write-HHQualificationPhase -Phase DirectPowerShell7 -Status Passed
+
+    Write-HHQualificationPhase -Phase DirectWindowsPowerShell51 -Status Started
+    $compatibilityResult = Invoke-HHCommand -Command $streamCommand -Target windows-ps51
     Assert-HHRuntimeResult -Result $compatibilityResult -Runtime WindowsPowerShell51
+    Write-HHQualificationPhase -Phase DirectWindowsPowerShell51 -Status Passed
+
+    Write-HHQualificationPhase -Phase MixedRuntime -Status Started
     $mixedResult = @(Invoke-HHCommand -Command $streamCommand `
             -Target windows-ps7, windows-ps51 -ThrottleLimit 2)
     if ($mixedResult.Count -ne 2 -or
@@ -301,7 +415,9 @@ Write-Error 'error' -ErrorAction Continue
     foreach ($result in $mixedResult) {
         Assert-HHRuntimeResult -Result $result -Runtime $result.PowerShellRuntime
     }
+    Write-HHQualificationPhase -Phase MixedRuntime -Status Passed
 
+    Write-HHQualificationPhase -Phase SshKeyBootstrap -Status Started
     $transition = Enable-HHSshKeyAuthentication `
         -Name windows-ps7 -Confirm:$false
     if ($transition.Authentication -cne 'PublicKey') {
@@ -312,9 +428,30 @@ Write-Error 'error' -ErrorAction Continue
         Get-HHSshBootstrapPublicKey -KeyPath $KeyPath
     } $transition.KeyPath
     $exactInstalledKeyLine = [string]$keyMaterial.ExactLine
+    Write-HHQualificationPhase -Phase SshKeyBootstrap -Status Passed
+
+    Write-HHQualificationPhase -Phase AgentKeyProof -Status Started
+    $sshAgent = Invoke-HHQualificationSshAgentStart
+    $env:SSH_AUTH_SOCK = $sshAgent.Socket
+    $env:SSH_AGENT_PID = $sshAgent.ProcessId
+    $sshAgentStarted = $true
+    $null = Invoke-HHInteractiveNativeProcess -FileName '/usr/bin/ssh-add' `
+        -ArgumentList @($transition.KeyPath) -CaptureOutput -TimeoutSeconds 120
+    $sshAgentKeyAdded = $true
+    $agentPublicKeys = Invoke-HHInteractiveNativeProcess -FileName '/usr/bin/ssh-add' `
+        -ArgumentList @('-L') -CaptureOutput -TimeoutSeconds 15
+    $expectedPublicKey = (@($exactInstalledKeyLine -split '\s+')[0..1] -join ' ')
+    $matchingAgentKeys = @($agentPublicKeys -split "`r?`n" | Where-Object {
+            $_ -ceq $expectedPublicKey -or $_.StartsWith("$expectedPublicKey ")
+        })
+    if ($matchingAgentKeys.Count -ne 1) {
+        throw 'The exact qualification identity was not loaded into the run-scoped SSH agent.'
+    }
     $keyResult = Invoke-HHCommand -Command "'key-proof'" -Target windows-ps7
     if (-not $keyResult.Succeeded) { throw 'The committed key profile could not execute.' }
+    Write-HHQualificationPhase -Phase AgentKeyProof -Status Passed
 
+    Write-HHQualificationPhase -Phase PasswordRecovery -Status Started
     $passwordOutput = Invoke-HHInteractiveNativeProcess -FileName 'ssh' -ArgumentList @(
         '-o', 'PubkeyAuthentication=no', '-o', 'PreferredAuthentications=password',
         '-p', [string]$Port, "${UserName}@${SshHost}",
@@ -323,7 +460,9 @@ Write-Error 'error' -ErrorAction Continue
     if ($passwordOutput.Trim() -cne 'HH_PASSWORD_AUTH_STILL_ENABLED') {
         throw 'Password authentication was not independently proven after key installation.'
     }
+    Write-HHQualificationPhase -Phase PasswordRecovery -Status Passed
 
+    Write-HHQualificationPhase -Phase Cleanup -Status Started
     $rollbackText = & $module {
         (Get-HHSshAuthorizedKeyRollbackScriptBlock).ToString()
     }
@@ -346,28 +485,73 @@ Write-Error 'error' -ErrorAction Continue
     $null = Remove-HHTarget -Name windows-ps7, windows-ps51 -Confirm:$false
 }
 finally {
+    if ($sshAgentStarted) {
+        try {
+            if ($sshAgentKeyAdded -and $null -ne $transition) {
+                $null = Invoke-HHInteractiveNativeProcess -FileName '/usr/bin/ssh-add' `
+                    -ArgumentList @('-d', [string]$transition.KeyPath) `
+                    -CaptureOutput -TimeoutSeconds 15
+                $sshAgentIdentityRemoved = $true
+            }
+        }
+        finally {
+            try {
+                $null = Invoke-HHInteractiveNativeProcess `
+                    -FileName '/usr/bin/ssh-agent' -ArgumentList @('-k') `
+                    -CaptureOutput -TimeoutSeconds 15
+                $sshAgentStopped = $true
+            }
+            finally {
+                $env:SSH_AUTH_SOCK = $originalSshAuthSock
+                $env:SSH_AGENT_PID = $originalSshAgentPid
+            }
+        }
+    }
     if ($remoteKeyRemoved -and
         -not [string]::IsNullOrWhiteSpace($keychainAccount) -and
-        -not [string]::IsNullOrWhiteSpace($keychainPath)) {
-        Invoke-HHQualificationSecurityDelete `
-            -Service 'com.hosthunter.nextgeneration.audit-master-key' `
-            -Account $keychainAccount -LoginKeychain $keychainPath
-        Invoke-HHQualificationSecurityDelete `
-            -Service 'com.hosthunter.nextgeneration.database-anchor.v1' `
-            -Account $keychainAccount -LoginKeychain $keychainPath
-        Remove-Item -LiteralPath $dataRoot -Recurse -Force -ErrorAction Stop
+        -not [string]::IsNullOrWhiteSpace($keychainPath) -and
+        -not [string]::IsNullOrWhiteSpace($auditService) -and
+        -not [string]::IsNullOrWhiteSpace($anchorService)) {
+        $keychainItems = @(
+            [pscustomobject]@{ Service = $auditService; Account = $keychainAccount },
+            [pscustomobject]@{ Service = $anchorService; Account = $keychainAccount }
+        )
+        foreach ($item in $keychainItems) {
+            if (-not (Test-HHQualificationSecurityItem `
+                        -Service $item.Service -Account $item.Account `
+                        -LoginKeychain $keychainPath)) {
+                throw 'An exact Keychain item expected from qualification was not present for cleanup.'
+            }
+            Invoke-HHQualificationSecurityDelete `
+                -Service $item.Service -Account $item.Account `
+                -LoginKeychain $keychainPath
+        }
+        foreach ($item in $keychainItems) {
+            if (Test-HHQualificationSecurityItem `
+                    -Service $item.Service -Account $item.Account `
+                    -LoginKeychain $keychainPath) {
+                throw 'An exact Keychain item remained after qualification cleanup.'
+            }
+        }
+        Remove-Item -LiteralPath $dataRoot -Recurse -Force -Confirm:$false `
+            -ErrorAction Stop
         $cleanupComplete = $true
     }
     if ($null -ne $module) {
-        Remove-Module $module -Force -ErrorAction SilentlyContinue
+        Remove-Module $module -Force -Confirm:$false -ErrorAction SilentlyContinue
     }
-    Remove-Item -LiteralPath $extractRoot -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -LiteralPath $extractRoot -Recurse -Force -Confirm:$false `
+        -ErrorAction SilentlyContinue
     $env:HH_DATA_ROOT = $null
 }
 
 if (-not $cleanupComplete) {
     throw 'Windows qualification cleanup was not proven; local recovery state was preserved.'
 }
+if (-not $sshAgentIdentityRemoved -or -not $sshAgentStopped) {
+    throw 'The run-scoped SSH agent cleanup was not proven.'
+}
+Write-HHQualificationPhase -Phase Cleanup -Status Passed
 [IO.Directory]::CreateDirectory((Split-Path -Parent $receipt)) | Out-Null
 [ordered]@{
     status = 'passed'
@@ -387,6 +571,10 @@ if (-not $cleanupComplete) {
     compatibilityExecutionMode = [string]$compatibilityResult.ExecutionMode
     mixedTargetCount = $mixedResult.Count
     keyTransitionSucceeded = [bool]$keyResult.Succeeded
+    runScopedSshAgentVerified = $sshAgentStarted -and $sshAgentKeyAdded -and
+        [bool]$keyResult.Succeeded
+    runScopedSshAgentIdentityRemoved = $sshAgentIdentityRemoved
+    runScopedSshAgentStopped = $sshAgentStopped
     passwordAuthenticationPreserved = $true
     remoteQualificationKeyRemoved = $remoteKeyRemoved
     cleanupComplete = $cleanupComplete

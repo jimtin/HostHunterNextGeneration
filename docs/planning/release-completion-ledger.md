@@ -43,7 +43,7 @@ proof for a candidate SHA.
 | RC-05 | Complete public action coverage | reconcile package journeys and add empty, preview, refusal, query, paging, tamper, recovery, and capacity actions | fresh-process package E2E plus integration mapping | verified working tree, 18/18 plus fault matrix | positive 5.1 belongs to live Windows lane; positive WinRM deferred |
 | RC-06 | Deterministic secret proof | candidate-file snapshot scan, force-tracked ignored detection, bounded tree/history scans | scanner contract fixtures plus working-tree and exact-history Gitleaks JSON | implemented and working-tree contract green; exact history pending commit | ignored untracked runtime evidence is not scanned as source |
 | RC-07 | Candidate-independent gate | clean detached exact-SHA runner plus separate local manual controller | exact tree/package hash and full product receipt | implemented; candidate execution pending | no automatic PR execution |
-| RC-08 | Native qualification | same package archive on macOS and Windows; Keychain/anchor, RID/ACL, PS7, Windows PowerShell 5.1, mixed runtime and key transition | redacted native receipts bound to candidate and package SHA-256 | scripts implemented; exact candidate execution pending | WinRM deferred |
+| RC-08 | Native qualification | same package archive on macOS and Windows; Keychain/anchor, RID/ACL, PS7, Windows PowerShell 5.1, mixed runtime, protected-key transition, run-scoped agent proof, and exact cleanup | redacted native receipts bound to candidate and package SHA-256 | focused qualification contract tests green; exact candidate execution pending | WinRM deferred |
 | RC-09 | Owner-only publication | private-first repository hardening, exact push, public-last visibility, settings re-read | remote SHA, visibility, Actions, permissions, rules, hooks, keys and integration receipt | pending | public users may fork or propose pull requests |
 | RC-10 | Accurate public documentation and threat model | reconcile implemented state, current receipts, action/critical matrices, residual risks and release policy | static documentation gate and threat-model report checker | documentation reconciled; static and final threat review pending | historical receipts remain labelled historical |
 
@@ -64,7 +64,9 @@ groups before the candidate gate:
   insufficient capacity, external disk full, and crash recovery.
 6. Positive direct PowerShell 7 in the container fixture and positive
   WindowsPowerShell51/mixed-runtime/key-transition qualification on the exact
-  live Windows package.
+  live Windows package. The live key journey separately proves initial key-only
+  transition, an agent-backed follow-up command, preserved password recovery,
+  exact agent/key removal, and stopped-agent cleanup.
 7. Negative WinRM with no network or persistence mutation.
 
 ## Test Ledger
@@ -76,6 +78,7 @@ groups before the candidate gate:
 | Recovery/fault | recovery source, SQLite fault workers/integration | recovery units and individual process cases | full SQLite integration lane |
 | CLI actions | public E2E and action inventory | filtered fresh-process journey groups | complete package E2E lane |
 | Security/release | secret scanner fixtures, candidate runner and controller | scanner contract and clean-worktree negatives | exact tree/history/package/full-gate receipt |
+| Native qualification | macOS/Windows qualification scripts and focused contract tests | non-inquiring six-stream command, exact Keychain deletion/post-check, protected-key and run-scoped-agent lifecycle | exact package receipts on both native platforms |
 
 ## Parallel Work
 

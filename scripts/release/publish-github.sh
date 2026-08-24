@@ -43,6 +43,32 @@ for receipt in "$macos_receipt" "$windows_receipt"; do
   }
 done
 
+jq -e '
+  .platform == "macOS" and .rollbackRejected == true and
+  .keychainItemCount == 2 and .cleanupComplete == true and .redacted == true
+' "$macos_receipt" >/dev/null || {
+  printf 'The macOS qualification receipt is incomplete.\n' >&2
+  exit 2
+}
+jq -e '
+  .targetPlatform == "Windows" and
+  .directRuntime == "PowerShell7" and .directEdition == "Core" and
+  .directExecutionMode == "Direct" and
+  .compatibilityRuntime == "WindowsPowerShell51" and
+  .compatibilityEdition == "Desktop" and
+  .compatibilityExecutionMode == "WindowsPowerShellCompatibility" and
+  .mixedTargetCount == 2 and .keyTransitionSucceeded == true and
+  .runScopedSshAgentVerified == true and
+  .runScopedSshAgentIdentityRemoved == true and
+  .runScopedSshAgentStopped == true and
+  .passwordAuthenticationPreserved == true and
+  .remoteQualificationKeyRemoved == true and
+  .cleanupComplete == true and .redacted == true
+' "$windows_receipt" >/dev/null || {
+  printf 'The Windows qualification receipt is incomplete.\n' >&2
+  exit 2
+}
+
 [[ -z "$(git -C "$repo_root" status --porcelain=v1 --untracked-files=all)" ]] || {
   printf 'Publication requires a clean source repository.\n' >&2
   exit 2

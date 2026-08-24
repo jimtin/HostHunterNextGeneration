@@ -41,6 +41,12 @@ mismatch or unavailability fails closed without falling back to another
 runtime. The compatibility path is implemented, but positive live
 Windows PowerShell 5.1 qualification against an exact commit remains pending.
 
+Dedicated SSH keys are passphrase-protected and may be loaded into an
+operator-controlled `ssh-agent`. HostHunter does not persist or noninteractively
+inject endpoint passwords or private-key passphrases. Native release
+qualification removes its exact agent identity, stops its run-scoped agent,
+and verifies its disposable Keychain items are absent before claiming cleanup.
+
 WinRM is intentionally deferred until a controlled lab can qualify its
 authentication, certificate, trust, and controller boundaries. A WinRM target
 must be rejected without dispatch in the first release. Do not weaken that

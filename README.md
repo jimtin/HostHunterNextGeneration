@@ -105,6 +105,11 @@ prove a dedicated Ed25519 key with:
 Enable-HHSshKeyAuthentication -Name server01-pwsh
 ```
 
+The dedicated key is created interactively so the operator can set a non-empty
+passphrase. Load it into a user-controlled `ssh-agent` for repeated commands;
+HostHunter never stores the passphrase or accepts it through command arguments,
+environment variables, or plaintext files.
+
 The profile changes to public-key authentication only after a separate key-only
 PowerShell identity probe succeeds. A failed proof removes only the exact
 authorized-key entry installed by that attempt. Server-wide password login is

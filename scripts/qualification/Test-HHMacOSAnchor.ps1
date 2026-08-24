@@ -25,9 +25,12 @@ $startedAt = [DateTimeOffset]::UtcNow
 $cleanupComplete = $false
 $account = $null
 $keychainPath = $null
+$auditService = $null
+$anchorService = $null
 $initialSequence = $null
 $advancedSequence = $null
 $rollbackRejected = $false
+$qualificationCompleted = $false
 
 function Invoke-HHQualificationSecurityDelete {
     param(
@@ -57,9 +60,44 @@ function Invoke-HHQualificationSecurityDelete {
         }
         $null = $process.StandardOutput.ReadToEnd()
         $null = $process.StandardError.ReadToEnd()
-        if ($process.ExitCode -notin @(0, 44)) {
+        if ($process.ExitCode -ne 0) {
             throw 'The exact Keychain item could not be deleted safely.'
         }
+    }
+    finally { $process.Dispose() }
+}
+
+function Test-HHQualificationSecurityItem {
+    param(
+        [Parameter(Mandatory)][string]$Service,
+        [Parameter(Mandatory)][string]$Account,
+        [Parameter(Mandatory)][string]$KeychainPath
+    )
+
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = '/usr/bin/security'
+    $startInfo.UseShellExecute = $false
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in @(
+            'find-generic-password', '-s', $Service, '-a', $Account, $KeychainPath
+        )) {
+        $null = $startInfo.ArgumentList.Add($argument)
+    }
+    $process = [Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    if (-not $process.Start()) { throw 'The exact Keychain verification process did not start.' }
+    try {
+        if (-not $process.WaitForExit(15000)) {
+            $process.Kill($true)
+            $process.WaitForExit()
+            throw 'The exact Keychain verification process timed out.'
+        }
+        $null = $process.StandardOutput.ReadToEnd()
+        $null = $process.StandardError.ReadToEnd()
+        if ($process.ExitCode -eq 0) { return $true }
+        if ($process.ExitCode -eq 44) { return $false }
+        throw 'The exact Keychain item could not be verified safely.'
     }
     finally { $process.Dispose() }
 }
@@ -70,10 +108,14 @@ try {
         [pscustomobject]@{
             Account = Get-HHAuditKeychainAccount -DataRoot $QualificationDataRoot
             KeychainPath = Get-HHMacOSLoginKeychainPath
+            AuditService = $script:HHAuditKeychainService
+            AnchorService = $script:HHPersistenceAnchorKeychainService
         }
     } $dataRoot
     $account = [string]$identity.Account
     $keychainPath = [string]$identity.KeychainPath
+    $auditService = [string]$identity.AuditService
+    $anchorService = [string]$identity.AnchorService
 
     $result = & $module {
         param($QualificationDataRoot)
@@ -162,22 +204,51 @@ try {
     if ($advancedSequence -le $initialSequence -or -not $rollbackRejected) {
         throw 'The Keychain-backed authenticated head did not advance and reject rollback.'
     }
+    $qualificationCompleted = $true
 }
 finally {
-    if (-not [string]::IsNullOrWhiteSpace($account) -and
-        -not [string]::IsNullOrWhiteSpace($keychainPath)) {
-        Invoke-HHQualificationSecurityDelete `
-            -Service 'com.hosthunter.nextgeneration.audit-master-key' `
-            -Account $account -KeychainPath $keychainPath
-        Invoke-HHQualificationSecurityDelete `
-            -Service 'com.hosthunter.nextgeneration.database-anchor.v1' `
-            -Account $account -KeychainPath $keychainPath
-        $cleanupComplete = $true
+    try {
+        if ([string]::IsNullOrWhiteSpace($account) -or
+            [string]::IsNullOrWhiteSpace($keychainPath) -or
+            [string]::IsNullOrWhiteSpace($auditService) -or
+            [string]::IsNullOrWhiteSpace($anchorService)) {
+            throw 'Native qualification did not resolve its exact Keychain identity.'
+        }
+
+        $keychainItems = @(
+            [pscustomobject]@{ Service = $auditService; Account = $account },
+            [pscustomobject]@{ Service = $anchorService; Account = $account }
+        )
+        $itemsPresentBeforeCleanup = 0
+        foreach ($item in $keychainItems) {
+            $itemPresent = Test-HHQualificationSecurityItem `
+                -Service $item.Service -Account $item.Account `
+                -KeychainPath $keychainPath
+            if ($qualificationCompleted -and -not $itemPresent) {
+                throw 'An exact Keychain item expected from qualification was not present for cleanup.'
+            }
+            if ($itemPresent) {
+                $itemsPresentBeforeCleanup++
+                Invoke-HHQualificationSecurityDelete `
+                    -Service $item.Service -Account $item.Account -KeychainPath $keychainPath
+            }
+        }
+        foreach ($item in $keychainItems) {
+            if (Test-HHQualificationSecurityItem `
+                    -Service $item.Service -Account $item.Account `
+                    -KeychainPath $keychainPath) {
+                throw 'An exact Keychain item remained after qualification cleanup.'
+            }
+        }
+        $cleanupComplete = (-not $qualificationCompleted) -or
+            $itemsPresentBeforeCleanup -eq $keychainItems.Count
     }
-    if ([IO.Directory]::Exists($dataRoot)) {
-        [IO.Directory]::Delete($dataRoot, $true)
+    finally {
+        if ([IO.Directory]::Exists($dataRoot)) {
+            [IO.Directory]::Delete($dataRoot, $true)
+        }
+        Remove-Module $module -Force -ErrorAction SilentlyContinue
     }
-    Remove-Module $module -Force -ErrorAction SilentlyContinue
 }
 
 if (-not $cleanupComplete) { throw 'Native qualification cleanup was not proven.' }
