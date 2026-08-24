@@ -985,6 +985,7 @@ Describe 'SSH identity and captured invocation lifecycle' -Tag Unit {
         $script:removalWorker.Command | Should -BeExactly 'Remove-PSSession'
         @($script:removalWorker.Parameters.Session).Count | Should -Be 1
         @($script:removalWorker.Parameters.Session)[0] | Should -Be $session
+        $script:removalWorker.Parameters.Confirm | Should -BeFalse
         $script:removalWorker.Parameters.ErrorAction | Should -BeExactly 'Stop'
         $script:removalWorker.BeginInvokeCalls | Should -Be 1
         $script:removalWorker.EndInvokeCalls | Should -Be 1
@@ -2189,6 +2190,7 @@ Describe 'Windows PowerShell 5.1 SSH compatibility bridge' -Tag Unit {
         $script:identityProbeText | Should -Match 'GetCommandLineArgs\(\)\[0\]'
         $requestedRuntimeProbeText | Should -Match "PSEdition -ceq 'Desktop'"
         $requestedRuntimeProbeText | Should -Match 'GetCommandLineArgs\(\)\[0\]'
+        $wrapper.ToString() | Should -Match 'Remove-PSSession[\s\S]+-Confirm:\$false'
         $envelopes[-1].FailureKind | Should -BeNullOrEmpty
         $envelopes[-1].OutcomeStatus | Should -BeExactly 'Succeeded'
     }

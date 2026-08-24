@@ -875,7 +875,8 @@ function Get-HHWindowsPowerShellCompatibilityEnvelopeScriptBlock {
                             }
                             Start-Sleep -Milliseconds 25
                         }
-                        Remove-PSSession -Session $compatibilitySession -ErrorAction Stop *>&1 |
+                        Remove-PSSession -Session $compatibilitySession `
+                            -Confirm:$false -ErrorAction Stop *>&1 |
                             Out-Null
                     }
                 }
@@ -1536,6 +1537,7 @@ function Close-HHSshSession {
     try {
         $null = $removalPowerShell.AddCommand('Remove-PSSession').
             AddParameter('Session', @($Session)).
+            AddParameter('Confirm', $false).
             AddParameter('ErrorAction', 'Stop')
         $asyncResult = $removalPowerShell.BeginInvoke()
         if ($null -eq $asyncResult -or $null -eq $asyncResult.AsyncWaitHandle) {
