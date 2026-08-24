@@ -26,7 +26,9 @@ if [[ "${1:-}" == info ]]; then exit 0; fi
 if [[ "${HH_FAKE_DOCKER_HANG:-0}" == 1 ]]; then sleep 10; fi
 out_root=''
 snapshot_root=''
+history_root=''
 report_path=''
+history_mode=false
 previous=''
 for argument in "$@"; do
   case "$argument" in
@@ -38,11 +40,22 @@ for argument in "$@"; do
       snapshot_root="${argument#type=bind,src=}"
       snapshot_root="${snapshot_root%,dst=/snapshot,readonly}"
       ;;
+    type=bind,src=*,dst=/history,readonly)
+      history_root="${argument#type=bind,src=}"
+      history_root="${history_root%,dst=/history,readonly}"
+      ;;
+    git)
+      history_mode=true
+      ;;
   esac
   if [[ "$previous" == --report-path ]]; then report_path="$argument"; fi
   previous="$argument"
 done
 [[ -n "$out_root" && -n "$report_path" ]] || exit 70
+if [[ "$history_mode" == true ]]; then
+  [[ -n "$history_root" && -f "$history_root/HEAD" && \
+    -d "$history_root/objects" ]] || exit 71
+fi
 host_report="$out_root/${report_path#/out/}"
 if [[ -n "$snapshot_root" ]] &&
   grep -R -l --binary-files=without-match 'HH_FAKE_SECRET_[A-Z0-9]*' \
@@ -95,6 +108,11 @@ if run_scan >/dev/null 2>&1; then
   exit 1
 fi
 git -C "$fixture_repo" checkout -q -- tracked.hhout
+
+linked_worktree="$fixture_root/linked-worktree"
+git -C "$fixture_repo" worktree add --quiet --detach "$linked_worktree" HEAD
+PATH="$fake_bin:$PATH" "$linked_worktree/scripts/security/scan-secrets.sh" >/dev/null
+git -C "$fixture_repo" worktree remove --force "$linked_worktree"
 
 outside_secret="$fixture_root/outside-secret"
 printf 'HH_FAKE_SECRET_OUTSIDE\n' > "$outside_secret"

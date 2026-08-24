@@ -28,6 +28,7 @@ snapshot_tree="$snapshot_root/tree"
 file_list="$snapshot_root/source-files.zlist"
 manifest_before="$snapshot_root/manifest-before.bin"
 manifest_after="$snapshot_root/manifest-after.bin"
+history_repo="$snapshot_root/history.git"
 
 cleanup() {
   rm -rf -- "$snapshot_root"
@@ -95,8 +96,16 @@ fi
 snapshot_manifest_sha256="$(shasum -a 256 "$manifest_before" | awk '{print $1}')"
 source_file_count="$(tr -cd '\000' < "$file_list" | wc -c | tr -d '[:space:]')"
 head_sha=''
+history_commit_count=0
 if git -C "$HH_SECURITY_REPO_ROOT" rev-parse --verify HEAD >/dev/null 2>&1; then
   head_sha="$(git -C "$HH_SECURITY_REPO_ROOT" rev-parse HEAD)"
+  git clone --quiet --mirror --no-local "$HH_SECURITY_REPO_ROOT" "$history_repo"
+  git --git-dir "$history_repo" cat-file -e "${head_sha}^{commit}"
+  history_commit_count="$(git --git-dir "$history_repo" rev-list --count "$head_sha")"
+  [[ "$history_commit_count" =~ ^[1-9][0-9]*$ ]] || {
+    printf 'Gitleaks history snapshot contains no candidate commits.\n' >&2
+    exit 2
+  }
 fi
 
 docker_base=(
@@ -124,12 +133,17 @@ if [[ -n "$head_sha" ]]; then
     "$stall_timeout_seconds" \
     "$HH_SECURITY_ARTIFACT_DIR/gitleaks-history.log" \
     "${docker_base[@]}" \
-    --mount "type=bind,src=$HH_SECURITY_REPO_ROOT,dst=/repo,readonly" \
-    --workdir /repo \
-    "$gitleaks_image" git /repo \
+    --mount "type=bind,src=$history_repo,dst=/history,readonly" \
+    --workdir /history \
+    "$gitleaks_image" git /history \
     --config /gitleaks.toml --ignore-gitleaks-allow --no-banner --no-color \
     --redact=100 --report-format json \
     --report-path /out/gitleaks-history.json --timeout 600
+  if grep -Eq 'not a git repository|0 commits scanned' \
+    "$HH_SECURITY_ARTIFACT_DIR/gitleaks-history.log"; then
+    printf 'Gitleaks did not scan the self-contained history snapshot.\n' >&2
+    exit 2
+  fi
 else
   printf '[]\n' > "$HH_SECURITY_ARTIFACT_DIR/gitleaks-history.json"
 fi
@@ -146,11 +160,13 @@ jq -n \
   --arg head "$head_sha" \
   --arg manifestSha256 "$snapshot_manifest_sha256" \
   --argjson sourceFileCount "$source_file_count" \
+  --argjson historyCommitCount "$history_commit_count" \
   '{
     status: $status,
     image: $image,
     head: (if $head == "" then null else $head end),
     sourceFileCount: $sourceFileCount,
+    historyCommitCount: $historyCommitCount,
     snapshotManifestSha256: $manifestSha256,
     workingTreeReport: "gitleaks-working-tree.json",
     historyReport: "gitleaks-history.json"
