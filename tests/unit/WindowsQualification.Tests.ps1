@@ -160,4 +160,13 @@ Describe 'Windows exact-package qualification contract' -Tag Unit {
             'Test-HHQualificationSecurityItem'
         )
     }
+
+    It 'uses an explicit successful noninteractive password-recovery command' {
+        $script:qualificationSource | Should -Match (
+            "'pwsh', '-NoLogo', '-NoProfile', '-NonInteractive', '-Command',\s*" +
+            "'Write-Output HH_PASSWORD_AUTH_STILL_ENABLED; exit 0'"
+        )
+        $script:qualificationSource |
+            Should -Not -Match '"''HH_PASSWORD_AUTH_STILL_ENABLED''"'
+    }
 }

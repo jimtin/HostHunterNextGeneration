@@ -455,7 +455,8 @@ Write-Error 'error' -ErrorAction Continue
     $passwordOutput = Invoke-HHInteractiveNativeProcess -FileName 'ssh' -ArgumentList @(
         '-o', 'PubkeyAuthentication=no', '-o', 'PreferredAuthentications=password',
         '-p', [string]$Port, "${UserName}@${SshHost}",
-        'pwsh', '-NoLogo', '-NoProfile', '-Command', "'HH_PASSWORD_AUTH_STILL_ENABLED'"
+        'pwsh', '-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
+        'Write-Output HH_PASSWORD_AUTH_STILL_ENABLED; exit 0'
     ) -CaptureOutput -TimeoutSeconds 120
     if ($passwordOutput.Trim() -cne 'HH_PASSWORD_AUTH_STILL_ENABLED') {
         throw 'Password authentication was not independently proven after key installation.'
