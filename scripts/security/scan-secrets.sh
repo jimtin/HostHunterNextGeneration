@@ -139,7 +139,7 @@ if [[ -n "$head_sha" ]]; then
     --config /gitleaks.toml --ignore-gitleaks-allow --no-banner --no-color \
     --redact=100 --report-format json \
     --report-path /out/gitleaks-history.json --timeout 600
-  if grep -Eq 'not a git repository|0 commits scanned' \
+  if grep -Eq 'not a git repository|(^|[^[:digit:]])0 commits scanned' \
     "$HH_SECURITY_ARTIFACT_DIR/gitleaks-history.log"; then
     printf 'Gitleaks did not scan the self-contained history snapshot.\n' >&2
     exit 2

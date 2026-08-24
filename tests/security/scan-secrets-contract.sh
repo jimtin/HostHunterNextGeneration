@@ -55,6 +55,7 @@ done
 if [[ "$history_mode" == true ]]; then
   [[ -n "$history_root" && -f "$history_root/HEAD" && \
     -d "$history_root/objects" ]] || exit 71
+  printf '10 commits scanned.\n'
 fi
 host_report="$out_root/${report_path#/out/}"
 if [[ -n "$snapshot_root" ]] &&
