@@ -14,7 +14,8 @@ evidence require a separate live Windows exact-candidate lane.
 | Tool | Purpose | Layer | Container/service | Exact local command | Version checked 2026-08-23 | Update policy | Status | Exception/equivalent |
 |---|---|---|---|---|---|---|---|---|
 | PowerShell | Test/runtime shell | All PowerShell lanes | Checksum-built test image | `docker compose -f compose.test.yml run --rm test pwsh -NoProfile ...` | 7.6.5 | Monthly; full gate | active | Official archives verified by SHA-256 |
-| PowerShell compatibility floor | Minimum supported controller proof | Package/integration | Separate checksum-built compatibility image | `./scripts/qualification/Test-HHControllerMatrix.ps1 -PowerShellVersion 7.4.19` | 7.4.19, checked 2026-08-24 | Monthly; full gate | active | Checksum-pinned x64/arm64 archives; packaged SQLite 3.53.4/schema-v2 smoke |
+| PowerShell compatibility floors | Minimum supported and SSH-security controller proof | Package/integration | Checksum-built 7.4.19 and 7.6.5 images plus floor units | `./scripts/qualification/Test-HHControllerMatrix.ps1 -PowerShellVersion 7.4.19`; canonical spaced-root SSH integration runs on 7.4.19 and 7.6.5 | 7.4.19, 7.5.10, 7.6.5, checked 2026-08-25 | Monthly; full gate | active | 7.5.10 floor is a deterministic version-contract case; older patch levels in all three servicing lines are rejected before SSH |
+| OpenSSH client | Native SSH transport and safe managed known-hosts expansion | Integration/native qualification | Controller host plus real SSH fixture | spaced-data-root SSH integration and exact Windows controller qualification | 8.4 minimum capability, checked 2026-08-25 | With controller/runtime changes | active | Functional environment-expansion preflight; no raw space-containing path in SSH options |
 | .NET SDK | Locked NuGet restore only | Build/dependencies | Digest-pinned build stage | `./scripts/dependencies/restore-sqlite.sh` | 10.0.400, checked 2026-08-24 | On dependency change; full gate | active | Build-time only; SDK is not shipped with the module |
 | Microsoft.Data.Sqlite.Core | Managed SQLite provider | Product persistence/build | Locked build-only SDK restore and packaged RID assets | `./scripts/dependencies/restore-sqlite.sh` | 10.0.11, checked 2026-08-24 | On dependency change; full gate | active | PowerShell calls provider directly; the durability helper is separate and first-party |
 | SQLitePCLRaw.bundle_e_sqlite3 | Managed/native provider bundle | Product persistence/build | Locked build-only SDK restore and packaged RID assets | `./scripts/dependencies/restore-sqlite.sh` | 3.0.5, checked 2026-08-24 | On dependency change; full gate | active | `Batteries_V2.Init()` once; native library adjacent |
@@ -58,7 +59,7 @@ evidence require a separate live Windows exact-candidate lane.
 - Exact clean-checkout candidate: `./scripts/release/verify-candidate.sh <sha>`
 
 All commands in this section are implemented. Current working-tree evidence is
-632/632 product tests, 21/21 package-backed CLI journeys, nine SQLite fault
+647/647 product tests, 23/23 package-backed CLI journeys, nine SQLite fault
 scenarios, and all four coverage metrics above 90%. Exact-commit and positive
 live Windows 5.1 execution remain release qualifications, not container claims.
 

@@ -15,6 +15,11 @@
 - SSH host identity and requested PowerShell runtime are both pinned. Windows
   PowerShell 5.1 is reached only through a validated PowerShell 7 SSH runspace;
   runtime, transport, trust, authentication, and command retries never fall back.
+- The macOS default data root contains whitespace. SSH session creation binds
+  the canonical managed `known_hosts` path through a unique, temporary process
+  environment reference rather than placing the path itself in an SSH option.
+  Vulnerable PowerShell patch levels and OpenSSH clients without the required
+  expansion capability are refused before dispatch.
 - The most valuable remaining mitigation is a candidate-independent laptop-gate
   controller that owns scanner policy and never executes an external contribution
   before manual review. The first-release owner-only policy supplies the current
@@ -101,7 +106,7 @@ evidence; `unknown` means the final external state has not yet been verified.
 | Host to Docker daemon | Wrappers to local daemon | Fixed Compose project; validation containers receive no Docker socket | Host wrappers can issue Docker commands | `compose.test.yml`, verification wrappers |
 | Registry and gallery to build | External packages/images to proof image | Exact versions, immutable digests, archive checksums | A trusted maintainer can still approve a compromised new pin | both Dockerfiles, scanner wrappers |
 | Test client to SSH fixture | Candidate tests to disposable endpoint | Internal network, strict host key, no host bind, teardown | Test code can read the fixture credential by design | `compose.test.yml`, fixture scripts |
-| Controller to SSH endpoint | Local module to remote PowerShell 7 runspace | Explicit SHA-256 fingerprint, managed `known_hosts`, native authentication, one attempt | Native PowerShell can omit precise OpenSSH failure details | SSH transport and integration tests |
+| Controller to SSH endpoint | Local module to remote PowerShell 7 runspace | Explicit SHA-256 fingerprint, managed `known_hosts`, unique per-session environment binding, global-hosts/update fallback disabled, native authentication, one attempt | Native PowerShell can omit precise OpenSSH failure details; inherited environment remains controller-process state | SSH transport and spaced-root integration tests |
 | PowerShell 7 to Windows PowerShell 5.1 | Authenticated outer runspace to local compatibility process | Windows-only guard, Desktop 5.1 and process identity proof, tagged ordered envelopes, no fallback | A remote host can stall the child process; no product command-duration limit | `Private/SshTransport.ps1` |
 | Remote output to local evidence | Untrusted endpoint data to in-memory capture and audit artifact | Six-stream allowlist, sequence checks, finite serialization, 100 MiB cap, AES-GCM at rest | Complete output can contain secrets; local user can decrypt it | transport and accountability source |
 | HostHunter to macOS Keychain | Parent module to metadata-only `security` lookup and native byte worker | Exact login Keychain, hashed data-root account, raw key only on anonymous pipes, 15-second timeout and confirmed termination | Worker source is part of the checkout; same user/admin can inspect process memory | `Private/AuditKeyStore.ps1`, `Private/Workers/MacOSKeychainWorker.ps1` |
@@ -177,6 +182,7 @@ Non-capabilities:
 | AP-24 | Expose secrets through 4688 command lines | inclusion enabled → sensitive arguments enter Security log | disclosure | medium | high | high | explicit non-default option; plaintext warning; no redaction claim; exact state verification | public tests; Windows qualification pending |
 | AP-25 | Overwrite concurrent policy ownership | query → GPO/admin change → stale mutation or compensation | integrity | medium | high | high | requery, compare-before-compensate, conflict/reconciliation result, no retry | compensation tests; native proof pending |
 | AP-26 | Redirect privileged execution through preference tampering | edit saved method → future `-Escalate` selects unintended method | authorization | low | high | high | closed enum, authenticated mutation chain, monotonic anchor, explicit-call precedence | schema-v2 and configuration tests |
+| AP-27 | Change SSH trust or arguments through a special local path or target identity | space/quote/control/option-like data → PowerShell SSH argument flattening or OpenSSH multi-value parsing → alternate option, host, or trust source | execution/integrity | medium | high | high | patched PowerShell floors; canonical file validation; unique non-recursive environment reference; `GlobalKnownHostsFile=none`; `UpdateHostKeys=no`; strict pin; host/user syntax rejection; environment restored in `finally` | focused transport tests, real spaced-root fixture, exact native receipt pending |
 | AP-11 | Confuse runtime attribution | Compromised endpoint → forged or malformed 5.1 stream protocol → incorrect audit result | integrity | low | high | medium | Outer PS7 and child Desktop 5.1 proof, stream/sequence/state allowlists, runspace attribution, fail-closed errors | transport source and tests |
 | AP-12 | Gain repository write authority | Compromised owner or app → public repository mutation → later trusted execution | access | low | high | medium | Single-owner policy, no collaborators/teams, Actions disabled, planned branch protection and live settings audit | release plan; live state pending |
 | AP-13 | Execute a substituted native provider | Tampered package/RID resolution → malicious SQLite library load → controller-user code execution | execution/integrity | low | high | high | Locked restore, exact hashes, package-relative RID allowlist, version assertion, SBOM and package scan | provider/package implementation and scans |
@@ -218,6 +224,7 @@ authority without a new threat review.
 | AP-18 | Preserve real capacity reservation and external ENOSPC/SQLITE_FULL fault cases in the exact-candidate gate | Output/persistence integration | Resource control |
 | AP-19 | Keep the Linux/Windows whole-root rollback limitation explicit; require a future OS-external anchor for stronger claims | Platform storage | Honest residual-risk boundary |
 | AP-20 | Run native Windows ACL creation/reopen/rejection proof against the immutable release package before publication | Windows qualification | Least privilege and fail-closed validation |
+| AP-27 | Retain the per-session environment indirection and strict SSH options; reject vulnerable controller patch levels, unsupported OpenSSH expansion, and unsafe host/user syntax; keep the macOS default-root journey in exact-candidate proof | SSH transport, target validation, and release qualification | Input validation and fail-closed trust |
 | AP-21 | Keep policy restoration on the retained password profile so remote-key rollback cannot remove the cleanup authority; require exact policy, agent, Keychain, local-root, and remote-key post-checks before accepting a native receipt | Native qualification cleanup | Recovery and least privilege |
 | AP-22 | Keep escalation providers closed and privilege-aware; never infer or enable every privilege for arbitrary command text | Public command and privilege resolver | Least privilege |
 | AP-23 | Treat restoration failure as terminal failure with reconciliation required and finite evidence | Privilege scope and accountability | Cleanup integrity |

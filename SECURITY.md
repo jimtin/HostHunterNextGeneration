@@ -2,7 +2,7 @@
 
 ## Supported version
 
-HostHunterNextGeneration is currently a `0.2.0` project. Security fixes
+HostHunterNextGeneration is currently a `0.2.1` project. Security fixes
 are applied to the latest revision only until a stable release policy exists.
 
 ## Reporting a vulnerability
@@ -40,6 +40,16 @@ through a PowerShell 7 SSH session and a local compatibility runspace. Runtime
 mismatch or unavailability fails closed without falling back to another
 runtime. The compatibility path is implemented, but positive live
 Windows PowerShell 5.1 qualification against an exact commit remains pending.
+
+SSH authority requires a security-patched controller release: PowerShell
+7.4.19+, 7.5.10+, 7.6.5+, or a later supported branch. OpenSSH must support
+environment expansion for `UserKnownHostsFile` (OpenSSH 8.4 or newer).
+HostHunter passes only a unique per-session environment reference through the
+SSH option boundary, restores that process environment in `finally`, disables
+global known-hosts fallback and host-key updates, and continues to validate the
+canonical managed file and exact pinned fingerprint before connection. This is
+required for macOS's space-containing default data root as well as adversarial
+custom path names.
 
 Dedicated SSH keys are passphrase-protected and may be loaded into an
 operator-controlled `ssh-agent`. HostHunter does not persist or noninteractively

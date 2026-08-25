@@ -37,6 +37,7 @@ Describe 'Windows exact-package qualification contract' -Tag Unit {
         $expectedPhases = @(
             'NativePackage',
             'TargetValidation',
+            'RestartPersistence',
             'DirectPowerShell7',
             'DirectWindowsPowerShell51',
             'MixedRuntime',
@@ -73,6 +74,23 @@ Describe 'Windows exact-package qualification contract' -Tag Unit {
             Should -Match 'HH_QUALIFICATION_PHASE\|\$Phase\|\$Status'
         $markerFunction.Extent.Text |
             Should -Not -Match '(?i)HostKey|UserName|SshHost|Fingerprint|CommandText'
+    }
+
+    It 'restarts from a macOS-style data root and receipts the complete path proof' {
+        $script:qualificationSource | Should -Match (
+            "'Library/Application Support/HostHunterNextGeneration'"
+        )
+        $script:qualificationSource | Should -Match (
+            '(?s)-Phase\s+RestartPersistence\s+-Status\s+Started.*?' +
+            'Remove-Module\s+\$module.*?Import-Module\s+\$manifest\.FullName.*?' +
+            'Get-HHTarget.*?-Phase\s+RestartPersistence\s+-Status\s+Passed'
+        )
+        $script:qualificationSource | Should -Match (
+            '\$spaceContainingDataRootVerified\s*=\s*\$true'
+        )
+        $script:qualificationSource | Should -Match (
+            'spaceContainingDataRootVerified\s*=\s*\$spaceContainingDataRootVerified'
+        )
     }
 
     It 'qualifies both requested runtimes and forbids runtime fallback' {

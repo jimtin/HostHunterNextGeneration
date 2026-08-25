@@ -45,7 +45,8 @@ done
 
 jq -e '
   .platform == "macOS" and .rollbackRejected == true and
-  .keychainItemCount == 2 and .cleanupComplete == true and .redacted == true
+  .spaceContainingDataRootVerified == true and .keychainItemCount == 2 and
+  .cleanupComplete == true and .redacted == true
 ' "$macos_receipt" >/dev/null || {
   printf 'The macOS qualification receipt is incomplete.\n' >&2
   exit 2
@@ -58,6 +59,7 @@ jq -e '
   .compatibilityEdition == "Desktop" and
   .compatibilityExecutionMode == "WindowsPowerShellCompatibility" and
   .mixedTargetCount == 2 and .keyTransitionSucceeded == true and
+  .spaceContainingDataRootVerified == true and
   .runScopedSshAgentVerified == true and
   .runScopedSshAgentIdentityRemoved == true and
   .runScopedSshAgentStopped == true and

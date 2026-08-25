@@ -9,9 +9,9 @@ cd -- "$repo_root"
 artifact_root="${HH_ARTIFACT_ROOT:-.artifacts}"
 receipt_root="$artifact_root/sqlite-integration"
 mkdir -p -- "$receipt_root"
-module_path='/artifacts/build/HostHunterNextGeneration/0.2.0/HostHunterNextGeneration.psd1'
+module_path='/artifacts/build/HostHunterNextGeneration/0.2.1/HostHunterNextGeneration.psd1'
 
-test -f "$artifact_root/build/HostHunterNextGeneration/0.2.0/HostHunterNextGeneration.psd1"
+test -f "$artifact_root/build/HostHunterNextGeneration/0.2.1/HostHunterNextGeneration.psd1"
 
 docker compose -f compose.test.yml run --rm --no-deps \
   -e "HH_TEST_MODULE_PATH=$module_path" \

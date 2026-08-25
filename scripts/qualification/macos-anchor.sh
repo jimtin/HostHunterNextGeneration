@@ -67,7 +67,7 @@ mkdir -p -- "$qualification_root"
 jq -e --arg sha "$candidate_sha" --arg packageSha "$package_sha256" '
   .status == "passed" and .candidateSha == $sha and
   .packageArchiveSha256 == $packageSha and .cleanupComplete == true and
-  .redacted == true
+  .spaceContainingDataRootVerified == true and .redacted == true
 ' "$qualification_root/receipt.json" >/dev/null
 
 printf 'Native macOS qualification passed: %s\n' "$qualification_root/receipt.json"

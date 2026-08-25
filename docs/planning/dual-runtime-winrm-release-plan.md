@@ -31,9 +31,9 @@ uses native Security-framework byte APIs, and its separate-process disposable
 create/read/delete lifecycle passed without placing the key in arguments,
 environment variables, or a plaintext key file.
 
-The current 2026-08-25 working-tree unit receipt is 632/632 with 95.3352%
-statements (7664/8039), 90.0214% branches (2526/2806), 96.31% functions
-(261/271), and 95.3677% lines (6341/6649). The exact-candidate gate must still
+The current 2026-08-25 readiness unit receipt is 647/647 with 95.3557%
+statements (7761/8139), 90.0669% branches (2557/2839), 96.3504% functions
+(264/274), and 95.3931% lines (6419/6729). The exact-candidate gate must still
 reproduce the full static, security, integration, E2E, package, and image
 program. This receipt is not an exact-commit or positive live Windows 5.1
 proof.

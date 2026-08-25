@@ -15,7 +15,7 @@
 | Preserve accountability | semantic operation, exact manifest, arm-before-dispatch, structured policy outcome | SQLite v2 round-trip, substitution/tamper, output query | implemented and focused verified | commands outside HostHunter |
 | Preserve partial-failure truth | preflight both capabilities, verify each surface, bounded conditional compensation, no retry | every mutation/verification/compensation/uncertain boundary | implemented and focused verified; native Windows pending | cross-target distributed rollback |
 | Preserve normal target reuse | omitted `-Target` selects saved active targets; explicit selection remains 1..8 | public unit and package journeys | implemented and focused verified | more than eight targets |
-| Maintain package and release proof | version 0.2.0, eleven exports, local containers, exact SHA and native Windows receipt | module/package contracts, canonical gate, pre-push security | package and canonical unit gate verified; exact SHA/native/push pending | GitHub-hosted test execution |
+| Maintain package and release proof | version 0.2.1, eleven exports, local containers, exact SHA and native Windows receipt | module/package contracts, canonical gate, pre-push security | macOS default-root SSH correction focused verified; exact SHA/native/push pending | GitHub-hosted test execution |
 
 The test ledger for this slice is the corresponding action matrix in
 `docs/testing/e2e-workflow-inventory.md`. No canonical full gate starts until
@@ -53,12 +53,21 @@ All external operations use injectable adapters. Public cmdlets orchestrate
 domain functions; transport, persistence, clock/identifier, key protection,
 and audit storage implementations remain behind private interfaces.
 
-The controller requires PowerShell 7.4 or newer. SSH is the only qualified v1
-transport. `PowerShell7` is the default requested runtime;
+The controller requires a security-patched PowerShell build: 7.4.19+, 7.5.10+,
+7.6.5+, or a later supported branch. SSH also requires OpenSSH 8.4+ environment
+expansion support. SSH is the only qualified v1 transport. `PowerShell7` is the
+default requested runtime;
 `WindowsPowerShell51` is an explicit Windows-target choice reached through a
 PowerShell 7 SSH session and a local `-UseWindowsPowerShell` compatibility
 runspace. Runtime mismatch or unavailability fails closed without fallback.
 WinRM is deferred by user decision until a controlled lab exists.
+
+The macOS default root remains
+`~/Library/Application Support/HostHunterNextGeneration`. Native SSH receives
+the canonical managed `known_hosts` path through a unique per-session
+environment reference, never as an ambiguous raw option value. The default and
+any override root remain independent authenticated stores; automatic merge,
+migration, or deletion is out of scope.
 
 The confirmed persistence contract is
 `docs/planning/sqlite-persistence-plan.md`. SQLite replaces active target JSON

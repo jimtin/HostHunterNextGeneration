@@ -37,6 +37,15 @@ trap cleanup EXIT INT TERM HUP
 "${bounded}" full-ssh-contract 300 120 .artifacts/logs/full-ssh-contract.log \
     docker compose --file compose.test.yml run --rm test \
         pwsh -NoLogo -NoProfile -NonInteractive -File tests/fixtures/ssh/Invoke-FixtureContract.ps1
+"${bounded}" controller-floor-spaced-ssh 300 120 \
+    .artifacts/logs/controller-floor-spaced-ssh.log \
+    docker compose --file compose.test.yml run --rm controller-floor \
+        pwsh -NoLogo -NoProfile -NonInteractive \
+        -File scripts/testing/Invoke-HHPesterLane.ps1 \
+        -TestPath tests/integration/SshTransport.Tests.ps1 \
+        -Tag Integration \
+        -ResultPath /artifacts/integration/controller-floor-spaced-ssh.xml \
+        -PesterVersion 6.1.0
 "${bounded}" full-integration 900 240 .artifacts/logs/full-integration.log \
     docker compose --file compose.test.yml run --rm test bash scripts/lanes/integration.sh
 "${bounded}" full-sqlite-fault-integration 1200 240 \

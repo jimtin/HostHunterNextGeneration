@@ -5,10 +5,12 @@
 **SQLITE CRITICAL PATHS IMPLEMENTED; EXACT-CANDIDATE NATIVE PROOF PENDING
 2026-08-25**
 
-The SQLite v2 working tree has 632/632 passing product tests, all four coverage
-metrics above 90%, 21/21 package CLI journeys, and nine passing process/fault
-scenarios. The declared PowerShell 7.4 floor is verified in its pinned
-container. Exact-candidate reproduction, native Windows, and post-publication
+The SQLite v2 working tree has 647/647 passing product tests, all four coverage
+metrics above 90%, 23/23 package CLI journeys, and nine passing process/fault
+scenarios. The supported security floors are PowerShell 7.4.19, 7.5.10, and
+7.6.5 within their servicing lines, plus later supported releases; SSH also
+requires OpenSSH 8.4+ environment expansion. Exact-candidate reproduction,
+native Windows, and post-publication
 GitHub verification remain pending.
 
 ## Confirmed SQLite critical paths
@@ -36,6 +38,8 @@ GitHub verification remain pending.
 |---|---|---|---|---|
 | Save a default PowerShell 7 SSH target | `Set-HHTarget` | trust, authentication, timeout, non-PowerShell endpoint, no partial write | real SSH fixture plus fresh-process default-runtime save/reload | verified |
 | Save an explicit PowerShell 7 SSH target | `Set-HHTarget -PowerShellRuntime PowerShell7` | Core/major-version mismatch without fallback | identity unit matrix, real SSH fixture, fresh-process CLI | verified |
+| Use the macOS default or another space-containing data root | `Set-HHTarget`, `Invoke-HHCommand`, `Enable-HHSshKeyAuthentication` | raw path must never become multiple SSH arguments; environment reference must be unique and restored; wrong pin remains fail-closed | native SSH fixture rooted under `Library/Application Support`, restart and key-auth journey, exact Windows qualification receipt | working-tree fixture and 7.4.19 floor verified; exact native pending |
+| Refuse a vulnerable controller or unsupported OpenSSH expansion boundary | every SSH-capable cmdlet | stable pre-dispatch error; no intent, authentication prompt, or target mutation | runtime-floor and functional OpenSSH-capability units/integration | focused verified; exact candidate pending |
 | Save an explicit Windows PowerShell 5.1 SSH target | `Set-HHTarget -PowerShellRuntime WindowsPowerShell51` | non-Windows outer target, missing compatibility session, non-Desktop or non-5.1 identity, no partial write | injected bridge seams, Linux negative fixture, live Windows exact-candidate proof | deterministic and negative paths verified; live positive pending |
 | Save two runtime profiles for one SSH endpoint | `Set-HHTarget -Add` | exact duplicate runtime profile and duplicate name rejected | endpoint-key unit matrix plus no-network fresh-process preview | verified without network; live 5.1 save pending |
 | Refuse legacy target/audit stores | persistence startup | any legacy JSON/JSONL or unmatched database is preserved and fails before network | replacement SQLite detector and fresh-process negative journey | verified |

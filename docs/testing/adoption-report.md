@@ -7,7 +7,7 @@
 The SQLite-only target and audit repository, packaged provider, external
 anchor, invocation-bound `.hhout` v2 artifacts, durable platform publication,
 crash recovery, capacity reservation, and two audit query cmdlets are
-implemented. The current packaged Linux/PowerShell 7 journey passes 18/18
+implemented. The current packaged Linux/PowerShell 7 journey passes 23/23
 actions. Product coverage passes all four repository gates. The candidate is
 not yet release-ready because exact-commit macOS/Windows/GitHub proof remains
 outstanding.
@@ -54,10 +54,10 @@ path instead of claiming WinRM support.
 | Check | Command | Container/service | Result | Artifact |
 |---|---|---|---|---|
 | Canonical full proof | `./scripts/verify-local.sh` | Docker/Compose and pinned scanner containers | current working-tree wrapper passed after the Windows ACL amendment; exact candidate rerun pending | `.artifacts/summary/verify-local.json` |
-| Four-metric product proof | `scripts/lanes/unit.sh` | test container | 632/632 passed; 95.3352% statements (7664/8039), 90.0214% branches (2526/2806), 96.31% functions (261/271), 95.3677% lines (6341/6649) | `.artifacts/unit/product/coverage-summary.json` |
+| Four-metric product proof | `scripts/lanes/unit.sh` | test container | readiness run 647/647 passed; 95.3557% statements (7761/8139), 90.0669% branches (2557/2839), 96.3504% functions (264/274), 95.3931% lines (6419/6729); canonical exact rerun pending | `.artifacts/unit/readiness-product-final/coverage-summary.json` |
 | SSH protocol contract | fixture contract script | test client plus disposable SSH target | password authentication and the pinned PowerShell 7 fixture passed | `.artifacts/integration/ssh-fixture-contract.json` |
 | Critical package/SSH integration | `scripts/lanes/integration.sh` | test client plus disposable SSH target | 22/22 passed; two privileged capacity cases are run separately | `.artifacts/integration/integration-tests.xml` |
-| CLI E2E equivalent | `scripts/lanes/e2e.sh` | fresh PowerShell processes plus SSH target | 18/18 SQLite package journeys passed | `.artifacts/e2e/e2e-tests.xml` |
+| CLI E2E equivalent | `scripts/lanes/e2e.sh` | fresh PowerShell processes plus SSH target | focused current package journeys passed 23/23; canonical exact rerun pending | `.artifacts/e2e/e2e-tests.xml` |
 | SQLite process/fault integration | `scripts/lanes/sqlite-integration.sh` | packaged module, subprocesses, bounded filesystems | 9/9 recovery, ownership, WAL, anchor, tamper, capacity, and external-full scenarios passed | `.artifacts/sqlite-integration/receipt.json` |
 | Static, security, and build | full static/security/build lanes | pinned test and scanner containers | PSScriptAnalyzer, text/static checks, gitleaks, dependency audit, filesystem/image scans, and package/build smoke passed | `.artifacts/static/`, `.artifacts/security/`, `.artifacts/build/` |
 

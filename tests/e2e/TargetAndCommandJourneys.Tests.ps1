@@ -1,4 +1,7 @@
 BeforeAll {
+    $script:originalDataRoot = $env:HH_DATA_ROOT
+    $env:HH_DATA_ROOT = Join-Path $script:originalDataRoot `
+        'Library/Application Support/HostHunterNextGeneration'
     $script:modulePath = if (-not [string]::IsNullOrWhiteSpace($env:HH_TEST_MODULE_PATH)) {
         (Resolve-Path -LiteralPath $env:HH_TEST_MODULE_PATH).Path
     }
@@ -40,7 +43,17 @@ BeforeAll {
     }
 }
 
+AfterAll {
+    $env:HH_DATA_ROOT = $script:originalDataRoot
+}
+
 Describe 'packaged HostHunter SQLite operator journeys' -Tag E2E {
+    It 'uses a macOS-style data root containing spaces for the complete journey' {
+        $env:HH_DATA_ROOT | Should -Match `
+            'Library/Application Support/HostHunterNextGeneration'
+        Test-Path -LiteralPath $env:HH_DATA_ROOT | Should -BeFalse
+    }
+
     It 'imports exactly eleven public commands without creating local state' {
         $commands = @(Get-Command -Module HostHunterNextGeneration | Sort-Object Name)
         $commands.Name | Should -Be @(
@@ -110,6 +123,15 @@ Describe 'packaged HostHunter SQLite operator journeys' -Tag E2E {
         foreach ($legacy in @('targets.json', 'audit/ledger.jsonl', 'audit/ledger.head.json')) {
             Test-Path -LiteralPath (Join-Path $env:HH_DATA_ROOT $legacy) | Should -BeFalse
         }
+    }
+
+    It 'rejects a wrong strict host-key pin without saving that target' {
+        {
+            Set-HHTarget -Name wrong-pin -HostName $script:targetHost `
+                -Port $script:targetPort -UserName $script:userName `
+                -HostKeyFingerprint ('SHA256:' + ('A' * 43)) -Add -Confirm:$false
+        } | Should -Throw '*No discovered SSH host key matched*'
+        @(Get-HHTarget -Name wrong-pin).Count | Should -Be 0
     }
 
     It 'reloads the authenticated target in a fresh PowerShell process' {

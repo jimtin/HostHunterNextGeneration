@@ -53,9 +53,11 @@ BeforeAll {
         )
     }
 
-    $script:integrationDirectory = Join-Path $env:HH_ARTIFACT_ROOT (
-        '.ssh-transport-integration-{0}' -f [Guid]::NewGuid().ToString('N')
-    )
+    $script:integrationDirectory = Join-Path (
+        Join-Path $env:HH_ARTIFACT_ROOT (
+            '.ssh-transport-integration-{0}' -f [Guid]::NewGuid().ToString('N')
+        )
+    ) 'Library/Application Support/HostHunterNextGeneration'
     [IO.Directory]::CreateDirectory($script:integrationDirectory) | Out-Null
     & chmod 0700 -- $script:integrationDirectory
     if ($LASTEXITCODE -ne 0) {
@@ -117,6 +119,33 @@ AfterAll {
 }
 
 Describe 'real PowerShell-over-SSH transport' -Tag Integration {
+    It 'opens and runs a password-authenticated command with a macOS-style known-hosts path' {
+        $script:knownHostsPath | Should -Match 'Library/Application Support/HostHunterNextGeneration'
+
+        $result = Invoke-HHSshTransport `
+            -Target (New-SshIntegrationTarget) `
+            -KnownHostsPath $script:knownHostsPath `
+            -RemoteScriptBlock { 'macos-default-data-root-password-proof' }
+
+        $result.Succeeded | Should -BeTrue
+        @(
+            $result.StreamEvents |
+                Where-Object { $_.Phase -ceq 'Command' -and $_.Stream -ceq 'Output' } |
+                ForEach-Object Value
+        ) | Should -Be @('macos-default-data-root-password-proof')
+    }
+
+    It 'rejects a wrong strict host-key pin with a macOS-style known-hosts path' {
+        $result = Invoke-HHSshTransport `
+            -Target (New-SshIntegrationTarget -Fingerprint ('SHA256:' + ('A' * 43))) `
+            -KnownHostsPath $script:knownHostsPath `
+            -RemoteScriptBlock { 'must-not-run' }
+
+        $result.Succeeded | Should -BeFalse
+        $result.FailureKind | Should -BeExactly TrustFailure
+        @($result.StreamEvents | Where-Object Phase -eq Command).Count | Should -Be 0
+    }
+
     It 'proves PowerShell 7.6.5 and captures every stream after a non-terminating error' {
         $result = Invoke-HHSshTransport `
             -Target (New-SshIntegrationTarget) `

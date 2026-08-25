@@ -2,8 +2,8 @@
 
 ## 1. Status
 
-**ADOPTED SQLITE FOUNDATION; EXACT-CANDIDATE AND NATIVE REQUALIFICATION
-PENDING 2026-08-24**
+**ADOPTED SQLITE FOUNDATION; MACOS DEFAULT-ROOT SSH AND NATIVE
+REQUALIFICATION PENDING 2026-08-25**
 
 The user explicitly confirmed this design on 2026-08-23. The testing foundation
 and dual-runtime product slice are implemented. The canonical working-tree gate
@@ -40,6 +40,7 @@ deferred and rejected in v1.
 |---|---|---|
 | Unit lane | adopted | Containerized Pester plus a proven four-metric coverage gate |
 | Integration lane | adopted | Real Compose PowerShell-over-SSH target plus deterministic seams |
+| macOS default-root SSH | working-tree focused proof complete; exact native pending | Real password, command, wrong-pin, restart, and key-auth paths under `Library/Application Support`; no space-free substitute |
 | Browser/E2E lane | not-applicable | Black-box CLI/service journeys are the equivalent E2E layer |
 | Production build/build smoke | adopted | Manifest/package smoke and exact export contract |
 | Static checks lane | adopted | PowerShell, Markdown, shell, YAML, Dockerfile, and EditorConfig checks |
@@ -85,9 +86,9 @@ semantic-equivalence tests against the uninstrumented module. An
 `explicit_branch_arm_coverage` approximation is not relabelled as standard
 branch coverage, and thresholds are not approximated or lowered.
 
-The current 2026-08-25 working-tree receipt is 632/632 product tests with
-95.3352% statements (7664/8039), 90.0214% branches (2526/2806), 96.31%
-functions (261/271), and 95.3677% lines (6341/6649). The branch phase includes
+The current 2026-08-25 readiness receipt is 647/647 product tests with
+95.3557% statements (7761/8139), 90.0669% branches (2557/2839), 96.3504%
+functions (264/274), and 95.3931% lines (6419/6729). The branch phase includes
 the authenticated SQLite migration integration so migration control flow is
 measured by the same integrity-checked branch collector.
 
@@ -106,6 +107,15 @@ class. A Compose service provides a real OpenSSH server configured with a
 PowerShell 7 subsystem for direct protocol integration and negative
 `WindowsPowerShell51` availability evidence. Test-only PTY automation may drive
 the native password prompt; no prompt automation is shipped in product code.
+
+At least one real transport and key-bootstrap journey must place the managed
+`known_hosts`, key, database, and output roots beneath a directory named
+`Library/Application Support`. It must prove that only a unique per-session
+environment reference crosses the SSH option boundary, that the exact canonical
+path exists only in process environment during the synchronous open, and that
+the environment is restored on success and failure. The journey also verifies
+strict wrong-pin refusal with global known-hosts fallback and host-key updates
+disabled. Space-free `/tmp` roots are insufficient evidence for this path.
 
 The Linux fixture cannot positively host Windows PowerShell 5.1. Unit and
 integration seams prove bridge planning, identity checks, ordered envelope
@@ -140,7 +150,8 @@ artifact directory, imports that package in a clean container process, verifies
 the eleven-command export contract, exact managed/native SQLite assets and
 licenses, asserts `SELECT sqlite_version()`, creates the committed schema, and
 executes a no-network help/smoke path on every claimed controller RID at the
-PowerShell 7.4 minimum and pinned 7.6.5 version. Persistence integration and E2E
+patched PowerShell floors 7.4.19, 7.5.10, and 7.6.5. SSH-capable paths also
+prove the OpenSSH 8.4+ expansion capability. Persistence integration and E2E
 must import this package rather than the source module.
 
 ## 6. Stubs, Fakes, and Test Data
@@ -248,7 +259,7 @@ updated in the same change as any affected feature.
 | Container-only proof | Test and tool images plus orchestration wrappers | Host wrapper inspection and container process evidence | verified | None |
 | Four-metric 90% coverage | True branch-outcome collector plus AST/Pester aggregation | Golden fixtures, negative thresholds, product report | verified | No branch proxy or metric approximation |
 | Critical integration | SSH target, runtime/transport/audit seams | Critical-path inventory plus live Windows receipt | 9/9 container/direct, negative, and deterministic bridge paths verified; live 5.1 pending | WinRM positive operation deferred |
-| All CLI actions | Fresh-process service journeys | E2E action matrix | 18/18 SQLite package journeys verified; process/fault matrix verified; live 5.1 pending | Browser Playwright not applicable |
+| All CLI actions | Fresh-process service journeys | E2E action matrix | 23/23 SQLite package journeys verified; process/fault matrix verified; live 5.1 pending | Browser Playwright not applicable |
 | Fast commit hook | Containerized fast lane | Hook install/verification and lane proof | verified | None |
 | Slim push hook | Gate-owned slim lanes | Hook install/verification and lane proof | verified | Full gate remains standalone-owned |
 | Security foundation | Gitleaks, OSV, Trivy, module pin audit | Clean local reports and seeded scope checks | verified | Semgrep not justified |

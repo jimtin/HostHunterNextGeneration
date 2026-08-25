@@ -2,8 +2,8 @@
 
 ## Status
 
-**SQLITE ACTION IMPLEMENTATION VERIFIED ON WORKING TREE; EXACT NATIVE RELEASE
-EVIDENCE PENDING 2026-08-24**
+**SQLITE ACTION IMPLEMENTATION VERIFIED; MACOS DEFAULT-ROOT SSH
+REQUALIFICATION IN PROGRESS 2026-08-25**
 
 This is the Playwright-equivalent action matrix for a PowerShell CLI module with
 no browser surface. Canonical journeys run in fresh `pwsh -NoProfile` processes
@@ -12,7 +12,7 @@ direct PowerShell 7 and negative 5.1-unavailable behavior, but it cannot provide
 a positive Windows PowerShell 5.1 compatibility runspace. Positive 5.1 and
 mixed-runtime rows therefore belong to the separate live Windows
 exact-candidate lane. The current package-backed working-tree E2E lane passes
-18/18 journeys. Process/fault actions that cannot safely run through a normal
+23/23 journeys. Process/fault actions that cannot safely run through a normal
 CLI session are covered by the package integration lane and public-boundary
 units. Exact-candidate reproduction remains pending.
 
@@ -32,6 +32,9 @@ is limited to the immutable native qualification.
 | Control 4688 command-line inclusion | `-CommandLineLogging` | local operator | ProcessCreation selected | Unchanged/Enabled/Disabled/NotConfigured; enabling warns but continues; exact prior registry state restored by qualification | package warning/validation plus live 4688 presence/absence | registry snapshot/type/value/compensation matrix | implemented; exact Windows pending |
 | Preview target creation | `Set-HHTarget -WhatIf` | local operator | absent data root | no root, database, anchor, prompt, audit event, or network | whole root remains absent | ShouldProcess before persistence initialization | verified working tree |
 | Preview two runtime profiles | `Set-HHTarget -InputObject -WhatIf` | local operator | existing database | validate profiles but preserve DB generation/head and avoid network | before/after logical-state comparison | runtime/domain and no-write units | verified working tree |
+| Use the macOS default data root | target, command, and key-auth cmdlets | macOS operator; `HH_DATA_ROOT` unset | `~/Library/Application Support/HostHunterNextGeneration` | password save, restart, command, key conversion, and key-auth command all use the exact managed pin without argument splitting | package-backed fresh-process journey rooted under `Library/Application Support`; native Windows controller receipt | unique environment binding, cleanup/concurrency, patched-floor, and OpenSSH capability tests | working-tree package and fixture verified; exact native pending |
+| Reject unsafe SSH controller boundaries | every SSH-capable cmdlet | local operator | vulnerable PowerShell patch or OpenSSH without required expansion | stable pre-dispatch refusal; no prompt, intent, target mutation, or network | package negative journey | version-floor and capability units | focused verified; exact candidate pending |
+| Reject changed host identity from a spaced root | target and command cmdlets | local operator | managed `known_hosts` under `Library/Application Support` contains the wrong pin | fail closed before command dispatch; never consult a global known-hosts file or update the managed pin | real SSH fixture wrong-pin journey | strict option and fingerprint units | working-tree fixture verified; exact candidate pending |
 | Save or add targets | `Set-HHTarget`, `-Add` | local operator | valid SSH endpoint | intent is durable before validation and the complete target mutation is atomic | set/restart/get/add/restart/get with SQLite-only state | schema, generation, eight-limit, concurrency, and CAS integration | verified working tree |
 | Reject invalid target mutation | `Set-HHTarget` | local operator | duplicate, ninth, WinRM, trust/auth/runtime failure | stable failure with no target-generation change or unintended network | rewritten negative journeys | validation and transaction rollback | verified working tree |
 | Read no targets | `Get-HHTarget` | local operator | valid empty database | return zero objects and create no audit event | empty fresh-process read | empty query/no-mutation units | verified working tree |
@@ -67,6 +70,11 @@ is limited to the immutable native qualification.
 | Encounter busy or mid-command full storage | mutation/query/remote cmdlets | local operator | lock timeout, `SQLITE_FULL`, or external fill after dispatch | stable local error before dispatch or honest `Unknown` after arm; no retry | deterministic negative journey | busy, full, streaming and artifact fault integration | verified package integration |
 | Repeat read-only audit queries | both audit query cmdlets | local operator | valid history | no new batch, invocation, audit event, artifact, or anchor update | authenticated heads/counts unchanged | read-only transaction units | verified working tree |
 | Verify SQLite-only persistence | all eleven cmdlets | local operator | complete journey set | no active flow creates or reads target/audit JSON or JSONL | filesystem sweep and legacy negatives | deleted-surface/reference guard | implemented; requalification pending |
+
+The temporary no-space override root used while diagnosing the macOS failure is
+an independent authenticated store. It is not migrated, merged, or deleted by
+these journeys; cleanup requires a separate explicit operator decision after
+the default-root proof succeeds.
 
 Positive Windows PowerShell 5.1 and mixed-runtime success remain pending until
 the live Windows exact-candidate lane passes. SQLite does not turn mock

@@ -458,7 +458,10 @@ Describe 'SSH transport trust and planning' -Tag Unit {
         $plan.Authentication | Should -BeExactly 'Password'
         $plan.ConnectingTimeoutMilliseconds | Should -Be 9000
         $plan.Options.StrictHostKeyChecking | Should -BeExactly 'yes'
-        $plan.Options.UserKnownHostsFile | Should -BeExactly $script:knownHostsPath
+        $plan.Options.GlobalKnownHostsFile | Should -BeExactly 'none'
+        $plan.Options.UpdateHostKeys | Should -BeExactly 'no'
+        $plan.Options.Contains('UserKnownHostsFile') | Should -BeFalse
+        $plan.KnownHostsPath | Should -BeExactly $script:knownHostsPath
         $plan.Options.NumberOfPasswordPrompts | Should -BeExactly '1'
         $plan.Options.PreferredAuthentications | Should -BeExactly 'password'
         $plan.Options.PubkeyAuthentication | Should -BeExactly 'no'
@@ -522,6 +525,127 @@ Describe 'SSH transport trust and planning' -Tag Unit {
         { New-HHSshTransportPlan `
                 -Target (New-SshTestTarget -Fingerprint $otherFingerprint) `
                 -KnownHostsPath $script:knownHostsPath } | Should -Throw '*does not match*'
+    }
+
+    It 'accepts an adversarial literal path through a safe environment token' {
+        $pathRoot = Join-Path $TestDrive 'Application Support # `${PATH} "quoted"'
+        [IO.Directory]::CreateDirectory($pathRoot) | Out-Null
+        $literalPath = Join-Path $pathRoot "known_hosts'file"
+        Write-SshTestKnownHost -Path $literalPath | Out-Null
+        $plan = New-HHSshTransportPlan `
+            -Target (New-SshTestTarget) `
+            -KnownHostsPath $literalPath
+
+        $name = 'HH_HH_KNOWN_HOSTS_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+        $binding = Enter-HHSshKnownHostsEnvironment -Plan $plan -VariableName $name
+        try {
+            $binding.Options.UserKnownHostsFile | Should -BeExactly ('${' + $name + '}')
+            [Environment]::GetEnvironmentVariable($name, 'Process') |
+                Should -BeExactly ([IO.Path]::GetFullPath($literalPath))
+            $binding.Options.GlobalKnownHostsFile | Should -BeExactly 'none'
+            $binding.Options.UpdateHostKeys | Should -BeExactly 'no'
+        }
+        finally {
+            Exit-HHSshKnownHostsEnvironment -Binding $binding
+        }
+        [Environment]::GetEnvironmentVariable($name, 'Process') | Should -BeNullOrEmpty
+    }
+
+    It 'restores a preexisting binding and creates distinct concurrent names' {
+        Write-SshTestKnownHost -Path $script:knownHostsPath | Out-Null
+        $plan = New-HHSshTransportPlan `
+            -Target (New-SshTestTarget) `
+            -KnownHostsPath $script:knownHostsPath
+        $fixedName = 'HH_HH_KNOWN_HOSTS_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB'
+        [Environment]::SetEnvironmentVariable($fixedName, 'previous-value', 'Process')
+        $fixedBinding = Enter-HHSshKnownHostsEnvironment -Plan $plan -VariableName $fixedName
+        $first = Enter-HHSshKnownHostsEnvironment -Plan $plan
+        $second = Enter-HHSshKnownHostsEnvironment -Plan $plan
+        try {
+            $first.VariableName | Should -Not -BeExactly $second.VariableName
+            $first.Options.UserKnownHostsFile | Should -Not -BeExactly $second.Options.UserKnownHostsFile
+            [Environment]::GetEnvironmentVariable($fixedName, 'Process') |
+                Should -BeExactly $plan.KnownHostsPath
+        }
+        finally {
+            Exit-HHSshKnownHostsEnvironment -Binding $second
+            Exit-HHSshKnownHostsEnvironment -Binding $first
+            Exit-HHSshKnownHostsEnvironment -Binding $fixedBinding
+        }
+        [Environment]::GetEnvironmentVariable($fixedName, 'Process') |
+            Should -BeExactly 'previous-value'
+        [Environment]::SetEnvironmentVariable($fixedName, $null, 'Process')
+    }
+
+    It 'rejects unsafe binding names and control characters in known-hosts paths' {
+        $plan = [pscustomobject]@{
+            KnownHostsPath = [IO.Path]::Combine([IO.Path]::GetTempPath(), "bad`nknown_hosts")
+            Options = @{}
+        }
+        { Enter-HHSshKnownHostsEnvironment -Plan $plan } |
+            Should -Throw '*without control characters*'
+        $plan.KnownHostsPath = [IO.Path]::Combine([IO.Path]::GetTempPath(), 'known_hosts')
+        { Enter-HHSshKnownHostsEnvironment -Plan $plan -VariableName 'PATH' } |
+            Should -Throw '*variable name is invalid*'
+    }
+
+    It 'enforces patched PowerShell floors and OpenSSH expansion capability' {
+        foreach ($supported in @('7.4.19', '7.5.10', '7.6.5', '7.7.0')) {
+            { Assert-HHSshControllerSupported `
+                    -PowerShellVersion $supported `
+                    -ControllerEdition Core `
+                    -SshCapabilityProbe { $true } } | Should -Not -Throw
+        }
+        foreach ($unsupported in @('7.3.12', '7.4.18', '7.5.9', '7.6.4')) {
+            { Assert-HHSshControllerSupported `
+                    -PowerShellVersion $unsupported `
+                    -ControllerEdition Core `
+                    -SshCapabilityProbe { $true } } | Should -Throw '*patched PowerShell*'
+        }
+        { Assert-HHSshControllerSupported `
+                -PowerShellVersion 7.6.5 `
+                -ControllerEdition Desktop `
+                -SshCapabilityProbe { $true } } | Should -Throw '*patched PowerShell*'
+        { Assert-HHSshControllerSupported `
+                -PowerShellVersion 7.6.5 `
+                -ControllerEdition Core `
+                -SshCapabilityProbe { $false } } | Should -Throw '*environment-variable expansion*'
+    }
+
+    It 'proves the installed OpenSSH expansion capability and removes its probe binding' {
+        $beforeNames = @(Get-ChildItem Env:HH_HH_SSH_CAPABILITY_* -ErrorAction SilentlyContinue |
+                ForEach-Object Name)
+
+        { Assert-HHSshControllerSupported `
+                -PowerShellVersion 7.6.5 `
+                -ControllerEdition Core } | Should -Not -Throw
+
+        @(Get-ChildItem Env:HH_HH_SSH_CAPABILITY_* -ErrorAction SilentlyContinue |
+                ForEach-Object Name) | Should -Be $beforeNames
+    }
+
+    It 'rejects a controller without an OpenSSH application before connection' {
+        Mock Get-Command { $null } -ParameterFilter {
+            $Name -ceq 'ssh' -and $CommandType -eq [Management.Automation.CommandTypes]::Application
+        }
+
+        { Assert-HHSshControllerSupported `
+                -PowerShellVersion 7.6.5 `
+                -ControllerEdition Core } | Should -Throw '*environment-variable expansion*'
+    }
+
+    It 'binds a safe known-hosts path when no additional SSH options are needed' {
+        $name = 'HH_HH_KNOWN_HOSTS_DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD'
+        $binding = Enter-HHSshKnownHostsEnvironment -Plan ([pscustomobject]@{
+                KnownHostsPath = [IO.Path]::Combine([IO.Path]::GetTempPath(), 'known_hosts')
+                Options = @{}
+            }) -VariableName $name
+        try {
+            @($binding.Options.Keys) | Should -Be @('UserKnownHostsFile')
+        }
+        finally {
+            Exit-HHSshKnownHostsEnvironment -Binding $binding
+        }
     }
 }
 
@@ -1895,7 +2019,19 @@ Describe 'SSH native command seams' -Tag Unit {
 
     It 'uses native New-PSSession and Remove-PSSession for password sessions' {
         $identity = New-SshTestIdentity
-        Mock New-PSSession { $script:nativeSession }
+        $script:observedKnownHostsVariable = $null
+        $script:observedKnownHostsPath = $null
+        Mock New-PSSession {
+            $script:observedKnownHostsVariable = [regex]::Match(
+                [string] $Options.UserKnownHostsFile,
+                '^\$\{(?<name>HH_HH_KNOWN_HOSTS_[A-F0-9]{32})\}$'
+            ).Groups['name'].Value
+            $script:observedKnownHostsPath = [Environment]::GetEnvironmentVariable(
+                $script:observedKnownHostsVariable,
+                'Process'
+            )
+            $script:nativeSession
+        }
         Mock Invoke-Command {
             [pscustomobject]@{
                 Marker = 'HostHunter.StreamEnvelope.v1'
@@ -1917,8 +2053,14 @@ Describe 'SSH native command seams' -Tag Unit {
             }
         }
         $plan = New-HHSshTransportPlan -Target (New-SshTestTarget) -KnownHostsPath $script:knownHostsPath
-        $context = Open-HHSshValidatedSession -Plan $plan
+        $context = Open-HHSshValidatedSession `
+            -Plan $plan `
+            -ControllerPowerShellVersion 7.6.5 `
+            -SshCapabilityProbe { $true }
         $context.RemotePowerShellVersion | Should -BeExactly '7.6.5'
+        $script:observedKnownHostsPath | Should -BeExactly $plan.KnownHostsPath
+        [Environment]::GetEnvironmentVariable($script:observedKnownHostsVariable, 'Process') |
+            Should -BeNullOrEmpty
         Close-HHSshSession -Session $context.Session
         $context.Session.State | Should -BeExactly 'Closed'
         Should -Invoke New-PSSession -Times 1 -Exactly -ParameterFilter {
@@ -1926,8 +2068,36 @@ Describe 'SSH native command seams' -Tag Unit {
             $Port -eq 22 -and
             $UserName -eq 'operator' -and
             $SSHTransport -and
-            $null -eq $KeyFilePath
+            $null -eq $KeyFilePath -and
+            $Options.GlobalKnownHostsFile -ceq 'none' -and
+            $Options.UpdateHostKeys -ceq 'no' -and
+            $Options.UserKnownHostsFile -match '^\$\{HH_HH_KNOWN_HOSTS_[A-F0-9]{32}\}$'
         }
+    }
+
+    It 'removes the temporary known-hosts binding when native session creation fails' {
+        $variableName = 'HH_HH_KNOWN_HOSTS_CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC'
+        $script:failureObservedPath = $null
+        Mock New-PSSession {
+            $script:failureObservedPath = [Environment]::GetEnvironmentVariable(
+                $variableName,
+                'Process'
+            )
+            throw [IO.IOException]::new('native open failed')
+        }
+        $plan = New-HHSshTransportPlan `
+            -Target (New-SshTestTarget) `
+            -KnownHostsPath $script:knownHostsPath
+
+        { Open-HHSshValidatedSession `
+                -Plan $plan `
+                -ControllerPowerShellVersion 7.6.5 `
+                -SshCapabilityProbe { $true } `
+                -EnvironmentVariableNameFactory { $variableName } } |
+            Should -Throw '*native open failed*'
+
+        $script:failureObservedPath | Should -BeExactly $plan.KnownHostsPath
+        [Environment]::GetEnvironmentVariable($variableName, 'Process') | Should -BeNullOrEmpty
     }
 
     It 'passes KeyFilePath to native New-PSSession for a key-only plan' {
@@ -1957,7 +2127,10 @@ Describe 'SSH native command seams' -Tag Unit {
         $plan = New-HHSshTransportPlan `
             -Target (New-SshTestTarget -Authentication PublicKey -KeyPath $keyPath) `
             -KnownHostsPath $script:knownHostsPath
-        $context = Open-HHSshValidatedSession -Plan $plan
+        $context = Open-HHSshValidatedSession `
+            -Plan $plan `
+            -ControllerPowerShellVersion 7.6.5 `
+            -SshCapabilityProbe { $true }
         $context.Session | Should -Be $script:nativeSession
         Should -Invoke New-PSSession -Times 1 -Exactly -ParameterFilter {
             $KeyFilePath -eq $keyPath

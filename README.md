@@ -8,7 +8,11 @@ evidence.
 
 ## First-release runtime contract
 
-The controller requires PowerShell 7.4 or newer. SSH is the only qualified
+The controller requires a security-patched PowerShell release: 7.4.19 or
+newer in the 7.4 servicing line, 7.5.10 or newer in the 7.5 servicing line,
+7.6.5 or newer in the 7.6 servicing line, or a later supported release. SSH
+operations also require OpenSSH 8.4 or newer so the managed known-hosts path
+can be passed without argument ambiguity. SSH is the only qualified
 first-release transport.
 
 | Requested runtime | SSH execution path | Availability |
@@ -65,6 +69,14 @@ Invoke-HHCommand `
     -Reason 'Investigate service load' `
     -CaseId 'INC-1234'
 ```
+
+On macOS, the default data root is
+`~/Library/Application Support/HostHunterNextGeneration`. HostHunter binds its
+managed `known_hosts` path to each native SSH session without embedding that
+space-containing path in the SSH option argument. Custom data roots containing
+spaces are supported as well. Distinct data roots have independent databases,
+Keychain identities, and audit histories; HostHunter never merges or deletes
+them automatically.
 
 Omitting `-PowerShellRuntime` selects `PowerShell7`. `Reason` is optional human
 context. `CaseId` is an optional correlation value, such as an incident, change,
@@ -195,10 +207,10 @@ All canonical proof runs in local containers:
 ./scripts/verify-local.sh
 ```
 
-The current working-tree product unit proof passed on 2026-08-25: 632/632 tests
+The current working-tree product unit proof passed on 2026-08-25: 647/647 tests
 passed, including the authenticated SQLite v1-to-v2 migration phase. Product
-coverage was 95.3352% statements (7664/8039), 90.0214% branches (2526/2806),
-96.31% functions (261/271), and 95.3677% lines (6341/6649). The exact-candidate
+coverage was 95.3557% statements (7761/8139), 90.0669% branches (2557/2839),
+96.3504% functions (264/274), and 95.3931% lines (6419/6729). The exact-candidate
 gate will rerun static, security,
 filesystem/image, integration, package, and build proof from a clean checkout.
 

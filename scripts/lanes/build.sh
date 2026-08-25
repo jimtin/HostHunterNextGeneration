@@ -26,7 +26,7 @@ pwsh -NoLogo -NoProfile -NonInteractive \
   -DurabilityHelperRoot "$durability_helper_root"
 
 printf '%s\n' \
-  "$build_artifacts/HostHunterNextGeneration/0.2.0/HostHunterNextGeneration.psd1" \
+  "$build_artifacts/HostHunterNextGeneration/0.2.1/HostHunterNextGeneration.psd1" \
   > "$build_artifacts/module-path.txt"
 
 printf 'Module package validation passed\n'

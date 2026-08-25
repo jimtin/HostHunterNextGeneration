@@ -14,6 +14,7 @@ BeforeAll {
             [string] $Transport = 'SSH',
             [string] $HostName = 'alpha.example.test',
             [int] $Port = 22,
+            [string] $UserName = 'operator',
             [string] $Authentication = 'Password',
             [ValidateSet('PowerShell7', 'WindowsPowerShell51')]
             [string] $PowerShellRuntime = 'PowerShell7',
@@ -56,7 +57,7 @@ BeforeAll {
             Transport                          = $Transport
             HostName                           = $HostName
             Port                               = $Port
-            UserName                           = 'operator'
+            UserName                           = $UserName
             Authentication                     = $Authentication
             PowerShellRuntime                  = $PowerShellRuntime
             HostKeyFingerprint                 = $HostKeyFingerprint
@@ -166,7 +167,13 @@ Describe 'Target schema v2 model' -Tag 'Unit' {
         { Get-TestTarget -Name "bad`nname" } | Should -Throw -ExpectedMessage '*null or newline*'
         { Get-TestTarget -Name ('a' * 129) } | Should -Throw -ExpectedMessage '*128*'
         { Get-TestTarget -HostName 'host name' } | Should -Throw -ExpectedMessage '*HostName*'
+        { Get-TestTarget -HostName '-option.test' } | Should -Throw -ExpectedMessage '*HostName*'
+        { Get-TestTarget -HostName 'host;command' } | Should -Throw -ExpectedMessage '*HostName*'
+        { Get-TestTarget -HostName 'host`name' } | Should -Throw -ExpectedMessage '*HostName*'
         { Get-TestTarget -HostName '...' } | Should -Throw -ExpectedMessage '*host or IP*'
+        { Get-TestTarget -UserName '-option' } | Should -Throw -ExpectedMessage '*UserName*'
+        { Get-TestTarget -UserName 'operator;command' } | Should -Throw -ExpectedMessage '*UserName*'
+        { Get-TestTarget -UserName 'operator name' } | Should -Throw -ExpectedMessage '*UserName*'
         {
             New-HHTargetRecord `
                 -Name alpha -Transport SSH -HostName host -Port 22 -UserName ' ' `
@@ -174,6 +181,16 @@ Describe 'Target schema v2 model' -Tag 'Unit' {
                 -IsActive $true -LastValidatedAtUtc '2026-08-23T00:00:00Z' `
                 -LastValidatedPowerShellVersion '7.6.5'
         } | Should -Throw -ExpectedMessage '*UserName*'
+    }
+
+    It 'accepts DNS IPv4 IPv6 UPN and domain-qualified account forms' {
+        (Get-TestTarget -HostName '192.0.2.10').HostName | Should -BeExactly '192.0.2.10'
+        (Get-TestTarget -HostName 'fe80::1%en0').HostName | Should -BeExactly 'fe80::1%en0'
+        (Get-TestTarget -HostName '[2001:db8::10]').HostName | Should -BeExactly '[2001:db8::10]'
+        (Get-TestTarget -UserName 'operator@example.test').UserName |
+            Should -BeExactly 'operator@example.test'
+        (Get-TestTarget -UserName 'DOMAIN\operator').UserName |
+            Should -BeExactly 'DOMAIN\operator'
     }
 
     It 'rejects invalid transport authentication combinations' {

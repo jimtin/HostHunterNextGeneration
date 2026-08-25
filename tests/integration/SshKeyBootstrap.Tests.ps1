@@ -159,7 +159,11 @@ Describe 'SSH key bootstrap against the disposable PowerShell-over-SSH fixture' 
     BeforeEach {
         $env:HH_COVERAGE_CASE = [Guid]::NewGuid().ToString('N')
         $script:fixtureTarget = $null
-        $script:knownHostsPath = Join-Path $TestDrive "$($env:HH_COVERAGE_CASE)-known_hosts"
+        $script:macOSStyleDataRoot = Join-Path (
+            Join-Path $TestDrive $env:HH_COVERAGE_CASE
+        ) 'Library/Application Support/HostHunterNextGeneration'
+        [IO.Directory]::CreateDirectory($script:macOSStyleDataRoot) | Out-Null
+        $script:knownHostsPath = Join-Path $script:macOSStyleDataRoot 'known_hosts'
         $scannedHostKeys = @(
             & ssh-keyscan `
                 -T 5 `
@@ -199,7 +203,10 @@ Describe 'SSH key bootstrap against the disposable PowerShell-over-SSH fixture' 
     }
 
     It 'installs one exact marker, proves PublicKey authentication, and remains idempotent' {
-        $keyPath = Join-Path $TestDrive "$($env:HH_COVERAGE_CASE)-id_ed25519"
+        $script:knownHostsPath | Should -Match `
+            'Library/Application Support/HostHunterNextGeneration'
+        $keyPath = Join-Path $script:macOSStyleDataRoot 'keys/id_ed25519'
+        [IO.Directory]::CreateDirectory((Split-Path -Parent $keyPath)) | Out-Null
         & ssh-keygen -q -t ed25519 -N '' -f $keyPath -C hosthunter-bootstrap-integration
         $LASTEXITCODE | Should -Be 0
 

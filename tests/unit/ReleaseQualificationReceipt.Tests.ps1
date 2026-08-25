@@ -8,6 +8,7 @@ Describe 'Publication native qualification receipt contract' -Tag Unit {
         foreach ($requiredPredicate in @(
                 '.platform == "macOS"',
                 '.rollbackRejected == true',
+                '.spaceContainingDataRootVerified == true',
                 '.keychainItemCount == 2',
                 '.cleanupComplete == true',
                 '.redacted == true'
@@ -25,6 +26,7 @@ Describe 'Publication native qualification receipt contract' -Tag Unit {
                 '.compatibilityEdition == "Desktop"',
                 '.compatibilityExecutionMode == "WindowsPowerShellCompatibility"',
                 '.mixedTargetCount == 2',
+                '.spaceContainingDataRootVerified == true',
                 '.keyTransitionSucceeded == true',
                 '.runScopedSshAgentVerified == true',
                 '.runScopedSshAgentIdentityRemoved == true',

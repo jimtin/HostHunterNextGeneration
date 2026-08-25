@@ -72,7 +72,11 @@ Describe 'macOS exact-package qualification cleanup contract' -Tag Unit {
 
     It 'keeps disposable scope and receipt binding intact' {
         $script:qualificationSource |
-            Should -Match "hosthunter-native-qualification-'\s*\+\s*\[Guid\]::NewGuid"
+            Should -Match "HostHunter Native Qualification '\s*\+\s*\[Guid\]::NewGuid"
+        $script:qualificationSource |
+            Should -Match "Library/Application Support/HostHunterNextGeneration"
+        $script:qualificationSource |
+            Should -Match 'spaceContainingDataRootVerified\s*=\s*\$spaceContainingDataRootVerified'
         $script:qualificationSource | Should -Match 'candidateSha\s*=\s*\$CandidateSha'
         $script:qualificationSource |
             Should -Match 'packageArchiveSha256\s*=\s*\$PackageArchiveSha256'

@@ -204,6 +204,166 @@ function Get-HHSshKnownHostFingerprint {
     return @($fingerprints | Sort-Object -Unique)
 }
 
+function Assert-HHSshControllerSupported {
+    [CmdletBinding()]
+    param(
+        [version] $PowerShellVersion = $PSVersionTable.PSVersion,
+
+        [string] $ControllerEdition = $PSVersionTable.PSEdition,
+
+        [scriptblock] $SshCapabilityProbe
+    )
+
+    $minimumVersion = if ($PowerShellVersion.Major -gt 7 -or
+        ($PowerShellVersion.Major -eq 7 -and $PowerShellVersion.Minor -gt 6)) {
+        [version] '7.0'
+    }
+    elseif ($PowerShellVersion.Major -eq 7 -and $PowerShellVersion.Minor -eq 6) {
+        [version] '7.6.5'
+    }
+    elseif ($PowerShellVersion.Major -eq 7 -and $PowerShellVersion.Minor -eq 5) {
+        [version] '7.5.10'
+    }
+    elseif ($PowerShellVersion.Major -eq 7 -and $PowerShellVersion.Minor -eq 4) {
+        [version] '7.4.19'
+    }
+    else {
+        [version] '999.0'
+    }
+
+    if ($ControllerEdition -cne 'Core' -or $PowerShellVersion -lt $minimumVersion) {
+        throw (New-HHSshClassifiedException -FailureKind TransportFailure -Message (
+                'SSH actions require a patched PowerShell controller: 7.4.19+, 7.5.10+, ' +
+                '7.6.5+, or a newer stable 7.x release.'
+            ))
+    }
+
+    $supportsEnvironmentExpansion = if ($null -ne $SshCapabilityProbe) {
+        [bool] (& $SshCapabilityProbe)
+    }
+    else {
+        $sshCommand = @(Get-Command ssh -CommandType Application -ErrorAction SilentlyContinue |
+                Select-Object -First 1)
+        if ($sshCommand.Count -ne 1) {
+            $false
+        }
+        else {
+            $probeName = 'HH_HH_SSH_CAPABILITY_{0}' -f [Guid]::NewGuid().ToString('N').ToUpperInvariant()
+            $probePath = [IO.Path]::Combine(
+                [IO.Path]::GetTempPath(),
+                'HostHunter SSH capability',
+                'known_hosts'
+            )
+            try {
+                [Environment]::SetEnvironmentVariable($probeName, $probePath, 'Process')
+                $probeToken = '${' + $probeName + '}'
+                $probeOutput = @(& $sshCommand[0].Source `
+                        -G `
+                        -F none `
+                        -o "UserKnownHostsFile=$probeToken" `
+                        -o 'GlobalKnownHostsFile=none' `
+                        hosthunter-capability.invalid 2>&1)
+                $resolvedKnownHosts = @($probeOutput | ForEach-Object { [string] $_ } |
+                        Where-Object { $_ -match '^userknownhostsfile\s+' } |
+                        ForEach-Object { $_ -replace '^userknownhostsfile\s+', '' })
+                $resolvedKnownHosts.Count -eq 1 -and
+                    $resolvedKnownHosts[0] -ceq $probePath
+            }
+            catch {
+                $false
+            }
+            finally {
+                Remove-Item -LiteralPath ("Env:{0}" -f $probeName) -Force `
+                    -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
+    if (-not $supportsEnvironmentExpansion) {
+        throw (New-HHSshClassifiedException -FailureKind TransportFailure -Message (
+                'The OpenSSH client must support environment-variable expansion in ' +
+                'UserKnownHostsFile before HostHunter can open an SSH connection.'
+            ))
+    }
+}
+
+function Enter-HHSshKnownHostsEnvironment {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+        'PSUseShouldProcessForStateChangingFunctions',
+        '',
+        Justification = 'The process-scoped environment binding is restored by the paired exit function.'
+    )]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [object] $Plan,
+
+        [string] $VariableName = (
+            'HH_HH_KNOWN_HOSTS_{0}' -f [Guid]::NewGuid().ToString('N').ToUpperInvariant()
+        )
+    )
+
+    if ($VariableName -cnotmatch '^HH_HH_KNOWN_HOSTS_[A-F0-9]{32}$') {
+        throw [ArgumentException]::new('The SSH known-hosts environment variable name is invalid.')
+    }
+    $knownHostsPath = [string] $Plan.KnownHostsPath
+    if ([string]::IsNullOrWhiteSpace($knownHostsPath) -or
+        -not [IO.Path]::IsPathFullyQualified($knownHostsPath) -or
+        $knownHostsPath.IndexOfAny([char[]]@(0x00, 0x0A, 0x0D)) -ge 0) {
+        throw [ArgumentException]::new(
+            'The SSH known-hosts environment binding requires an absolute path without control characters.'
+        )
+    }
+
+    $processEnvironment = [Environment]::GetEnvironmentVariables('Process')
+    $wasPresent = $processEnvironment.Contains($VariableName)
+    $previousValue = if ($wasPresent) {
+        [string] $processEnvironment[$VariableName]
+    }
+    else {
+        $null
+    }
+    [Environment]::SetEnvironmentVariable($VariableName, $knownHostsPath, 'Process')
+    $options = @{}
+    foreach ($entry in $Plan.Options.GetEnumerator()) {
+        $options[[string] $entry.Key] = [string] $entry.Value
+    }
+    $options.UserKnownHostsFile = '${' + $VariableName + '}'
+
+    return [pscustomobject][ordered]@{
+        VariableName = $VariableName
+        WasPresent = $wasPresent
+        PreviousValue = $previousValue
+        Options = $options
+    }
+}
+
+function Exit-HHSshKnownHostsEnvironment {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+        'PSUseShouldProcessForStateChangingFunctions',
+        '',
+        Justification = 'This restores a process-scoped environment binding.'
+    )]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [object] $Binding
+    )
+
+    $variableName = [string] $Binding.VariableName
+    if ([bool] $Binding.WasPresent) {
+        [Environment]::SetEnvironmentVariable(
+            $variableName,
+            [string] $Binding.PreviousValue,
+            'Process'
+        )
+    }
+    else {
+        Remove-Item -LiteralPath ("Env:{0}" -f $variableName) -Force `
+            -ErrorAction SilentlyContinue
+    }
+}
+
 function New-HHSshTransportPlan {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
         'PSUseShouldProcessForStateChangingFunctions',
@@ -250,8 +410,9 @@ function New-HHSshTransportPlan {
 
     $options = [ordered]@{
         ConnectTimeout = [string] $ConnectionTimeoutSeconds
+        GlobalKnownHostsFile = 'none'
         StrictHostKeyChecking = 'yes'
-        UserKnownHostsFile = [IO.Path]::GetFullPath($KnownHostsPath)
+        UpdateHostKeys = 'no'
     }
     if ($validatedTarget.Authentication -ceq 'Password') {
         $options.NumberOfPasswordPrompts = '1'
@@ -1623,6 +1784,14 @@ function Open-HHSshValidatedSession {
 
         [scriptblock] $Clock,
 
+        [version] $ControllerPowerShellVersion = $PSVersionTable.PSVersion,
+
+        [string] $ControllerPSEdition = $PSVersionTable.PSEdition,
+
+        [scriptblock] $SshCapabilityProbe,
+
+        [scriptblock] $EnvironmentVariableNameFactory,
+
         [ValidateRange(1, [long]::MaxValue)]
         [long] $MaxOutputBytes = 104857600
     )
@@ -1636,19 +1805,37 @@ function Open-HHSshValidatedSession {
             & $SessionFactory $Plan
         }
         else {
+            Assert-HHSshControllerSupported `
+                -PowerShellVersion $ControllerPowerShellVersion `
+                -ControllerEdition $ControllerPSEdition `
+                -SshCapabilityProbe $SshCapabilityProbe
+            $variableName = if ($null -ne $EnvironmentVariableNameFactory) {
+                [string] (& $EnvironmentVariableNameFactory)
+            }
+            else {
+                'HH_HH_KNOWN_HOSTS_{0}' -f [Guid]::NewGuid().ToString('N').ToUpperInvariant()
+            }
+            $knownHostsBinding = Enter-HHSshKnownHostsEnvironment `
+                -Plan $Plan `
+                -VariableName $variableName
             $sessionParameters = @{
                 HostName = $Plan.HostName
                 Port = $Plan.Port
                 UserName = $Plan.UserName
                 ConnectingTimeout = $Plan.ConnectingTimeoutMilliseconds
                 SSHTransport = $true
-                Options = [hashtable] $Plan.Options
+                Options = [hashtable] $knownHostsBinding.Options
                 ErrorAction = 'Stop'
             }
             if ($Plan.Authentication -ceq 'PublicKey') {
                 $sessionParameters.KeyFilePath = $Plan.KeyFilePath
             }
-            New-PSSession @sessionParameters
+            try {
+                New-PSSession @sessionParameters
+            }
+            finally {
+                Exit-HHSshKnownHostsEnvironment -Binding $knownHostsBinding
+            }
         }
         if ($null -eq $session) {
             throw (New-HHSshClassifiedException -FailureKind TransportFailure `

@@ -1,6 +1,6 @@
 @{
     RootModule = 'HostHunterNextGeneration.psm1'
-    ModuleVersion = '0.2.0'
+    ModuleVersion = '0.2.1'
     GUID = 'a29e4ed1-e148-49ec-9b3b-ab930d2e968d'
     Author = 'James Hinton'
     CompanyName = 'HostHunter'

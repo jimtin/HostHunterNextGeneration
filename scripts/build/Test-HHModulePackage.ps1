@@ -25,7 +25,7 @@ $provider = (Resolve-Path -LiteralPath $ProviderRoot).Path
 $metadata = (Resolve-Path -LiteralPath $MetadataRoot).Path
 $durabilityHelper = (Resolve-Path -LiteralPath `
         (Join-Path $DurabilityHelperRoot 'HostHunter.Persistence.Durability.dll')).Path
-$packageRoot = Join-Path $artifact 'HostHunterNextGeneration/0.2.0'
+$packageRoot = Join-Path $artifact 'HostHunterNextGeneration/0.2.1'
 if (Test-Path -LiteralPath $packageRoot) {
     Remove-Item -LiteralPath $packageRoot -Recurse -Force
 }
@@ -91,7 +91,7 @@ Copy-Item -LiteralPath (Join-Path $provider 'asset-sha256.txt') `
 
 $manifestPath = Join-Path $packageRoot 'HostHunterNextGeneration.psd1'
 $manifest = Test-ModuleManifest -Path $manifestPath -ErrorAction Stop
-if ($manifest.Version.ToString() -ne '0.2.0') {
+if ($manifest.Version.ToString() -ne '0.2.1') {
     throw "Unexpected packaged module version '$($manifest.Version)'."
 }
 

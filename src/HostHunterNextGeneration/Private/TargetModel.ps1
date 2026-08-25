@@ -121,8 +121,10 @@ function New-HHTargetRecord {
     $normalizedHostName = $HostName.Trim()
     if ([string]::IsNullOrWhiteSpace($normalizedHostName) -or
         $normalizedHostName.Length -gt 253 -or
-        $normalizedHostName -match '[\s/\\]') {
-        throw 'Target HostName must be a non-empty host or IP address without whitespace or path separators.'
+        $normalizedHostName.StartsWith('-') -or
+        $normalizedHostName -notmatch '^[\p{L}\p{N}._:%\[\]-]+$') {
+        throw ('Target HostName must be a non-empty host or IP address containing only ' +
+            'letters, numbers, dots, hyphens, colons, percent signs, or IPv6 brackets.')
     }
     $normalizedRuntime = if ($PowerShellRuntime -ieq 'WindowsPowerShell51') {
         'WindowsPowerShell51'
@@ -137,8 +139,12 @@ function New-HHTargetRecord {
             -PowerShellRuntime $normalizedRuntime)
 
     $normalizedUserName = $UserName.Trim()
-    if ([string]::IsNullOrWhiteSpace($normalizedUserName) -or $normalizedUserName.Length -gt 256) {
-        throw 'Target UserName must contain between 1 and 256 characters.'
+    if ([string]::IsNullOrWhiteSpace($normalizedUserName) -or
+        $normalizedUserName.Length -gt 256 -or
+        $normalizedUserName.StartsWith('-') -or
+        $normalizedUserName -notmatch '^[\p{L}\p{N}._@+\\-]+$') {
+        throw ('Target UserName must contain between 1 and 256 safe account-name characters. ' +
+            'DOMAIN\user and user@domain forms are supported.')
     }
 
     $normalizedFingerprint = if ([string]::IsNullOrWhiteSpace($HostKeyFingerprint)) {

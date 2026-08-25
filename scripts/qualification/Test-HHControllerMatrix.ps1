@@ -11,8 +11,24 @@ $ErrorActionPreference = 'Stop'
 if ($PSVersionTable.PSVersion -ne $PowerShellVersion) {
     throw "Expected PowerShell $PowerShellVersion; found $($PSVersionTable.PSVersion)."
 }
-if ($PSVersionTable.PSEdition -cne 'Core' -or $PowerShellVersion -lt [version]'7.4') {
-    throw 'The controller-floor qualification requires PowerShell Core 7.4 or newer.'
+$minimumPatchedVersion = switch ($PowerShellVersion.Minor) {
+    4 { [version]'7.4.19' }
+    5 { [version]'7.5.10' }
+    6 { [version]'7.6.5' }
+    default {
+        if ($PowerShellVersion.Major -gt 7 -or
+            ($PowerShellVersion.Major -eq 7 -and $PowerShellVersion.Minor -gt 6)) {
+            [version]'7.0'
+        }
+        else {
+            [version]'999.0'
+        }
+    }
+}
+if ($PSVersionTable.PSEdition -cne 'Core' -or
+    $PowerShellVersion -lt $minimumPatchedVersion) {
+    throw ('The controller-floor qualification requires PowerShell Core 7.4.19+, ' +
+        '7.5.10+, 7.6.5+, or a later supported release.')
 }
 $modulePath = (Get-Content -LiteralPath $ModulePathReceipt -Raw).Trim()
 $module = Import-Module $modulePath -Force -PassThru

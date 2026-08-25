@@ -17,9 +17,15 @@ if ([string]::IsNullOrWhiteSpace($canonicalTempRoot) -or
     -not [IO.Directory]::Exists($canonicalTempRoot)) {
     throw 'The native macOS qualification temporary root could not be canonicalized.'
 }
-$dataRoot = Join-Path $canonicalTempRoot (
-    'hosthunter-native-qualification-' + [Guid]::NewGuid().ToString('N')
+$qualificationScopeRoot = Join-Path $canonicalTempRoot (
+    'HostHunter Native Qualification ' + [Guid]::NewGuid().ToString('N')
 )
+$dataRoot = Join-Path $qualificationScopeRoot `
+    'Library/Application Support/HostHunterNextGeneration'
+$spaceContainingDataRootVerified = $dataRoot.Contains(' ')
+if (-not $spaceContainingDataRootVerified) {
+    throw 'Native qualification did not construct a space-containing data root.'
+}
 $module = Import-Module $manifest -Force -PassThru
 $startedAt = [DateTimeOffset]::UtcNow
 $cleanupComplete = $false
@@ -244,8 +250,8 @@ finally {
             $itemsPresentBeforeCleanup -eq $keychainItems.Count
     }
     finally {
-        if ([IO.Directory]::Exists($dataRoot)) {
-            [IO.Directory]::Delete($dataRoot, $true)
+        if ([IO.Directory]::Exists($qualificationScopeRoot)) {
+            [IO.Directory]::Delete($qualificationScopeRoot, $true)
         }
         Remove-Module $module -Force -ErrorAction SilentlyContinue
     }
@@ -264,6 +270,7 @@ $receiptDirectory = Split-Path -Parent $receipt
     initialAuditSequence = $initialSequence
     advancedAuditSequence = $advancedSequence
     rollbackRejected = $rollbackRejected
+    spaceContainingDataRootVerified = $spaceContainingDataRootVerified
     keychainItemCount = 2
     cleanupComplete = $cleanupComplete
     redacted = $true

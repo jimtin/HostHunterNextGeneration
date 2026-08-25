@@ -46,9 +46,11 @@ if ([string]::IsNullOrWhiteSpace($canonicalTempRoot) -or
     -not [IO.Directory]::Exists($canonicalTempRoot)) {
     throw 'The Windows qualification temporary root could not be canonicalized.'
 }
-$dataRoot = Join-Path $canonicalTempRoot (
+$qualificationRoot = Join-Path $canonicalTempRoot (
     'hosthunter-windows-qualification-' + [Guid]::NewGuid().ToString('N')
 )
+$dataRoot = Join-Path $qualificationRoot `
+    'Library/Application Support/HostHunterNextGeneration'
 $extractRoot = Join-Path $canonicalTempRoot (
     'hosthunter-windows-package-' + [Guid]::NewGuid().ToString('N')
 )
@@ -77,6 +79,7 @@ $commandLineEnabledEventVerified = $false
 $commandLineDisabledEventVerified = $false
 $escalationPreferenceVerified = $false
 $processAuditPolicyRestored = $false
+$spaceContainingDataRootVerified = $false
 $processAuditRestoreRequired = $false
 $processAuditBeforeFlag = $null
 $commandLineBeforeState = $null
@@ -89,6 +92,7 @@ function Write-HHQualificationPhase {
         [ValidateSet(
             'NativePackage',
             'TargetValidation',
+            'RestartPersistence',
             'DirectPowerShell7',
             'DirectWindowsPowerShell51',
             'MixedRuntime',
@@ -494,6 +498,19 @@ try {
         -HostKeyFingerprint $HostKeyFingerprint -Add -Confirm:$false
     Write-HHQualificationPhase -Phase TargetValidation -Status Passed
 
+    Write-HHQualificationPhase -Phase RestartPersistence -Status Started
+    Remove-Module $module -Force -Confirm:$false
+    $module = Import-Module $manifest.FullName -Force -PassThru
+    $reloadedTargets = @(Get-HHTarget | Sort-Object Name)
+    if ($reloadedTargets.Count -ne 2 -or
+        @(Compare-Object -CaseSensitive `
+                -ReferenceObject @('windows-ps51', 'windows-ps7') `
+                -DifferenceObject @($reloadedTargets.Name)).Count -ne 0 -or
+        @($reloadedTargets | Where-Object Authentication -cne 'Password').Count -ne 0) {
+        throw 'The space-containing data root did not persist both password targets across restart.'
+    }
+    Write-HHQualificationPhase -Phase RestartPersistence -Status Passed
+
     $streamCommand = @'
 Write-Output 'output'
 Write-Warning 'warning'
@@ -607,6 +624,10 @@ Write-Error 'error' -ErrorAction Continue
     }
     $keyResult = Invoke-HHCommand -Command "'key-proof'" -Target windows-ps7
     if (-not $keyResult.Succeeded) { throw 'The committed key profile could not execute.' }
+    if ($dataRoot -notmatch 'Library/Application Support/HostHunterNextGeneration') {
+        throw 'The Windows qualification did not use the required macOS-style data root.'
+    }
+    $spaceContainingDataRootVerified = $true
     Write-HHQualificationPhase -Phase AgentKeyProof -Status Passed
 
     Write-HHQualificationPhase -Phase PasswordRecovery -Status Started
@@ -718,7 +739,7 @@ finally {
                 throw 'An exact Keychain item remained after qualification cleanup.'
             }
         }
-        Remove-Item -LiteralPath $dataRoot -Recurse -Force -Confirm:$false `
+        Remove-Item -LiteralPath $qualificationRoot -Recurse -Force -Confirm:$false `
             -ErrorAction Stop
         $cleanupComplete = $true
     }
@@ -762,6 +783,7 @@ Write-HHQualificationPhase -Phase Cleanup -Status Passed
     escalationPreferenceVerified = $escalationPreferenceVerified
     processAuditPolicyRestored = $processAuditPolicyRestored
     keyTransitionSucceeded = [bool]$keyResult.Succeeded
+    spaceContainingDataRootVerified = $spaceContainingDataRootVerified
     runScopedSshAgentVerified = $sshAgentStarted -and $sshAgentKeyAdded -and
         [bool]$keyResult.Succeeded
     runScopedSshAgentIdentityRemoved = $sshAgentIdentityRemoved
