@@ -203,6 +203,12 @@ Describe 'Windows exact-package qualification contract' -Tag Unit {
     It 'polls event 4688 by process identity without persisting command-line content' {
         $script:qualificationSource | Should -Match "Id\s*=\s*4688"
         $script:qualificationSource | Should -Match "\['NewProcessId'\]"
+        $script:qualificationSource | Should -Match "\['ProcessId'\]"
+        $script:qualificationSource | Should -Match '\$creatorProcessId\s*=\s*\$PID'
+        $script:qualificationSource | Should -Match (
+            'ToInt64\(\$eventCreatorProcessId\.Substring\(2\),\s*16\)\s*-eq\s*' +
+            '\$creatorProcessId'
+        )
         $script:qualificationSource | Should -Match 'AddSeconds\(30\)'
         $script:qualificationSource | Should -Match (
             'HostHunter\.WindowsProcessAuditEventProbe\.v1'

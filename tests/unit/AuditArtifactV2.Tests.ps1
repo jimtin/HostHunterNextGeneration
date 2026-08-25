@@ -401,6 +401,24 @@ Describe 'streaming audit artifact v2' -Tag Unit {
         finally { $stream.Dispose() }
     }
 
+    It 'parses canonical timestamps independently of the controller culture' {
+        $previousCulture = [Globalization.CultureInfo]::CurrentCulture
+        try {
+            [Globalization.CultureInfo]::CurrentCulture =
+                [Globalization.CultureInfo]::GetCultureInfo('en-AU')
+            $eventRecord = Get-TestEvent
+            $eventRecord.ObservedAtUtc = '2026-08-25T02:24:01.1234567+00:00'
+
+            $frame = Get-HHAuditArtifactV2EventFrame -EventRecord $eventRecord
+            $decoded = ConvertFrom-HHAuditArtifactV2Frame -Bytes $frame -Emit
+
+            $decoded.ObservedAtUtc | Should -Be '2026-08-25T02:24:01.1234567+00:00'
+        }
+        finally {
+            [Globalization.CultureInfo]::CurrentCulture = $previousCulture
+        }
+    }
+
     It 'rejects read and verification paths outside the data root or through links' -Skip:$IsWindows {
         $writer = Get-TestWriter
         $receipt = Complete-HHAuditArtifactV2Writer -Writer $writer

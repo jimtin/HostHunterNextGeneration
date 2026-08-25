@@ -361,6 +361,7 @@ function Invoke-HHWindowsProcessAuditEventProbe {
     $probe = @'
 $marker = '__MARKER__'
 $startedAt = [DateTime]::UtcNow.AddSeconds(-5)
+$creatorProcessId = $PID
 $startInfo = [Diagnostics.ProcessStartInfo]::new()
 $startInfo.FileName = Join-Path $env:SystemRoot 'System32\cmd.exe'
 $startInfo.UseShellExecute = $false
@@ -393,8 +394,12 @@ do {
             $fields[[string]$field.Name] = [string]$field.'#text'
         }
         $eventProcessId = [string]$fields['NewProcessId']
+        $eventCreatorProcessId = [string]$fields['ProcessId']
         if ($eventProcessId -match '^0x[0-9a-fA-F]+$' -and
-            [Convert]::ToInt64($eventProcessId.Substring(2), 16) -eq $markerProcessId) {
+            $eventCreatorProcessId -match '^0x[0-9a-fA-F]+$' -and
+            [Convert]::ToInt64($eventProcessId.Substring(2), 16) -eq $markerProcessId -and
+            [Convert]::ToInt64($eventCreatorProcessId.Substring(2), 16) -eq
+                $creatorProcessId) {
             $matched = $fields
             break
         }

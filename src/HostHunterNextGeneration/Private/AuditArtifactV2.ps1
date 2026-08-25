@@ -612,6 +612,15 @@ function ConvertFrom-HHAuditArtifactV2Frame {
 
     try {
         $json = [Text.UTF8Encoding]::new($false, $true).GetString($Bytes)
+        $jsonDocument = [Text.Json.JsonDocument]::Parse($json)
+        try {
+            $timestampElement = $jsonDocument.RootElement.GetProperty('ObservedAtUtc')
+            if ($timestampElement.ValueKind -ne [Text.Json.JsonValueKind]::String) {
+                throw 'Invalid frame timestamp.'
+            }
+            $timestampText = $timestampElement.GetString()
+        }
+        finally { $jsonDocument.Dispose() }
         $frame = $json | ConvertFrom-Json -Depth 10 -NoEnumerate -ErrorAction Stop
         $expected = @('Sequence', 'RemoteSequence', 'ObservedAtUtc', 'Phase', 'Stream', 'TypeName',
             'SerializedByteCount', 'IsTerminating', 'SerializedValue')
@@ -621,7 +630,12 @@ function ConvertFrom-HHAuditArtifactV2Frame {
         if ([long]$frame.Sequence -ne $ExpectedSequence -or [long]$frame.SerializedByteCount -lt 0 -or
             $frame.IsTerminating -isnot [bool]) { throw 'Invalid frame values.' }
         $timestamp = [DateTimeOffset]::MinValue
-        if (-not [DateTimeOffset]::TryParse([string]$frame.ObservedAtUtc, [ref]$timestamp)) {
+        if (-not [DateTimeOffset]::TryParse(
+                $timestampText,
+                [Globalization.CultureInfo]::InvariantCulture,
+                [Globalization.DateTimeStyles]::RoundtripKind,
+                [ref]$timestamp
+            )) {
             throw 'Invalid frame timestamp.'
         }
         $value = [Management.Automation.PSSerializer]::Deserialize([string]$frame.SerializedValue)
