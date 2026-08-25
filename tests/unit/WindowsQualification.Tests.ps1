@@ -189,6 +189,13 @@ Describe 'Windows exact-package qualification contract' -Tag Unit {
             Should -Match '(?s)Invoke-HHWindowsProcessAuditEventProbe.*?-ExpectCommandLine\s+\$false'
         $script:qualificationSource |
             Should -Match '(?s)finally\s*\{.*?Set-HHWindowsProcessAuditPolicy\s+-State\s+\$restoreAuditState'
+        $script:qualificationSource | Should -Match (
+            '(?s)finally\s*\{.*?' +
+            'Set-HHWindowsProcessAuditPolicy\s+-State\s+\$restoreAuditState.*?' +
+            '-Target\s+windows-ps51\s+-Escalate.*?' +
+            'Assert-HHWindowsProcessAuditPolicyResult\s+.*?' +
+            '-Result\s+\$restoreResult\s+-Runtime\s+WindowsPowerShell51'
+        )
         $script:qualificationSource |
             Should -Match 'processAuditPolicyRestored\s*=\s*\$processAuditPolicyRestored'
     }

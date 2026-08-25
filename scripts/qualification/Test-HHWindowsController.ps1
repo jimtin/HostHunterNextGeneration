@@ -648,10 +648,10 @@ finally {
         else { 'Disabled' }
         $restoreResult = Set-HHWindowsProcessAuditPolicy -State $restoreAuditState `
             -Subcategory ProcessCreation -CommandLineLogging $commandLineBeforeState `
-            -Target windows-ps7 -Escalate `
+            -Target windows-ps51 -Escalate `
             -EscalationMethod WindowsTokenPrivilege -Confirm:$false
         Assert-HHWindowsProcessAuditPolicyResult `
-            -Result $restoreResult -Runtime PowerShell7
+            -Result $restoreResult -Runtime WindowsPowerShell51
         $processAuditPolicyRestored =
             [uint32]$restoreResult.PolicyOutcome.AuditAfter.ProcessCreation -eq
                 $processAuditBeforeFlag -and
