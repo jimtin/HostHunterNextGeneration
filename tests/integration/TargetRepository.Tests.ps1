@@ -5,8 +5,7 @@ $null = (Resolve-Path -LiteralPath $env:HH_TEST_MODULE_PATH).Path
 Describe 'Packaged SQLite target repository lifecycle' -Tag Integration {
     It 'persists replace Add exact-profile CAS and hard-delete across fresh connections' {
         $dataRoot = Join-Path $TestDrive 'lifecycle'
-        Import-Module $env:HH_TEST_MODULE_PATH -Force
-        $loadedModule = Get-Module HostHunterNextGeneration
+        $loadedModule = Import-Module $env:HH_TEST_MODULE_PATH -Force -PassThru
         $loadedPackageRoot = Split-Path -Parent $env:HH_TEST_MODULE_PATH
         $loadedProviderRoot = Join-Path $loadedPackageRoot 'lib'
         $loadedMasterKey = [byte[]](1..32)
@@ -174,8 +173,7 @@ WHERE singleton_id=1 AND generation=0;
 
     It 'rejects a stale generation from a competing connection without partial writes' {
         $dataRoot = Join-Path $TestDrive 'stale-generation'
-        Import-Module $env:HH_TEST_MODULE_PATH -Force
-        $loadedModule = Get-Module HostHunterNextGeneration
+        $loadedModule = Import-Module $env:HH_TEST_MODULE_PATH -Force -PassThru
         $loadedPackageRoot = Split-Path -Parent $env:HH_TEST_MODULE_PATH
         $loadedProviderRoot = Join-Path $loadedPackageRoot 'lib'
         $loadedMasterKey = [byte[]](1..32)
