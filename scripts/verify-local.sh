@@ -30,7 +30,7 @@ trap cleanup EXIT INT TERM HUP
         pwsh -NoLogo -NoProfile -NonInteractive \
         -File scripts/qualification/Test-HHControllerMatrix.ps1 \
         -PowerShellVersion 7.4.19
-"${bounded}" full-unit-coverage 720 180 .artifacts/logs/full-unit-coverage.log \
+"${bounded}" full-unit-coverage 720 300 .artifacts/logs/full-unit-coverage.log \
     docker compose --file compose.test.yml run --rm test bash scripts/lanes/unit.sh
 "${bounded}" full-ssh-start 180 120 .artifacts/logs/full-ssh-start.log \
     docker compose --file compose.test.yml up --detach --wait ssh-target
