@@ -6,9 +6,12 @@ BeforeAll {
     . (Join-Path $sourceRoot 'Private/AuditKeyStore.ps1')
 
     function Get-HHTestAnchorArtifact {
-        param([byte]$Offset = 0)
+        param(
+            [byte]$Offset = 0,
+            [ValidateSet(196, 236)][int]$Length = 236
+        )
 
-        $bytes = [byte[]]::new(196)
+        $bytes = [byte[]]::new($Length)
         for ($index = 0; $index -lt $bytes.Length; $index++) {
             $bytes[$index] = [byte](($index + $Offset) % 256)
         }
@@ -77,10 +80,11 @@ BeforeAll {
                     }
                 }
                 'CompareUpdateAnchor' {
-                    $expected = [byte[]]::new(196)
-                    $replacement = [byte[]]::new(196)
-                    [Array]::Copy($InputBytes, 0, $expected, 0, 196)
-                    [Array]::Copy($InputBytes, 196, $replacement, 0, 196)
+                    $expectedLength = $InputBytes.Length - 236
+                    $expected = [byte[]]::new($expectedLength)
+                    $replacement = [byte[]]::new(236)
+                    [Array]::Copy($InputBytes, 0, $expected, 0, $expectedLength)
+                    [Array]::Copy($InputBytes, $expectedLength, $replacement, 0, 236)
                     if ($null -eq $workerState.Artifact -or
                         -not [Security.Cryptography.CryptographicOperations]::FixedTimeEquals(
                             $workerState.Artifact,
@@ -130,7 +134,7 @@ Describe 'macOS persistence-anchor Keychain boundary' -Tag Unit {
         $script:calls.Action | Should -Be @('CreateAnchor', 'ReadAnchor')
         @($script:calls | Select-Object -ExpandProperty Service -Unique) |
             Should -Be @('com.hosthunter.nextgeneration.database-anchor.v1')
-        $script:calls[0].InputBytes.Length | Should -Be 196
+        $script:calls[0].InputBytes.Length | Should -Be 236
         $script:calls[0].TimeoutSeconds | Should -Be 15
         $script:calls[0].Account | Should -Be (Get-HHAuditKeychainAccount -DataRoot $TestDrive)
         ($script:calls[0].WorkerPath, $script:calls[0].PowerShellPath,
@@ -151,7 +155,7 @@ Describe 'macOS persistence-anchor Keychain boundary' -Tag Unit {
         $script:calls[0].Action | Should -BeExactly 'ReadAnchor'
     }
 
-    It 'reads an exact 196-byte artifact' {
+    It 'reads an exact current 236-byte artifact' {
         $script:state.Artifact = Get-HHTestAnchorArtifact -Offset 11
 
         $result = Read-HHMacOSPersistenceAnchorItem `
@@ -178,7 +182,7 @@ Describe 'macOS persistence-anchor Keychain boundary' -Tag Unit {
 
         $script:calls.Count | Should -Be 1
         $script:calls[0].Action | Should -BeExactly 'CompareUpdateAnchor'
-        $script:calls[0].InputBytes.Length | Should -Be 392
+        $script:calls[0].InputBytes.Length | Should -Be 472
         [Convert]::ToHexString($script:state.Artifact) |
             Should -BeExactly ([Convert]::ToHexString($replacement))
     }
@@ -209,7 +213,7 @@ Describe 'macOS persistence-anchor Keychain boundary' -Tag Unit {
                 -Artifact ([byte[]](1, 2, 3)) `
                 -SecurityCommandInvoker $script:security `
                 -KeychainWorkerInvoker $script:worker
-        } | Should -Throw '*exactly 196 bytes*'
+        } | Should -Throw '*exactly 236 bytes*'
         {
             Update-HHMacOSPersistenceAnchorItem `
                 -DataRoot $TestDrive `
@@ -217,7 +221,7 @@ Describe 'macOS persistence-anchor Keychain boundary' -Tag Unit {
                 -NewArtifact $valid `
                 -SecurityCommandInvoker $script:security `
                 -KeychainWorkerInvoker $script:worker
-        } | Should -Throw '*exactly 196 bytes*'
+        } | Should -Throw '*196 or 236 bytes*'
         $script:calls.Count | Should -Be 0
     }
 
@@ -317,8 +321,8 @@ Describe 'macOS persistence-anchor Keychain boundary' -Tag Unit {
     It 'rejects malformed native anchor input at the process boundary' {
         foreach ($case in @(
                 [pscustomobject]@{ Action = 'CreateAnchor'; Bytes = [byte[]](1, 2, 3) },
-                [pscustomobject]@{ Action = 'CompareUpdateAnchor'; Bytes = [byte[]]::new(196) },
-                [pscustomobject]@{ Action = 'ReadAnchor'; Bytes = [byte[]]::new(196) }
+                [pscustomobject]@{ Action = 'CompareUpdateAnchor'; Bytes = [byte[]]::new(236) },
+                [pscustomobject]@{ Action = 'ReadAnchor'; Bytes = [byte[]]::new(236) }
             )) {
             {
                 Invoke-HHMacOSKeychainWorker `
@@ -452,7 +456,31 @@ Describe 'macOS persistence-anchor Keychain boundary' -Tag Unit {
                 -NewArtifact ([byte[]](1, 2, 3)) `
                 -SecurityCommandInvoker $script:security `
                 -KeychainWorkerInvoker $script:worker
-        } | Should -Throw '*exactly 196 bytes*'
+        } | Should -Throw '*replacement must be 236 bytes*'
         $script:calls.Count | Should -Be 0
+    }
+
+    It 'reads a legacy v1 anchor and atomically upgrades it to a current v2 anchor' {
+        $legacy = Get-HHTestAnchorArtifact -Offset 89 -Length 196
+        $current = Get-HHTestAnchorArtifact -Offset 97
+        $script:state.Artifact = [byte[]]$legacy.Clone()
+
+        $read = Read-HHMacOSPersistenceAnchorItem `
+            -DataRoot $TestDrive `
+            -SecurityCommandInvoker $script:security `
+            -KeychainWorkerInvoker $script:worker
+        $read.Artifact.Length | Should -Be 196
+
+        Update-HHMacOSPersistenceAnchorItem `
+            -DataRoot $TestDrive `
+            -ExpectedArtifact $read.Artifact `
+            -NewArtifact $current `
+            -SecurityCommandInvoker $script:security `
+            -KeychainWorkerInvoker $script:worker
+
+        $script:calls[-1].InputBytes.Length | Should -Be 432
+        $script:state.Artifact.Length | Should -Be 236
+        [Convert]::ToHexString($script:state.Artifact) |
+            Should -BeExactly ([Convert]::ToHexString($current))
     }
 }

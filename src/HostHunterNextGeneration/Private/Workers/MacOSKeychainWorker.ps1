@@ -27,7 +27,8 @@ public static class HHMacOSKeychainWorker
     private const int ErrSecDuplicateItem = -25299;
     private const int ErrSecItemNotFound = -25300;
     private const int RequiredKeyLength = 32;
-    private const int RequiredAnchorLength = 196;
+    private const int LegacyAnchorLength = 196;
+    private const int CurrentAnchorLength = 236;
     private const string KeyService = "com.hosthunter.nextgeneration.audit-key.v1";
     private const string AnchorService = "com.hosthunter.nextgeneration.database-anchor.v1";
 
@@ -119,9 +120,9 @@ public static class HHMacOSKeychainWorker
                 case "Delete":
                     return Delete(keychainPath, service, account);
                 case "CreateAnchor":
-                    return Create(keychainPath, service, account, RequiredAnchorLength);
+                    return Create(keychainPath, service, account, CurrentAnchorLength);
                 case "ReadAnchor":
-                    return Read(keychainPath, service, account, RequiredAnchorLength);
+                    return ReadAnchor(keychainPath, service, account);
                 case "CompareUpdateAnchor":
                     return CompareUpdateAnchor(keychainPath, service, account);
                 default:
@@ -272,26 +273,32 @@ public static class HHMacOSKeychainWorker
         string service,
         string account)
     {
-        byte[] input = new byte[RequiredAnchorLength * 2];
-        byte[] expected = new byte[RequiredAnchorLength];
-        byte[] replacement = new byte[RequiredAnchorLength];
+        byte[] input = null;
+        byte[] expected = null;
+        byte[] replacement = null;
         byte[] current = null;
         byte[] readback = null;
         IntPtr item = IntPtr.Zero;
         IntPtr readbackItem = IntPtr.Zero;
         try
         {
-            if (!ReadExactInput(input))
+            input = ReadBoundedInput(CurrentAnchorLength * 2);
+            if (input == null
+                || (input.Length != LegacyAnchorLength + CurrentAnchorLength
+                    && input.Length != CurrentAnchorLength * 2))
             {
                 return InvalidInput;
             }
-            Buffer.BlockCopy(input, 0, expected, 0, RequiredAnchorLength);
+            int expectedLength = input.Length - CurrentAnchorLength;
+            expected = new byte[expectedLength];
+            replacement = new byte[CurrentAnchorLength];
+            Buffer.BlockCopy(input, 0, expected, 0, expectedLength);
             Buffer.BlockCopy(
                 input,
-                RequiredAnchorLength,
+                expectedLength,
                 replacement,
                 0,
-                RequiredAnchorLength);
+                CurrentAnchorLength);
 
             int findStatus = Find(
                 keychainPath,
@@ -303,7 +310,7 @@ public static class HHMacOSKeychainWorker
             {
                 return ItemMissing;
             }
-            if (findStatus != 0 || current == null || current.Length != RequiredAnchorLength)
+            if (findStatus != 0 || current == null || current.Length != expectedLength)
             {
                 return NativeFailure;
             }
@@ -330,7 +337,7 @@ public static class HHMacOSKeychainWorker
                 out readbackItem);
             if (readbackStatus != 0
                 || readback == null
-                || readback.Length != RequiredAnchorLength
+                || readback.Length != CurrentAnchorLength
                 || !CryptographicOperations.FixedTimeEquals(readback, replacement))
             {
                 return VerificationFailed;
@@ -342,9 +349,18 @@ public static class HHMacOSKeychainWorker
         }
         finally
         {
-            CryptographicOperations.ZeroMemory(input);
-            CryptographicOperations.ZeroMemory(expected);
-            CryptographicOperations.ZeroMemory(replacement);
+            if (input != null)
+            {
+                CryptographicOperations.ZeroMemory(input);
+            }
+            if (expected != null)
+            {
+                CryptographicOperations.ZeroMemory(expected);
+            }
+            if (replacement != null)
+            {
+                CryptographicOperations.ZeroMemory(replacement);
+            }
             if (current != null)
             {
                 CryptographicOperations.ZeroMemory(current);
@@ -448,6 +464,42 @@ public static class HHMacOSKeychainWorker
         return status;
     }
 
+    private static int ReadAnchor(
+        string keychainPath,
+        string service,
+        string account)
+    {
+        byte[] secret = null;
+        IntPtr item = IntPtr.Zero;
+        try
+        {
+            int status = Find(keychainPath, service, account, out secret, out item);
+            if (status == ErrSecItemNotFound)
+            {
+                return ItemMissing;
+            }
+            if (status != 0
+                || secret == null
+                || (secret.Length != LegacyAnchorLength
+                    && secret.Length != CurrentAnchorLength))
+            {
+                return NativeFailure;
+            }
+            using Stream output = Console.OpenStandardOutput();
+            output.Write(secret, 0, secret.Length);
+            output.Flush();
+            return Success;
+        }
+        finally
+        {
+            if (secret != null)
+            {
+                CryptographicOperations.ZeroMemory(secret);
+            }
+            Release(item);
+        }
+    }
+
     private static int WithEncodedMetadata(
         string keychainPath,
         string service,
@@ -483,6 +535,33 @@ public static class HHMacOSKeychainWorker
             offset += count;
         }
         return input.ReadByte() == -1;
+    }
+
+    private static byte[] ReadBoundedInput(int maximumLength)
+    {
+        using Stream input = Console.OpenStandardInput();
+        using MemoryStream buffer = new MemoryStream();
+        byte[] chunk = new byte[256];
+        try
+        {
+            while (true)
+            {
+                int count = input.Read(chunk, 0, chunk.Length);
+                if (count == 0)
+                {
+                    return buffer.ToArray();
+                }
+                if (buffer.Length + count > maximumLength)
+                {
+                    return null;
+                }
+                buffer.Write(chunk, 0, count);
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(chunk);
+        }
     }
 
     private static void Release(IntPtr value)

@@ -2,7 +2,8 @@ Set-StrictMode -Version Latest
 
 $script:HHAuditKeychainService = 'com.hosthunter.nextgeneration.audit-key.v1'
 $script:HHPersistenceAnchorKeychainService = 'com.hosthunter.nextgeneration.database-anchor.v1'
-$script:HHPersistenceAnchorArtifactLength = 196
+$script:HHPersistenceAnchorV1ArtifactLength = 196
+$script:HHPersistenceAnchorArtifactLength = 236
 $script:HHMacOSSecurityPath = '/usr/bin/security'
 $script:HHMacOSKeychainWorkerPath = Join-Path $PSScriptRoot 'Workers/MacOSKeychainWorker.ps1'
 $script:HHPowerShellExecutablePath = Join-Path $PSHOME 'pwsh'
@@ -315,7 +316,17 @@ function Invoke-HHMacOSKeychainWorker {
     $expectedInputLength = switch ($Action) {
         'Create' { 32 }
         'CreateAnchor' { $script:HHPersistenceAnchorArtifactLength }
-        'CompareUpdateAnchor' { $script:HHPersistenceAnchorArtifactLength * 2 }
+        'CompareUpdateAnchor' {
+            if ($null -eq $InputKey -or
+                $InputKey.Length -notin @(
+                    ($script:HHPersistenceAnchorV1ArtifactLength +
+                        $script:HHPersistenceAnchorArtifactLength),
+                    ($script:HHPersistenceAnchorArtifactLength * 2)
+                )) {
+                -1
+            }
+            else { $InputKey.Length }
+        }
         default { 0 }
     }
     $anchorActions = @('CreateAnchor', 'ReadAnchor', 'CompareUpdateAnchor')
@@ -329,7 +340,8 @@ function Invoke-HHMacOSKeychainWorker {
         )
     }
     else { $Service -ceq $script:HHAuditKeychainService }
-    if (($expectedInputLength -eq 0 -and $null -ne $InputKey) -or
+    if ($expectedInputLength -lt 0 -or
+        ($expectedInputLength -eq 0 -and $null -ne $InputKey) -or
         ($expectedInputLength -gt 0 -and
             ($null -eq $InputKey -or $InputKey.Length -ne $expectedInputLength)) -or
         [string]::IsNullOrWhiteSpace($Service) -or
@@ -739,7 +751,10 @@ function Read-HHMacOSPersistenceAnchorItem {
         return [pscustomobject]@{ Found = $false; Artifact = $null }
     }
     if ($result.ExitCode -ne 0 -or
-        $result.OutputBytes.Length -ne $script:HHPersistenceAnchorArtifactLength) {
+        $result.OutputBytes.Length -notin @(
+            $script:HHPersistenceAnchorV1ArtifactLength,
+            $script:HHPersistenceAnchorArtifactLength
+        )) {
         [Array]::Clear($result.OutputBytes, 0, $result.OutputBytes.Length)
         throw (Get-HHAuditKeyStoreErrorRecord `
                 -ErrorId 'AuditIntegrityFailed' `
@@ -767,7 +782,7 @@ function New-HHMacOSPersistenceAnchorItem {
     )
 
     if ($Artifact.Length -ne $script:HHPersistenceAnchorArtifactLength) {
-        throw [System.ArgumentException]::new('Persistence anchor must be exactly 196 bytes.', 'Artifact')
+        throw [System.ArgumentException]::new('Persistence anchor must be exactly 236 bytes.', 'Artifact')
     }
     $account = Get-HHAuditKeychainAccount -DataRoot $DataRoot
     $keychainPath = Get-HHMacOSLoginKeychainPath `
@@ -825,21 +840,24 @@ function Update-HHMacOSPersistenceAnchorItem {
         [scriptblock]$KeychainWorkerInvoker
     )
 
-    if ($ExpectedArtifact.Length -ne $script:HHPersistenceAnchorArtifactLength -or
+    if ($ExpectedArtifact.Length -notin @(
+            $script:HHPersistenceAnchorV1ArtifactLength,
+            $script:HHPersistenceAnchorArtifactLength
+        ) -or
         $NewArtifact.Length -ne $script:HHPersistenceAnchorArtifactLength) {
         throw [System.ArgumentException]::new(
-            'Persistence anchors must be exactly 196 bytes.',
+            'The expected persistence anchor must be 196 or 236 bytes and the replacement must be 236 bytes.',
             'ExpectedArtifact'
         )
     }
-    $inputBytes = [byte[]]::new($script:HHPersistenceAnchorArtifactLength * 2)
+    $inputBytes = [byte[]]::new($ExpectedArtifact.Length + $NewArtifact.Length)
     try {
         [Array]::Copy($ExpectedArtifact, 0, $inputBytes, 0, $ExpectedArtifact.Length)
         [Array]::Copy(
             $NewArtifact,
             0,
             $inputBytes,
-            $script:HHPersistenceAnchorArtifactLength,
+            $ExpectedArtifact.Length,
             $NewArtifact.Length
         )
         $account = Get-HHAuditKeychainAccount -DataRoot $DataRoot
