@@ -8,6 +8,7 @@ BeforeAll {
     $script:HHModuleRoot = $sourceRoot
     . (Join-Path $sourceRoot 'Private/AuditKeyStore.ps1')
     . (Join-Path $sourceRoot 'Private/PersistencePath.ps1')
+    . (Join-Path $sourceRoot 'Private/DockerVolumePersistence.ps1')
     . (Join-Path $sourceRoot 'Private/Configuration.ps1')
 }
 
@@ -16,6 +17,9 @@ Describe 'HostHunter runtime configuration' -Tag Unit {
         $env:HH_COVERAGE_CASE = [Guid]::NewGuid().ToString('N')
         $env:HH_DATA_ROOT = $null
         $env:XDG_STATE_HOME = $null
+        $env:HH_SECRET_PROVIDER = $null
+        $env:HH_SECRET_ROOT = $null
+        $env:HH_ANCHOR_ROOT = $null
         $script:HHControllerIsMacOS = $false
         $testAuditRoot = Join-Path $TestDrive 'audit'
         [IO.Directory]::CreateDirectory($testAuditRoot) | Out-Null

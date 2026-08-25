@@ -10,6 +10,10 @@ Describe 'SQLite provider packaging contract' -Tag Unit {
             $script:repoRoot 'eng/durability/HostHunter.Persistence.Durability.csproj'
         $script:durabilityLockPath = Join-Path `
             $script:repoRoot 'eng/durability/packages.lock.json'
+        $script:evtxMetadataPath = Join-Path `
+            $script:repoRoot 'eng/forensics/evtx-dump-assets.json'
+        $script:moduleManifestPath = Join-Path `
+            $script:repoRoot 'src/HostHunterNextGeneration/HostHunterNextGeneration.psd1'
     }
 
     It 'pins the net8 provider graph and four supported RIDs' {
@@ -83,5 +87,33 @@ Describe 'SQLite provider packaging contract' -Tag Unit {
             ConvertFrom-Json -Depth 10
         @($lock.dependencies.PSObject.Properties.Name) | Should -Be @('net8.0')
         @($lock.dependencies.'net8.0'.PSObject.Properties).Count | Should -Be 0
+    }
+
+    It 'pins the exact evtx_dump 0.12.2 assets and distributable licenses' {
+        $metadata = Get-Content -LiteralPath $script:evtxMetadataPath -Raw |
+            ConvertFrom-Json -Depth 10
+        $metadata.name | Should -BeExactly 'evtx_dump'
+        $metadata.version | Should -BeExactly '0.12.2'
+        $metadata.licenseExpression | Should -BeExactly 'MIT OR Apache-2.0'
+        @($metadata.assets.PSObject.Properties.Name | Sort-Object) | Should -Be @(
+            'linux-arm64'
+            'linux-x64'
+            'osx-arm64'
+            'osx-x64'
+        )
+        foreach ($asset in $metadata.assets.PSObject.Properties.Value) {
+            $asset.sha256 | Should -Match '^[a-f0-9]{64}$'
+        }
+        Join-Path $script:repoRoot 'eng/forensics/licenses/LICENSE-APACHE' |
+            Should -Exist
+        Join-Path $script:repoRoot 'eng/forensics/licenses/LICENSE-MIT' |
+            Should -Exist
+    }
+
+    It 'declares the exact 0.3.0-preview1 package identity' {
+        $manifest = Test-ModuleManifest -Path $script:moduleManifestPath -ErrorAction Stop
+        $manifest.Version.ToString() | Should -BeExactly '0.3.0'
+        [string]$manifest.PrivateData.PSData.Prerelease |
+            Should -BeExactly 'preview1'
     }
 }

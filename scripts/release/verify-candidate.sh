@@ -90,7 +90,39 @@ COPYFILE_DISABLE=1 tar -C "$(dirname -- "$package_root")" \
 package_archive_sha256="$(shasum -a 256 "$archive_path" | awk '{print $1}')"
 
 mkdir -p -- "$artifact_root/evidence"
-cp -R -- "$checkout_root/.artifacts/." "$artifact_root/evidence/"
+"$checkout_root/scripts/release/copy-proof-receipts.sh" \
+  "$checkout_root/.artifacts" "$artifact_root/evidence"
+
+runtime_receipt="$artifact_root/evidence/runtime/runtime-verification.json"
+runtime_contract="$artifact_root/evidence/runtime/runtime-container.json"
+security_receipt="$artifact_root/evidence/security/receipt.json"
+for required_receipt in "$runtime_receipt" "$runtime_contract" "$security_receipt"; do
+  [[ -f "$required_receipt" ]] || {
+    printf 'Required compact candidate evidence is missing: %s\n' \
+      "$required_receipt" >&2
+    exit 2
+  }
+done
+jq -e '
+  .status == "passed" and
+  .freshExternalVolumes == 6 and
+  .nativeMigrationAttempted == false and
+  .exactVolumeDestructionVerified == true and
+  .cliJourney.journeys == 23 and
+  .cliJourney.spaceContainingDataRootVerified == true and
+  (.parserEcsJourneys | length) == 2 and
+  ([.parserEcsJourneys[] |
+    select(.status == "passed" and .ecsVersion == "9.5.0" and
+      .plaintextJsonlArtifactCreated == false)] | length) == 2
+' \
+  "$runtime_receipt" >/dev/null
+jq -e '.status == "passed" and .controller.imageId and .parser.imageId' \
+  "$runtime_contract" >/dev/null
+jq -e '.status == "passed" and .scope == "full-product-and-production-runtime"' \
+  "$security_receipt" >/dev/null
+runtime_receipt_sha256="$(shasum -a 256 "$runtime_receipt" | awk '{print $1}')"
+controller_image_id="$(jq -r '.controller.imageId' "$runtime_contract")"
+parser_image_id="$(jq -r '.parser.imageId' "$runtime_contract")"
 
 if [[ -n "$(git -C "$checkout_root" status --porcelain=v1 --untracked-files=all)" ]]; then
   printf 'Candidate proof dirtied tracked or unignored checkout state.\n' >&2
@@ -110,6 +142,9 @@ jq -n \
   --arg packageArchive "$(basename -- "$archive_path")" \
   --arg packageArchiveSha256 "$package_archive_sha256" \
   --arg packageInventorySha256 "$package_inventory_sha256" \
+  --arg runtimeReceiptSha256 "$runtime_receipt_sha256" \
+  --arg controllerImageId "$controller_image_id" \
+  --arg parserImageId "$parser_image_id" \
   --arg composeProject "$project_name" \
   --arg startedAtUtc "$started_at" \
   --arg finishedAtUtc "$finished_at" \
@@ -120,6 +155,11 @@ jq -n \
     packageArchive: $packageArchive,
     packageArchiveSha256: $packageArchiveSha256,
     packageInventorySha256: $packageInventorySha256,
+    runtimeReceiptSha256: $runtimeReceiptSha256,
+    productionRuntimeImageIds: {
+      controller: $controllerImageId,
+      parser: $parserImageId
+    },
     composeProject: $composeProject,
     startedAtUtc: $startedAtUtc,
     finishedAtUtc: $finishedAtUtc,

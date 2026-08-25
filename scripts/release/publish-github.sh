@@ -18,40 +18,61 @@ owner='jimtin'
 repository='HostHunterNextGeneration'
 repository_slug="$owner/$repository"
 candidate_receipt="$repo_root/.artifacts/release/$candidate_sha/receipt.json"
-macos_receipt="$repo_root/.artifacts/qualification/macos/$candidate_sha/receipt.json"
 windows_receipt="$repo_root/.artifacts/qualification/windows/$candidate_sha/receipt.json"
+runtime_verification_receipt="$repo_root/.artifacts/release/$candidate_sha/evidence/runtime/runtime-verification.json"
+runtime_contract_receipt="$repo_root/.artifacts/release/$candidate_sha/evidence/runtime/runtime-container.json"
 publication_root="$repo_root/.artifacts/publication/$candidate_sha"
 
-for receipt in "$candidate_receipt" "$macos_receipt" "$windows_receipt"; do
+for receipt in "$candidate_receipt" "$runtime_verification_receipt" \
+  "$runtime_contract_receipt" "$windows_receipt"; do
   [[ -f "$receipt" ]] || {
     printf 'Required release receipt is missing: %s\n' "$receipt" >&2
     exit 2
   }
-  jq -e --arg sha "$candidate_sha" \
-    '.status == "passed" and .candidateSha == $sha' "$receipt" >/dev/null || {
-    printf 'Required release receipt is invalid: %s\n' "$receipt" >&2
-    exit 2
-  }
 done
+jq -e --arg sha "$candidate_sha" \
+  '.status == "passed" and .candidateSha == $sha' \
+  "$candidate_receipt" >/dev/null
+jq -e --arg sha "$candidate_sha" \
+  '.status == "passed" and .candidateSha == $sha' \
+  "$windows_receipt" >/dev/null
 
 package_sha="$(jq -r '.packageArchiveSha256' "$candidate_receipt")"
-for receipt in "$macos_receipt" "$windows_receipt"; do
-  jq -e --arg packageSha "$package_sha" \
-    '.packageArchiveSha256 == $packageSha' "$receipt" >/dev/null || {
-    printf 'Native qualification did not use the exact candidate package.\n' >&2
-    exit 2
-  }
-done
-
-jq -e '
-  .platform == "macOS" and .rollbackRejected == true and
-  .spaceContainingDataRootVerified == true and .keychainItemCount == 2 and
-  .cleanupComplete == true and .redacted == true
-' "$macos_receipt" >/dev/null || {
-  printf 'The macOS qualification receipt is incomplete.\n' >&2
+runtime_receipt_sha256="$(shasum -a 256 "$runtime_verification_receipt" | awk '{print $1}')"
+jq -e --arg runtimeSha "$runtime_receipt_sha256" \
+  '.runtimeReceiptSha256 == $runtimeSha' "$candidate_receipt" >/dev/null || {
+  printf 'The production runtime receipt is not bound to the candidate.\n' >&2
+  exit 2
+}
+controller_image_id="$(jq -r '.controller.imageId' "$runtime_contract_receipt")"
+jq -e --arg imageId "$controller_image_id" '
+  .status == "passed" and .controller.imageId == $imageId and
+  .controller.dockerSocketMounted == false and
+  .parser.networkMode == "none" and
+  .parser.secretDatabaseOrSshMountCount == 0
+' "$runtime_contract_receipt" >/dev/null || {
+  printf 'The production runtime receipt is incomplete.\n' >&2
   exit 2
 }
 jq -e '
+  .status == "passed" and
+  .freshExternalVolumes == 6 and
+  .nativeMigrationAttempted == false and
+  .exactVolumeDestructionVerified == true and
+  .cliJourney.journeys == 23 and
+  .cliJourney.spaceContainingDataRootVerified == true
+' "$runtime_verification_receipt" >/dev/null || {
+  printf 'The production runtime journey receipt is incomplete.\n' >&2
+  exit 2
+}
+jq -e --arg packageSha "$package_sha" --arg imageId "$controller_image_id" '
+  .packageArchiveSha256 == $packageSha and
+  .controllerMode == "LinuxDockerVolume" and
+  .controllerImageId == $imageId and
+  .controllerVolumeCount == 6 and
+  .controllerVolumeCleanupComplete == true and
+  .controllerVolumesDestroyed == 6 and
+  .stablePackagedModuleVerified == true and
   .targetPlatform == "Windows" and
   .directRuntime == "PowerShell7" and .directEdition == "Core" and
   .directExecutionMode == "Direct" and
@@ -59,7 +80,13 @@ jq -e '
   .compatibilityEdition == "Desktop" and
   .compatibilityExecutionMode == "WindowsPowerShellCompatibility" and
   .mixedTargetCount == 2 and .keyTransitionSucceeded == true and
-  .spaceContainingDataRootVerified == true and
+  .restartPersistenceVerified == true and
+  .escalationPreferenceVerified == true and
+  .processAuditPowerShell7Verified == true and
+  .processAuditWindowsPowerShell51Verified == true and
+  .commandLineEnabledEventVerified == true and
+  .commandLineDisabledEventVerified == true and
+  .processAuditPolicyRestored == true and
   .runScopedSshAgentVerified == true and
   .runScopedSshAgentIdentityRemoved == true and
   .runScopedSshAgentStopped == true and
@@ -92,27 +119,24 @@ command -v gh >/dev/null 2>&1 || {
 gh auth status >/dev/null
 mkdir -p -- "$publication_root/raw"
 
-if gh api "repos/$repository_slug" >/dev/null 2>&1; then
-  printf 'Refusing to reuse an existing GitHub repository: %s\n' \
-    "$repository_slug" >&2
-  exit 2
-fi
-
-gh repo create "$repository_slug" --private --disable-wiki
-gh api --method PUT "repos/$repository_slug/actions/permissions" \
-  --input - <<< '{"enabled":false}' >/dev/null
+gh api "repos/$repository_slug" > "$publication_root/raw/repository-before-push.json"
 gh api "repos/$repository_slug/actions/permissions" \
   > "$publication_root/raw/actions-before-push.json"
+jq -e --arg owner "$owner" '
+  .visibility == "public" and .owner.login == $owner and
+  .default_branch == "main"
+' "$publication_root/raw/repository-before-push.json" >/dev/null
 jq -e '.enabled == false' \
   "$publication_root/raw/actions-before-push.json" >/dev/null
 
-remote_url="https://github.com/$repository_slug.git"
-git -C "$repo_root" push "$remote_url" "$candidate_sha:refs/heads/main"
-gh api --method PATCH "repos/$repository_slug" \
-  -f default_branch=main >/dev/null
+remote_url="$(git -C "$repo_root" remote get-url origin)"
+[[ "$remote_url" == "https://github.com/$repository_slug.git" || \
+  "$remote_url" == "git@github.com:$repository_slug.git" ]] || {
+  printf 'Origin is not the approved repository: %s\n' "$remote_url" >&2
+  exit 2
+}
+git -C "$repo_root" push origin "$candidate_sha:refs/heads/main"
 
-gh api --method PATCH "repos/$repository_slug" \
-  -f visibility=public >/dev/null
 gh api --method PUT "repos/$repository_slug/branches/main/protection" \
   --input - <<'PROTECTION' >/dev/null
 {
@@ -195,6 +219,8 @@ jq -n \
     status: $status,
     candidateSha: $candidateSha,
     packageArchiveSha256: $packageArchiveSha256,
+    canonicalRuntime: "DockerVolume",
+    liveWindowsControllerMode: "LinuxDockerVolume",
     repository: $repository,
     visibility: "public",
     actionsEnabled: false,

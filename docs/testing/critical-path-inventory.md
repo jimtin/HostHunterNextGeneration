@@ -13,6 +13,28 @@ requires OpenSSH 8.4+ environment expansion. Exact-candidate reproduction,
 native Windows, and post-publication
 GitHub verification remain pending.
 
+## Confirmed Forensics Part 1 extension
+
+The ECS 9.5.0 Process Start critical paths and their implementation status are
+authoritative in
+[`forensics-part1-action-matrix.md`](forensics-part1-action-matrix.md). They
+cover verified EVTX admission, pinned bounded parsing, Sysmon 1 and Security
+4688 mapping, deterministic identity, protected command lines, a separate
+authenticated `forensics.db`, encrypted exact-byte outbox delivery, recovery,
+and exact-package inventory. None of those rows is current release evidence
+until its listed focused and package integration proof passes.
+
+## Docker runtime and compact-proof extension
+
+| ID | Critical path | Entry point | Required failure evidence | Focused proof | Status |
+| --- | --- | --- | --- | --- | --- |
+| CP-RUN-01 | Start the production controller from a built package | runtime launcher/Compose | image drift, root user, writable root, extra capabilities, Docker socket, unsafe mount, or missing external volume blocks startup | image contract and clean-volume lifecycle integration | implementation in progress |
+| CP-RUN-02 | Persist without an OS credential manager | first state mutation in Docker | missing/swapped/wrong-mode/provider-mismatched key or anchor fails closed; no silent key regeneration for existing data | portable-provider units and multiprocess restart/CAS integration | implementation in progress |
+| CP-RUN-03 | Isolate untrusted EVTX parsing | internal ECS Process Start journey | parser has network, secret/DB/SSH mount, writable evidence, unbounded resource use, or emits plaintext JSONL artifact | parser-sidecar contract plus real-EVTX package journey | implementation in progress |
+| CP-RUN-04 | Exercise every operator action | eleven exported cmdlets | any untested parameter set, mutation, read, WhatIf, failure, restart, retry, or uncertain state blocks release | production-image package E2E and exact Windows qualification | implementation in progress |
+| CP-EVD-01 | Retain compact deterministic proof | every test/release lane | raw per-hit logs, copied caches, duplicated reports, or a proof bundle over 20 MiB fails the lane | compact collector integrity and artifact-budget tests | implementation in progress |
+| CP-DEL-01 | Deliver one immutable candidate | standalone laptop gate | dirty/changed SHA, receipt/package/image mismatch, missing threat model or secret scan, or remote SHA mismatch blocks push | exact-SHA container gate, native/live receipts, post-push readback | pending |
+
 ## Confirmed SQLite critical paths
 
 | ID | Critical path | Entry point | Required failure evidence | Focused proof | Status |
@@ -56,7 +78,7 @@ GitHub verification remain pending.
 | Detect evidence tampering | audit verification | row edit/delete/reorder, wrong key, DB rollback, target redirection, artifact mismatch | SQLite corruption matrix and CLI refusal before dispatch/query | verified in container; native Keychain rollback pending |
 | Convert password SSH to key | `Enable-HHSshKeyAuthentication` | generation/read/install/proof failures, uncertain dispatch, cumulative cap, cleanup, idempotence | disposable fixture, adversarial bootstrap seams, and authorized live Windows exact-candidate transition | fixture, uncertainty, and cumulative cap verified; live transition pending |
 | Use and clean a passphrase-protected qualification key | exact Windows package qualification | interactive key creation/proof, exact agent identity, agent stop, password recovery, or remote rollback fails | focused qualification contract plus redacted native receipt fields | focused contract verified; exact live Windows proof pending |
-| Prove exact native Keychain cleanup | macOS and Windows qualification completion | wrong service, item-not-found false success, partial lifecycle, or missing absence check | focused qualification tests plus exact-package native receipts | focused contract verified; exact native receipts pending |
+| Preserve optional native Keychain cleanup | optional macOS qualification completion | wrong service, item-not-found false success, partial lifecycle, or missing absence check | focused qualification tests plus optional exact-package native receipt | focused contract verified; not required by canonical Docker release |
 | Preserve unrelated keys on rollback | bootstrap internals | exact marker conflict, failed key-only proof, rollback failure | real fixture and remote-script unit matrix | verified |
 | Reject endpoint identity change | target and command gateways | changed fingerprint or managed host record | trust unit matrix and CLI changed-identity refusal | verified |
 | Reject WinRM in v1 | target and command cmdlets | no session creation, no target mutation, clear deferred error | fail-closed unit case plus fresh-process negative CLI | verified negative; positive WinRM deferred |

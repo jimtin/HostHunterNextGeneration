@@ -1,0 +1,81 @@
+#!/bin/bash
+
+set -Eeuo pipefail
+
+printf '%s\n' "$*" >>"$HH_FAKE_DOCKER_LOG"
+case "${1:-}" in
+  info | compose)
+    exit 0
+    ;;
+  ps)
+    if [[ -n "${HH_FAKE_ATTACHED:-}" ]]; then
+      printf '%s\n' "$HH_FAKE_ATTACHED"
+    fi
+    exit 0
+    ;;
+  volume)
+    action="${2:-}"
+    shift 2
+    case "$action" in
+      inspect)
+        format=''
+        if [[ "${1:-}" == '--format' ]]; then
+          format="$2"
+          shift 2
+        fi
+        name="$1"
+        state_path="$HH_FAKE_DOCKER_STATE/$name"
+        [[ -f "$state_path" ]] || exit 1
+        IFS='|' read -r project role <"$state_path"
+        case "$format" in
+          *com.hosthunter.runtime.project*) printf '%s\n' "$project" ;;
+          *com.hosthunter.runtime.role*) printf '%s\n' "$role" ;;
+          *Driver*) printf '%s\n' 'local' ;;
+        esac
+        ;;
+      create)
+        project=''
+        role=''
+        name=''
+        while [[ "$#" -gt 0 ]]; do
+          case "$1" in
+            --driver)
+              shift 2
+              ;;
+            --label)
+              case "$2" in
+                com.hosthunter.runtime.project=*) project="${2#*=}" ;;
+                com.hosthunter.runtime.role=*) role="${2#*=}" ;;
+              esac
+              shift 2
+              ;;
+            *)
+              name="$1"
+              shift
+              ;;
+          esac
+        done
+        [[ -n "$name" && -n "$project" && -n "$role" ]]
+        printf '%s|%s\n' "$project" "$role" >"$HH_FAKE_DOCKER_STATE/$name"
+        printf '%s\n' "$name"
+        ;;
+      rm)
+        status=0
+        for name in "$@"; do
+          if [[ "$name" == "${HH_FAKE_FAIL_REMOVE_NAME:-}" ]]; then
+            status=1
+          else
+            rm -f -- "$HH_FAKE_DOCKER_STATE/$name"
+          fi
+        done
+        exit "$status"
+        ;;
+      *)
+        exit 2
+        ;;
+    esac
+    ;;
+  *)
+    exit 2
+    ;;
+esac

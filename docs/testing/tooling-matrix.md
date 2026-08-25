@@ -2,8 +2,8 @@
 
 ## Status
 
-**ADOPTED SQLITE TOOLCHAIN; EXACT-CANDIDATE AND NATIVE EXECUTION PENDING
-2026-08-24**
+**ADOPTED DOCKER TOOLCHAIN; EXACT-CANDIDATE AND LIVE WINDOWS EXECUTION PENDING
+2026-08-26**
 
 All pre-migration foundation rows are active and container-proven. The confirmed
 SQLite amendment rows are implemented unless explicitly marked pending below.
@@ -13,6 +13,8 @@ evidence require a separate live Windows exact-candidate lane.
 
 | Tool | Purpose | Layer | Container/service | Exact local command | Version checked 2026-08-23 | Update policy | Status | Exception/equivalent |
 |---|---|---|---|---|---|---|---|---|
+| Production Docker runtime | Canonical execution of all eleven public cmdlets and private ECS Process Start pipeline | Runtime/E2E/release | Non-root controller plus networkless parser | `./scripts/runtime/verify.sh` | repo-owned, checked 2026-08-26 | Every release | focused contract green; exact-image execution pending | Six external labelled volumes; no Docker socket or host credential-store requirement |
+| Docker-volume persistence provider | Unattended core/Forensics keys and monotonic anchors | Persistence/runtime | Controller only | exercised by `./scripts/runtime/verify.sh` | repo-owned, checked 2026-08-26 | With persistence changes | focused unit/integration green | Docker administrator is trusted; coordinated whole-set rollback is an accepted residual |
 | PowerShell | Test/runtime shell | All PowerShell lanes | Checksum-built test image | `docker compose -f compose.test.yml run --rm test pwsh -NoProfile ...` | 7.6.5 | Monthly; full gate | active | Official archives verified by SHA-256 |
 | PowerShell compatibility floors | Minimum supported and SSH-security controller proof | Package/integration | Checksum-built 7.4.19 and 7.6.5 images plus floor units | `./scripts/qualification/Test-HHControllerMatrix.ps1 -PowerShellVersion 7.4.19`; canonical spaced-root SSH integration runs on 7.4.19 and 7.6.5 | 7.4.19, 7.5.10, 7.6.5, checked 2026-08-25 | Monthly; full gate | active | 7.5.10 floor is a deterministic version-contract case; older patch levels in all three servicing lines are rejected before SSH |
 | OpenSSH client | Native SSH transport and safe managed known-hosts expansion | Integration/native qualification | Controller host plus real SSH fixture | spaced-data-root SSH integration and exact Windows controller qualification | 8.4 minimum capability, checked 2026-08-25 | With controller/runtime changes | active | Functional environment-expansion preflight; no raw space-containing path in SSH options |
@@ -24,8 +26,8 @@ evidence require a separate live Windows exact-candidate lane.
 | SQLite fault/concurrency harness | WAL, operation/writer locks, busy/full/capacity, crash, anchor and artifact boundaries | Integration | Isolated Compose/fresh-process/bounded-volume harness | `./scripts/lanes/sqlite-integration.sh` | repo-owned | With persistence changes | active | Nine-scenario redacted receipt; no remote retry |
 | Persistence changed-scope coverage | 95% target for repo-owned persistence logic plus 90% repository hard gate | Unit coverage | Custom test image | `./scripts/lanes/unit.sh` | repo-owned | Every persistence slice | active | Focused receipts accompany the authoritative product gate |
 | Release-package scanner | Exact package inventory, SBOM, hashes, licences and vulnerabilities | Security/build | Immutable scanner images | `./scripts/security/scan-release-package.sh <package>` | repo-owned | Every candidate | active | Scans ignored `.artifacts` package explicitly |
-| macOS Keychain database-head proof | Native atomic update/anti-rollback qualification | Native security/release | Host-orchestrated fresh workers on current Mac | `./scripts/qualification/macos-anchor.sh <sha> <package>` | repo-owned | Every exact release candidate | implemented; candidate execution pending | Containers use injected anchor; native proof is separate |
-| Windows controller qualification | Provider/RID/ACL/reparse, PS7/5.1/mixed, protected-key transition, run-scoped agent, password recovery, and exact cleanup | Native/live release | Available Windows x64 laptop | `pwsh -NoLogo -NoProfile -NonInteractive -File scripts/qualification/Test-HHWindowsController.ps1 -CandidateSha <sha> -PackageArchivePath <package> -SshHost <host> -UserName <user> -HostKeyFingerprint <fingerprint>` | repo-owned | Every exact release candidate | focused contract green; candidate execution pending | Same package SHA-256 as exact-SHA gate; endpoint password and key passphrase remain interactive and never enter arguments, environment, files, logs, or receipts |
+| macOS Keychain database-head proof | Optional native atomic update/anti-rollback compatibility qualification | Native compatibility | Host-orchestrated fresh workers on macOS | `./scripts/qualification/macos-anchor.sh <sha> <package>` | repo-owned | When the optional native provider changes | implemented | Not required for canonical Docker releases |
+| Windows controller qualification | Provider/RID/ACL/reparse, PS7/5.1/mixed, process audit, protected-key transition, password recovery, and exact cleanup | Native/live release | Exact Docker controller image to available Windows x64 target | `./scripts/qualification/windows-docker.sh <sha> <package> <host> <user> <fingerprint>` | repo-owned | Every exact release candidate | focused contract green; candidate execution pending | Same package and controller-image hashes as exact-SHA gate; endpoint password and key passphrase remain interactive and never enter arguments, environment, files, logs, or receipts |
 | Clean-checkout candidate runner | Full exact-SHA package/container proof | Release | Temporary clean worktree plus Compose | `./scripts/release/verify-candidate.sh <sha>` | repo-owned | Every candidate | implemented; candidate execution pending | Emits `.artifacts/release/<sha>/`; any edit invalidates receipt |
 | Pester | Unit, integration, JUnit, command hits | Unit/integration | Custom test image | `scripts/lanes/unit.sh` | 6.1.0 | Monthly; full gate | active | AST/runtime gate supplies independent metrics |
 | PSScriptAnalyzer | PowerShell static analysis | Static | Custom test image | `scripts/lanes/static.sh` | 1.25.0 | Monthly; full gate | active | |
@@ -39,7 +41,7 @@ evidence require a separate live Windows exact-candidate lane.
 | gitleaks | Repo-only secret scan | Security | Immutable scanner image | `./scripts/security/scan-secrets.sh` | 8.30.1 | Monthly; full gate | active | Wrapper resolves and read-only mounts only repo root |
 | OSV-Scanner | Dependency/SBOM vulnerability scan | Security | Immutable scanner image | `./scripts/security/scan-dependencies.sh` | 2.5.1 | Monthly; full gate | active | PowerShell module pin audit supplements ecosystem gaps |
 | Trivy filesystem | Vulnerability/configuration scan | Security | `ghcr.io/aquasecurity/trivy` | `./scripts/security/scan-filesystem.sh` | 0.74.0 | Monthly; full gate | active | Post-incident immutable digest |
-| Trivy image | Built-image scan | Security/build | `ghcr.io/aquasecurity/trivy` | `./scripts/security/scan-images.sh` | 0.74.0 | Monthly; full gate | active | Scans test and SSH fixture images |
+| Trivy image | Built-image scan | Security/build | `ghcr.io/aquasecurity/trivy` | `./scripts/security/scan-images.sh` | 0.74.0 | Monthly; full gate | active | Scans test, SSH fixture, production controller, and parser images |
 | PowerShell module pin audit | Exact module inventory and drift | Security | Custom test image | `pwsh -File scripts/security/Test-ModulePins.ps1` | repo-owned | On dependency change | active | No stack-native PowerShell audit provides complete advisory coverage |
 | Docker Compose | Local service orchestration | Integration/E2E | Host orchestrates; work runs in services | `./scripts/compose-run.sh ...` | Compose v2 contract | Host maintenance; design-compatible | active | Host orchestration only, never canonical test execution |
 | Test-ModuleManifest | Manifest/build validation | Build | Custom test image | `scripts/lanes/build.sh` | PowerShell 7.6.5 | With PowerShell pin | active | Verifies eleven exports, RID assets, versions, schema CRUD, and isolated package import |
@@ -48,6 +50,7 @@ evidence require a separate live Windows exact-candidate lane.
 ## Authoritative commands
 
 - Full local proof: `./scripts/verify-local.sh`
+- Production runtime journey: `./scripts/runtime/verify.sh`
 - Fast pre-commit: `./scripts/precommit.sh`
 - Slim gate-owned pre-push: `./scripts/prepush.sh`
 - Hook install: `./scripts/hooks-install.sh`
@@ -58,10 +61,11 @@ evidence require a separate live Windows exact-candidate lane.
 - Exact package scan: `./scripts/security/scan-release-package.sh <package>`
 - Exact clean-checkout candidate: `./scripts/release/verify-candidate.sh <sha>`
 
-All commands in this section are implemented. Current working-tree evidence is
-647/647 product tests, 23/23 package-backed CLI journeys, nine SQLite fault
-scenarios, and all four coverage metrics above 90%. Exact-commit and positive
-live Windows 5.1 execution remain release qualifications, not container claims.
+All commands in this section are implemented. Current focused Docker runtime
+evidence includes 9/9 contract and 7/7 lifecycle cases; current product evidence
+includes 23/23 package-backed CLI journeys, nine SQLite fault scenarios, and all
+four coverage metrics above 90%. Exact-commit production-image execution and
+positive live Windows 5.1 remain release qualifications, not focused-test claims.
 
 ## Runtime qualification routing
 

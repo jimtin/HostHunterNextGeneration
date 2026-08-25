@@ -8,10 +8,10 @@
 - The highest residual confidentiality risk is deliberate retention of complete
   command text in the local ledger and complete remote streams in decryptable
   local evidence. Anyone with the controller user's authority can access them.
-- macOS now keeps the 32-byte audit key in the login Keychain through a bounded
-  native Security-framework worker. The raw key is never placed in arguments,
-  environment variables, or a plaintext key file, but a local administrator and
-  candidate-controlled host code remain outside the integrity guarantee.
+- The canonical runtime is now a hardened Docker controller plus a networkless
+  parser sidecar. Core and Forensics keys and anchors live in separate,
+  owner-private Docker volumes; native macOS Keychain remains an optional
+  compatibility provider rather than a release dependency.
 - SSH host identity and requested PowerShell runtime are both pinned. Windows
   PowerShell 5.1 is reached only through a validated PowerShell 7 SSH runspace;
   runtime, transport, trust, authentication, and command retries never fall back.
@@ -20,10 +20,9 @@
   environment reference rather than placing the path itself in an SSH option.
   Vulnerable PowerShell patch levels and OpenSSH clients without the required
   expansion capability are refused before dispatch.
-- The most valuable remaining mitigation is a candidate-independent laptop-gate
-  controller that owns scanner policy and never executes an external contribution
-  before manual review. The first-release owner-only policy supplies the current
-  procedural control.
+- The most valuable continuing mitigation is strict Docker-administrator
+  control: anyone with Docker-daemon authority can inspect mounted key material,
+  replace images, or coordinate rollback of all persistence volumes.
 - SQLite is now the sole structured persistence boundary. Identity-bound
   encrypted audit fields, streaming `.hhout` v2 output, authenticated target
   generations, per-operation dispatch evidence, crash recovery, capacity
@@ -33,9 +32,10 @@
 
 ## 2. Scope and Method
 
-In scope: `src/HostHunterNextGeneration/`, repository hooks and local gate
-wrappers, Docker Compose topology, the disposable SSH fixture, coverage and
-scanner tooling, local audit artifacts, the macOS Keychain boundary, the
+In scope: `src/HostHunterNextGeneration/`, the production Dockerfile and runtime
+Compose topology, the controller and parser sidecar, the portable key/anchor
+provider, repository hooks and local gate wrappers, the disposable SSH fixture,
+coverage and scanner tooling, local audit artifacts, the optional macOS Keychain boundary, the
 PowerShell 7 to Windows PowerShell 5.1 compatibility boundary, and the planned
 public GitHub repository permissions.
 
@@ -43,10 +43,12 @@ Out of scope: a central audit collector, guaranteed physical erasure on SSDs,
 Windows DPAPI key storage, a production service deployment, and positive WinRM
 operation. WinRM is deferred until a separate controlled lab exists.
 
-The product is a local PowerShell 7 module. It connects to authenticated SSH
-PowerShell endpoints; there is no listening web service. Canonical proof runs in
-local containers and GitHub Actions are prohibited. Positive Windows PowerShell
-5.1 and password-to-key qualification are explicit live, exact-candidate lanes.
+The product is a PowerShell 7 module packaged into a non-root Docker controller.
+It connects to authenticated SSH PowerShell endpoints. A private Unix-domain
+socket connects the controller to a networkless EVTX parser sidecar; there is no
+public listening web service. Canonical proof runs in local containers and
+GitHub Actions are prohibited. Positive Windows PowerShell 5.1 and
+password-to-key qualification are explicit live, exact-image lanes.
 
 The confirmed SQLite amendment in
 `docs/planning/sqlite-persistence-plan.md` is implemented. Legacy JSON/JSONL
@@ -64,9 +66,12 @@ evidence; `unknown` means the final external state has not yet been verified.
 | Component | Role | Entrypoints | Evidence | Confidence |
 |---|---|---|---|---|
 | PowerShell module | Target CRUD, runtime validation, command dispatch, SSH-key transition, audit retrieval, escalation preference, and Windows process-audit policy | Eleven exported cmdlets | `src/HostHunterNextGeneration/` | confirmed |
+| Docker controller | Canonical operator runtime for all eleven cmdlets with no host credential-store requirement | `scripts/runtime/*.sh`, `/usr/local/bin/hosthunter-controller` | `Dockerfile.runtime`, `compose.runtime.yml`, `scripts/runtime/` | confirmed implementation; exact-image proof pending |
+| Parser sidecar | Runs pinned `evtx_dump` against evidence from a read-only volume and returns provisional records over a private socket | `hosthunter.parser.v1` Unix-socket request | `Dockerfile.runtime`, `scripts/runtime/parser-sidecar.py` | confirmed implementation; exact-image proof pending |
+| Docker-volume persistence provider | Separate core/Forensics keys and anchors with domain/data-root binding and interprocess CAS | Explicit `HH_SECRET_PROVIDER=DockerVolume` | `Private/DockerVolumePersistence.ps1`, runtime Compose | confirmed focused proof |
 | Target repository | Secret-free profiles, authenticated complete-set state, generation/revision CAS | Target cmdlets | `Private/TargetModel.ps1`, `Private/TargetRepository.ps1` | confirmed |
 | Audit subsystem | Encrypted intent/manifests, per-operation arming, HMAC chain, streaming artifacts, and crash recovery | Remote-operation and audit-query cmdlets | `Private/AuditRepository.ps1`, `Private/AuditOrchestration.ps1`, `Private/AuditRecovery.ps1` | confirmed |
-| Audit-key providers | macOS login Keychain; restrictive file fallback on other controllers | Audit startup | `Private/AuditKeyStore.ps1`, `Private/Workers/MacOSKeychainWorker.ps1`, `Private/Configuration.ps1` | confirmed |
+| Audit-key providers | Canonical Docker-volume provider; optional macOS login Keychain; restrictive compatibility fallback | Audit startup | `Private/DockerVolumePersistence.ps1`, `Private/AuditKeyStore.ps1`, `Private/Workers/MacOSKeychainWorker.ps1`, `Private/Configuration.ps1` | confirmed |
 | SSH transport | Strict known-host trust, direct PowerShell 7, explicit 5.1 bridge, six-stream capture, per-target output cap, fan-out | SSH probe and command operations | `Private/SshTrust.ps1`, `Private/SshTransport.ps1` | confirmed |
 | SSH key bootstrap | Exact Ed25519 marker install, separate key-only proof, exact rollback | `Enable-HHSshKeyAuthentication` | `Private/SshKeyBootstrap.ps1` | confirmed |
 | WinRM guard | Rejects unqualified positive operation | WinRM-shaped input | `Private/WinRmTransport.ps1`, `Public/Set-HHTarget.ps1` | confirmed |
@@ -104,6 +109,10 @@ evidence; `unknown` means the final external state has not yet been verified.
 |---|---|---|---|---|
 | Reviewed checkout to laptop gate | Repository code to host user and Docker authority | Owner-only mutation policy, manual review, hooks, bounded runners, detached exact-SHA gate | Candidate scripts and Keychain worker still execute with host-user authority after review | `AGENTS.md`, `.githooks/`, `scripts/release/` |
 | Host to Docker daemon | Wrappers to local daemon | Fixed Compose project; validation containers receive no Docker socket | Host wrappers can issue Docker commands | `compose.test.yml`, verification wrappers |
+| Operator to production controller | Host shell to non-root container | No Docker socket; read-only root; all capabilities dropped; no-new-privileges; bounded memory, CPU, PIDs and tmpfs; logging driver disabled | Docker administrator can replace the image, inspect mounts, or enter the namespace | `Dockerfile.runtime`, `compose.runtime.yml`, `scripts/runtime/status.sh` |
+| Controller to persistence volumes | PowerShell runtime to data, key and anchor volumes | Distinct labelled volumes; 0700 directories; 0600 regular non-link files; provider/domain/data-root binding; expected-value anchor CAS | Same Docker administrator can snapshot or roll back all volumes together | `Private/DockerVolumePersistence.ps1`, `scripts/runtime/init.sh` |
+| Controller to parser sidecar | Trusted mapper to native parser over private Unix socket | Networkless parser; no secret, DB, SSH, or Docker mounts; read-only evidence; no-follow handle binding; byte/time/resource bounds; records provisional until terminal receipt | Malicious native parser data still consumes bounded local resources; Docker administrator can replace either image | `scripts/runtime/parser-sidecar.py`, `Invoke-HHParserSocketClient.ps1`, `compose.runtime.yml` |
+| Runtime lifecycle to external volumes | Init/start/destroy scripts to six persistent volumes | Exact project/role labels, complete-set checks, attachment refusal, explicit project confirmation, survivor reporting | Docker volume deletion is non-atomic; a host crash can leave a partial set that must be refused and reconciled | `scripts/runtime/lib.sh`, `destroy.sh`, `RuntimeLifecycle.Tests.ps1` |
 | Registry and gallery to build | External packages/images to proof image | Exact versions, immutable digests, archive checksums | A trusted maintainer can still approve a compromised new pin | both Dockerfiles, scanner wrappers |
 | Test client to SSH fixture | Candidate tests to disposable endpoint | Internal network, strict host key, no host bind, teardown | Test code can read the fixture credential by design | `compose.test.yml`, fixture scripts |
 | Controller to SSH endpoint | Local module to remote PowerShell 7 runspace | Explicit SHA-256 fingerprint, managed `known_hosts`, unique per-session environment binding, global-hosts/update fallback disabled, native authentication, one attempt | Native PowerShell can omit precise OpenSSH failure details; inherited environment remains controller-process state | SSH transport and spaced-root integration tests |
@@ -134,7 +143,8 @@ therefore not applicable to this release.
 | Endpoint private keys and passphrases | Per-user HostHunter key root, SSH agent, or explicitly selected key | Compromise permits remote administration |
 | Complete command text | Encrypted fields in the owner-private SQLite database | May contain operational secrets and sensitive intent |
 | Complete remote streams | Encrypted `.hhout` artifacts | May contain credentials, customer data, or forensic evidence |
-| Audit master key | macOS login Keychain or non-macOS mode-0600 file fallback; briefly in process memory | Joint key/evidence compromise defeats confidentiality and local integrity claims |
+| Core and Forensics master keys | Separate Docker secret-volume files, optional macOS Keychain items, and briefly process memory | Joint key/evidence compromise defeats confidentiality and local integrity claims |
+| External persistence set | Six Docker volumes containing data, secrets, anchors, SSH material, evidence and parser socket state | Partial deletion or coordinated rollback affects availability, confidentiality and audit integrity |
 | Repository administration | GitHub owner account, repository settings, installed apps | Unauthorized write could seed code for later trusted local execution |
 | Proof integrity | Exact candidate SHA, scanner pins/config, reports | Determines whether a candidate is safe to publish |
 
@@ -148,6 +158,8 @@ Capabilities:
 - A local process running as the controller user can read plaintext ledger
   metadata and request access to that user's Keychain items.
 - A local administrator can inspect process memory and modify user-owned files.
+- A user with Docker-daemon authority can inspect container memory and mounts,
+  replace runtime images, and snapshot or roll back all external volumes.
 
 Non-capabilities:
 
@@ -157,6 +169,8 @@ Non-capabilities:
   checked-in internal-network topology.
 - Does not receive the Docker socket or unrelated host-directory mounts inside
   validation containers.
+- A compromised parser has no network, secret, database, SSH, or Docker-socket
+  mount under the checked-in runtime topology.
 - Cannot make a 5.1 request silently execute in PowerShell 7, or bypass the
   pinned SSH fingerprint merely by controlling command output.
 - Is not assumed to have already compromised the OS kernel, Docker daemon,
@@ -183,6 +197,10 @@ Non-capabilities:
 | AP-25 | Overwrite concurrent policy ownership | query → GPO/admin change → stale mutation or compensation | integrity | medium | high | high | requery, compare-before-compensate, conflict/reconciliation result, no retry | compensation tests; native proof pending |
 | AP-26 | Redirect privileged execution through preference tampering | edit saved method → future `-Escalate` selects unintended method | authorization | low | high | high | closed enum, authenticated mutation chain, monotonic anchor, explicit-call precedence | schema-v2 and configuration tests |
 | AP-27 | Change SSH trust or arguments through a special local path or target identity | space/quote/control/option-like data → PowerShell SSH argument flattening or OpenSSH multi-value parsing → alternate option, host, or trust source | execution/integrity | medium | high | high | patched PowerShell floors; canonical file validation; unique non-recursive environment reference; `GlobalKnownHostsFile=none`; `UpdateHostKeys=no`; strict pin; host/user syntax rejection; environment restored in `finally` | focused transport tests, real spaced-root fixture, exact native receipt pending |
+| AP-28 | Read runtime keys or evidence | Docker administrator → mounted secret/evidence volumes or container memory → audit and forensic contents | exfiltration | medium | high | high | Separate 0600 volumes, non-root services, disabled container logs, no parser secret mounts | runtime Compose and Docker-volume provider |
+| AP-29 | Hide activity by coordinated rollback | Docker administrator → snapshot/restore data, key and anchor volumes together → stale but internally consistent state | integrity, detection-evasion | medium | high | high | Domain/data-root binding detects partial swaps; whole-set rollback is explicitly outside unattended Docker guarantees | Docker-volume provider and runtime documentation |
+| AP-30 | Escape or exhaust the native parser | Hostile EVTX → parser sidecar → controller or host resources | execution, availability | low | high | medium | Networkless sidecar, no secret mounts, no-follow input, fixed digest, byte/time/CPU/memory/PID bounds, provisional output | parser sidecar and runtime contract tests |
+| AP-31 | Destroy only part of persistence | Operator error or host interruption → non-atomic volume deletion → unusable partial set | availability, integrity | medium | medium | medium | Exact labelled set, attachment preflight, explicit confirmation, survivor receipt, fail-closed partial-set startup | runtime lifecycle scripts and tests |
 | AP-11 | Confuse runtime attribution | Compromised endpoint → forged or malformed 5.1 stream protocol → incorrect audit result | integrity | low | high | medium | Outer PS7 and child Desktop 5.1 proof, stream/sequence/state allowlists, runspace attribution, fail-closed errors | transport source and tests |
 | AP-12 | Gain repository write authority | Compromised owner or app → public repository mutation → later trusted execution | access | low | high | medium | Single-owner policy, no collaborators/teams, Actions disabled, planned branch protection and live settings audit | release plan; live state pending |
 | AP-13 | Execute a substituted native provider | Tampered package/RID resolution → malicious SQLite library load → controller-user code execution | execution/integrity | low | high | high | Locked restore, exact hashes, package-relative RID allowlist, version assertion, SBOM and package scan | provider/package implementation and scans |
@@ -231,6 +249,10 @@ authority without a new threat review.
 | AP-24 | Keep command-line inclusion explicit, warn before dispatch, and never claim Security-log redaction | Public policy cmdlet and documentation | Informed consent and data minimization |
 | AP-25 | Preserve compare-before-compensate and no-retry semantics; report effective-now state and GPO override risk | Windows policy adapter | Concurrency integrity |
 | AP-26 | Authenticate and anchor every preference mutation; reject unknown methods before dispatch | SQLite configuration repository | Integrity and allowlisting |
+| AP-28 | Keep Docker access restricted to trusted administrators; never mount the daemon socket; keep logging disabled; document that volume encryption is an operator/platform responsibility | Runtime deployment and operator guide | Least privilege and secret isolation |
+| AP-29 | Back up and restore the six-volume persistence set as one coordinated unit; use an external trusted anchor or interactive wrapped-key mode if whole-set rollback resistance is required later | Runtime backup/restore tooling | Integrity and recovery |
+| AP-30 | Preserve the two-image boundary, parser network isolation, read-only evidence mount, resource caps, exact parser digest, and terminal-receipt rule in every future release | Dockerfile, Compose, runtime contract tests | Sandboxing and dependency pinning |
+| AP-31 | Keep destroy explicit and label-bound; refuse partial sets and attached volumes; persist exact survivor names after interrupted deletion | Runtime lifecycle scripts | Fail-closed destructive action control |
 
 ## 9. Assumptions and Open Questions
 
@@ -249,18 +271,27 @@ authority without a new threat review.
 - `user-confirmed`: The SQLite plan has no legacy-data import, keeps target
   profiles plaintext inside owner-private storage, adds two audit-query cmdlets,
   and retains database/artifact evidence indefinitely in v1.
+- `user-confirmed`: Docker is the canonical runtime for this release and future
+  releases; all eleven current cmdlets must work through it.
+- `user-confirmed`: Unattended Docker-volume key and anchor storage is accepted,
+  the Docker administrator is trusted, and native macOS state is neither
+  required nor automatically migrated or deleted.
+- `user-confirmed`: Future containers use separate trust boundaries and the
+  current parser must not receive controller secrets, database state, SSH
+  material, or network access.
 - `confirmed`: The macOS native Keychain create/read/delete lifecycle passed a
   disposable separate-process proof without a plaintext `audit.key`.
 - `confirmed`: The SQLite contract, package RIDs, atomic anchor semantics,
   target/projection binding, operation ownership and arming, output v2,
   capacity, recovery, and query objects have focused, package-only, and
   container fault evidence in the current working tree.
-- `unvalidated`: The immutable exact-SHA gate, native macOS anchor lifecycle,
-  native Windows ACL/durable publication, and live PS7/5.1/bootstrap journey
-  remain release blockers until the initial candidate exists.
-- `accepted residual`: Linux/Windows colocated fallback key and anchor cannot
-  detect rollback of the complete data root; only macOS Keychain supplies that
-  first-release guarantee.
+- `unvalidated`: The immutable exact-SHA gate, production Docker journey, native
+  Windows ACL/durable publication, and live PS7/5.1/bootstrap journey remain
+  release blockers until the candidate is committed and qualified.
+- `accepted residual`: A Docker administrator can roll back the coordinated
+  data, key and anchor volumes together. Partial swaps fail closed, but
+  unattended Docker mode does not claim an independent external rollback
+  anchor. Optional macOS Keychain retains stronger whole-root rollback evidence.
 - `unvalidated`: The final GitHub visibility, collaborators, apps, Actions, branch
   rules, and remote SHA remain unknown until the post-publication settings audit.
 - `unvalidated`: An independently controlled audit sink, retention/pruning,

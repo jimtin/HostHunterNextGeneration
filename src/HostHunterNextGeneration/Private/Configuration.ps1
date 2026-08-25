@@ -252,6 +252,13 @@ function Get-HHMasterKey {
         [switch]$RequireExisting
     )
 
+    if ((Get-HHSecretProviderSelection) -ceq 'DockerVolume') {
+        $provider = Get-HHDockerVolumePersistenceProviderFromEnvironment `
+            -DataRoot $DataRoot
+        $context = [pscustomobject]@{ DataRoot = [IO.Path]::GetFullPath($DataRoot) }
+        return & $provider.CoreMasterKeyProvider $context ([bool]$RequireExisting)
+    }
+
     if (-not $script:HHControllerIsMacOS) {
         return Get-HHFileAuditMasterKey -DataRoot $DataRoot -RequireExisting:$RequireExisting
     }

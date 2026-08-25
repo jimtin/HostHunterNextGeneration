@@ -32,8 +32,27 @@ hh_security_init() {
 
   export HH_SECURITY_REPO_ROOT="$discovered_root"
   export HH_SECURITY_ARTIFACT_DIR="$discovered_root/.artifacts/security"
-  export HH_SECURITY_CACHE_DIR="$HH_SECURITY_ARTIFACT_DIR/cache"
-  mkdir -p -- "$HH_SECURITY_ARTIFACT_DIR" "$HH_SECURITY_CACHE_DIR"
+
+  local cache_base
+  if [[ -n "${HH_SECURITY_CACHE_ROOT:-}" ]]; then
+    cache_base="$HH_SECURITY_CACHE_ROOT"
+  elif [[ -n "${XDG_CACHE_HOME:-}" ]]; then
+    cache_base="$XDG_CACHE_HOME/hosthunter-next-generation/security"
+  elif [[ -n "${HOME:-}" ]]; then
+    cache_base="$HOME/.cache/hosthunter-next-generation/security"
+  else
+    cache_base="${TMPDIR:-/tmp}/hosthunter-next-generation-security-cache-$(id -u)"
+  fi
+  mkdir -p -- "$HH_SECURITY_ARTIFACT_DIR" "$cache_base"
+  HH_SECURITY_CACHE_DIR="$(cd -- "$cache_base" && pwd -P)"
+  export HH_SECURITY_CACHE_DIR
+  case "$HH_SECURITY_CACHE_DIR/" in
+    "$discovered_root"/*)
+      echo "Security scanner cache must be outside the repository." >&2
+      return 2
+      ;;
+    *) ;;
+  esac
 }
 
 hh_require_docker() {

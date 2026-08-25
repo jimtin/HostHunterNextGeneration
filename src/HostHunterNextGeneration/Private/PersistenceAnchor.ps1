@@ -332,6 +332,11 @@ function Read-HHPersistenceAnchor {
     if ($null -ne $AnchorReader) {
         return & $AnchorReader $PersistenceContext $MasterKey
     }
+    if ((Get-HHSecretProviderSelection) -ceq 'DockerVolume') {
+        $provider = Get-HHDockerVolumePersistenceProviderFromEnvironment `
+            -DataRoot $PersistenceContext.DataRoot
+        return & $provider.CoreAnchorReader $PersistenceContext $MasterKey
+    }
     if ($IsMacOS) {
         $item = Read-HHMacOSPersistenceAnchorItem -DataRoot $PersistenceContext.DataRoot
         if (-not $item.Found) {
@@ -357,6 +362,13 @@ function Write-HHPersistenceAnchor {
     $newArtifact = ConvertTo-HHPersistenceAnchorArtifact -Anchor $Anchor -MasterKey $MasterKey
     if ($null -ne $AnchorWriter) {
         & $AnchorWriter $PersistenceContext $ExpectedArtifact $newArtifact $MasterKey
+        return
+    }
+    if ((Get-HHSecretProviderSelection) -ceq 'DockerVolume') {
+        $provider = Get-HHDockerVolumePersistenceProviderFromEnvironment `
+            -DataRoot $PersistenceContext.DataRoot
+        & $provider.CoreAnchorWriter $PersistenceContext $ExpectedArtifact `
+            $newArtifact $MasterKey
         return
     }
     if ($IsMacOS) {

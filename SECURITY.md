@@ -2,7 +2,7 @@
 
 ## Supported version
 
-HostHunterNextGeneration is currently a `0.2.1` project. Security fixes
+HostHunterNextGeneration is currently a `0.3.0-preview1` project. Security fixes
 are applied to the latest revision only until a stable release policy exists.
 
 ## Reporting a vulnerability
@@ -53,9 +53,9 @@ custom path names.
 
 Dedicated SSH keys are passphrase-protected and may be loaded into an
 operator-controlled `ssh-agent`. HostHunter does not persist or noninteractively
-inject endpoint passwords or private-key passphrases. Native release
-qualification removes its exact agent identity, stops its run-scoped agent,
-and verifies its disposable Keychain items are absent before claiming cleanup.
+inject endpoint passwords or private-key passphrases. Release qualification
+removes its exact agent identity, stops its run-scoped agent, and proves exact
+remote and runtime-volume cleanup.
 
 WinRM is intentionally deferred until a controlled lab can qualify its
 authentication, certificate, trust, and controller boundaries. A WinRM target
@@ -65,9 +65,18 @@ guard or infer WinRM support from mocks.
 ## Security boundary
 
 HostHunter logs only operations it originates. Remote output can itself contain
-secrets and must be handled as sensitive. The local ledger is tamper-evident,
-not tamper-proof against an administrator who controls both the evidence and
-the controller's credential material. On macOS, the audit master key belongs in
-the user's login Keychain; a legacy plaintext `audit.key` blocks remote activity
-until a deliberate migration. See the repository threat model for the complete
-boundary and current mitigations.
+secrets and must be handled as sensitive. Docker is the canonical runtime from
+`0.3.0-preview1`: its non-root controller uses distinct external data, secret,
+anchor, SSH, evidence, and parser-socket volumes, while the networkless parser
+has no key, database, anchor, or SSH mount. Docker logging is disabled, no
+service receives the Docker socket, and the parser never writes plaintext
+JSONL evidence.
+
+The unattended Docker-volume provider removes any Keychain or Windows
+credential-store requirement but trusts the Docker administrator. An
+administrator controlling the data, key, and anchor volumes together can read
+keys or coordinate a whole-environment rollback. Backups and destruction must
+therefore cover all exact project volumes as one lifecycle. Native macOS
+Keychain support remains optional compatibility; a legacy plaintext `audit.key`
+still blocks remote activity until deliberate migration. See the repository
+threat models for the complete boundaries and mitigations.

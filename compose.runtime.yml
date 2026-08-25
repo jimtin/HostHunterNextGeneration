@@ -1,0 +1,208 @@
+name: ${HH_RUNTIME_PROJECT:?HH_RUNTIME_PROJECT is required}
+
+x-runtime-security: &runtime-security
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 128
+  mem_limit: 512m
+  cpus: 1.0
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+  logging:
+    driver: none
+  init: true
+  stop_grace_period: 10s
+
+x-controller-volumes: &controller-volumes
+  - type: volume
+    source: data
+    target: /var/lib/hosthunter-data
+  - type: volume
+    source: secrets
+    target: /var/lib/hosthunter-secrets
+  - type: volume
+    source: anchors
+    target: /var/lib/hosthunter-anchors
+  - type: volume
+    source: ssh
+    target: /var/lib/hosthunter-data/keys
+  - type: volume
+    source: evidence
+    target: /var/lib/hosthunter-evidence
+  - type: volume
+    source: parser-socket
+    target: /run/hosthunter-parser
+
+x-controller-environment: &controller-environment
+  HOME: /tmp
+  HH_DATA_ROOT: /var/lib/hosthunter-data
+  HH_SECRET_PROVIDER: DockerVolume
+  HH_SECRET_ROOT: /var/lib/hosthunter-secrets
+  HH_ANCHOR_ROOT: /var/lib/hosthunter-anchors
+  HH_SSH_ROOT: /var/lib/hosthunter-data/keys
+  HH_EVIDENCE_ROOT: /var/lib/hosthunter-evidence
+  HH_PARSER_SOCKET: /run/hosthunter-parser/parser.sock
+
+services:
+  parser:
+    <<: *runtime-security
+    build:
+      context: .
+      dockerfile: Dockerfile.runtime
+      target: parser
+    image: ${HH_RUNTIME_PARSER_IMAGE:?HH_RUNTIME_PARSER_IMAGE is required}
+    user: "10001:10001"
+    network_mode: none
+    mem_limit: 256m
+    cpus: 0.5
+    pids_limit: 64
+    volumes:
+      - type: volume
+        source: evidence
+        target: /evidence
+        read_only: true
+      - type: volume
+        source: parser-socket
+        target: /run/hosthunter-parser
+    healthcheck:
+      test:
+        - CMD
+        - python3
+        - /opt/hosthunter-parser/parser-probe.py
+      interval: 5s
+      timeout: 2s
+      retries: 12
+      start_period: 5s
+    restart: unless-stopped
+
+  controller:
+    <<: *runtime-security
+    build:
+      context: .
+      dockerfile: Dockerfile.runtime
+      target: controller
+    image: ${HH_RUNTIME_CONTROLLER_IMAGE:?HH_RUNTIME_CONTROLLER_IMAGE is required}
+    user: "10001:10001"
+    environment: *controller-environment
+    volumes: *controller-volumes
+    networks:
+      - runtime
+    depends_on:
+      parser:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - /usr/local/bin/hosthunter-controller
+        - doctor
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    restart: unless-stopped
+
+  journey:
+    <<: *runtime-security
+    profiles:
+      - acceptance
+    build:
+      context: .
+      dockerfile: Dockerfile.runtime
+      target: runtime-e2e
+    image: ${HH_RUNTIME_JOURNEY_IMAGE:?HH_RUNTIME_JOURNEY_IMAGE is required}
+    user: "10001:10001"
+    environment:
+      <<: *controller-environment
+      HH_SSH_HOST: ssh-target
+      HH_SSH_PORT: "22"
+      HH_SSH_RUNTIME_DIR: /run/hosthunter-ssh-fixture
+    volumes:
+      - type: volume
+        source: data
+        target: /var/lib/hosthunter-data
+      - type: volume
+        source: secrets
+        target: /var/lib/hosthunter-secrets
+      - type: volume
+        source: anchors
+        target: /var/lib/hosthunter-anchors
+      - type: volume
+        source: ssh
+        target: /var/lib/hosthunter-data/keys
+      - type: volume
+        source: ssh
+        target: /var/lib/hosthunter-data/Library/Application Support/HostHunterNextGeneration/keys
+      - type: volume
+        source: evidence
+        target: /var/lib/hosthunter-evidence
+      - type: volume
+        source: parser-socket
+        target: /run/hosthunter-parser
+      - type: volume
+        source: acceptance-ssh-runtime
+        target: /run/hosthunter-ssh-fixture
+        read_only: true
+    networks:
+      - runtime
+    depends_on:
+      ssh-target:
+        condition: service_healthy
+    command:
+      - /opt/hosthunter-runtime-tests/run-journeys.sh
+
+  ssh-target:
+    profiles:
+      - acceptance
+    build:
+      context: tests/fixtures/ssh
+      dockerfile: Dockerfile
+    image: ${HH_RUNTIME_SSH_FIXTURE_IMAGE:?HH_RUNTIME_SSH_FIXTURE_IMAGE is required}
+    tmpfs:
+      - /tmp:mode=1777
+      - /run/sshd:mode=0755
+      - /home/hhfixture:uid=10001,gid=10001,mode=0700
+    volumes:
+      - type: volume
+        source: acceptance-ssh-runtime
+        target: /run/hosthunter-ssh
+    networks:
+      runtime:
+        aliases:
+          - ssh-target-alt
+    logging:
+      driver: none
+    healthcheck:
+      test:
+        - CMD
+        - /usr/local/bin/healthcheck.sh
+      interval: 2s
+      timeout: 2s
+      retries: 30
+      start_period: 2s
+
+networks:
+  runtime:
+
+volumes:
+  data:
+    external: true
+    name: ${HH_RUNTIME_DATA_VOLUME:?HH_RUNTIME_DATA_VOLUME is required}
+  secrets:
+    external: true
+    name: ${HH_RUNTIME_SECRET_VOLUME:?HH_RUNTIME_SECRET_VOLUME is required}
+  anchors:
+    external: true
+    name: ${HH_RUNTIME_ANCHOR_VOLUME:?HH_RUNTIME_ANCHOR_VOLUME is required}
+  ssh:
+    external: true
+    name: ${HH_RUNTIME_SSH_VOLUME:?HH_RUNTIME_SSH_VOLUME is required}
+  evidence:
+    external: true
+    name: ${HH_RUNTIME_EVIDENCE_VOLUME:?HH_RUNTIME_EVIDENCE_VOLUME is required}
+  parser-socket:
+    external: true
+    name: ${HH_RUNTIME_PARSER_SOCKET_VOLUME:?HH_RUNTIME_PARSER_SOCKET_VOLUME is required}
+  acceptance-ssh-runtime:

@@ -2,15 +2,16 @@
 
 ## Verdict
 
-`working-tree-green-exact-candidate-and-native-release-proof-pending`
+`docker-focused-green-exact-candidate-and-live-windows-proof-pending`
 
 The SQLite-only target and audit repository, packaged provider, external
 anchor, invocation-bound `.hhout` v2 artifacts, durable platform publication,
 crash recovery, capacity reservation, and two audit query cmdlets are
-implemented. The current packaged Linux/PowerShell 7 journey passes 23/23
-actions. Product coverage passes all four repository gates. The candidate is
-not yet release-ready because exact-commit macOS/Windows/GitHub proof remains
-outstanding.
+implemented. Docker is now the canonical runtime: a non-root controller uses
+separate data/key/anchor/SSH/evidence/socket volumes and a networkless parser
+sidecar. Focused runtime contract and lifecycle checks are green. The candidate
+is not yet release-ready because exact-commit production-image, live Windows,
+and post-push GitHub proof remain outstanding.
 Positive Windows PowerShell 5.1 execution still requires a separate live Windows
 SSH qualification of the exact committed candidate. Publication and live GitHub
 settings verification also remain pending.
@@ -27,14 +28,16 @@ path instead of claiming WinRM support.
 - Package manager: none; exact PowerShell Gallery test modules are installed in
   the checksum-verified pinned test image.
 - Frameworks/services: PowerShell 7 controller module, Pester, Compose
-  PowerShell-over-SSH fixture, and deterministic transport/storage/runtime
-  seams.
+  PowerShell-over-SSH fixture, production Docker controller, networkless parser,
+  and deterministic transport/storage/runtime seams.
 - Existing commands: full, pre-commit, slim pre-push, hook install/verify, and
   static/unit/integration/security lanes.
 - Existing hook framework: checked-in `.githooks`, installed and active.
 - Existing CI/deploy configuration: none; remote CI test reruns are prohibited.
 - Release runtime contract: direct PowerShell 7 by default; explicit Windows
   PowerShell 5.1 through a Windows-local compatibility session; SSH only.
+- Canonical key/anchor contract: unattended Docker-volume provider with
+  separate core/Forensics domains; macOS Keychain is optional compatibility.
 - Public-repository contract: after publication, only `jimtin` may write or
   administer; external contribution code receives manual review before trusted
   local execution. Live settings verification remains pending.
@@ -53,6 +56,7 @@ path instead of claiming WinRM support.
 
 | Check | Command | Container/service | Result | Artifact |
 |---|---|---|---|---|
+| Production runtime focused contract | focused Pester contract/lifecycle lanes | containerized Pester plus fake-Docker lifecycle fixture | runtime contract 9/9 and lifecycle 7/7 passed | `.artifacts/runtime-contract-unit.xml`, `.artifacts/runtime-lifecycle-integration.xml` |
 | Canonical full proof | `./scripts/verify-local.sh` | Docker/Compose and pinned scanner containers | current working-tree wrapper passed after the Windows ACL amendment; exact candidate rerun pending | `.artifacts/summary/verify-local.json` |
 | Four-metric product proof | `scripts/lanes/unit.sh` | test container | readiness run 647/647 passed; 95.3557% statements (7761/8139), 90.0669% branches (2557/2839), 96.3504% functions (264/274), 95.3931% lines (6419/6729); canonical exact rerun pending | `.artifacts/unit/readiness-product-final/coverage-summary.json` |
 | SSH protocol contract | fixture contract script | test client plus disposable SSH target | password authentication and the pinned PowerShell 7 fixture passed | `.artifacts/integration/ssh-fixture-contract.json` |
@@ -78,7 +82,7 @@ from a clean detached checkout before the native and GitHub release steps.
 | CAS target mutation and bounded cleanup | competing-writer, timeout, and cancellation seams | verified in canonical working-tree gate |
 | Bootstrap dispatch uncertainty and cumulative output cap | adversarial bootstrap unit/integration seams | verified in canonical working-tree gate |
 | Authorized Ed25519 transition | disposable fixture plus exact candidate in the designated live Windows environment | disposable fixture verified; exact-candidate live Windows transition pending |
-| Native macOS Keychain audit-key lifecycle | focused units plus disposable fresh-process live contract | 37 AuditKeyStore + 21 Configuration focused units, native lifecycle, and aggregate working-tree gate passed |
+| Optional native macOS Keychain audit-key lifecycle | focused units plus disposable fresh-process compatibility contract | implemented and previously qualified; not required by the canonical Docker release |
 | WinRM rejection without dispatch or store mutation | unit plus fresh-process negative journey | verified fail-closed; positive WinRM remains deferred |
 | Owner-only public GitHub settings and disabled Actions | live GitHub re-read after publication | pending publication |
 

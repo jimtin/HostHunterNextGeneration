@@ -1,10 +1,12 @@
 # HostHunterNextGeneration
 
-HostHunterNextGeneration is a PowerShell 7 module for accountable remote
-PowerShell execution. It saves one to eight endpoint profiles, verifies the
-requested PowerShell runtime before use, records intent before network dispatch,
-and retains the complete command and all PowerShell streams as protected audit
-evidence.
+HostHunterNextGeneration is a container-first PowerShell 7 module for
+accountable remote PowerShell execution. It saves one to eight endpoint
+profiles, verifies the requested PowerShell runtime before use, records intent
+before network dispatch, and retains the complete command and all PowerShell
+streams as protected audit evidence. Its private Part 1 pipeline also
+normalizes Windows Process Start evidence to ECS 9.5 without exporting an
+incomplete acquisition interface.
 
 ## First-release runtime contract
 
@@ -48,6 +50,47 @@ The module exports exactly eleven commands:
 - `Set-HHEscalationPreference`
 - `Set-HHWindowsProcessAuditPolicy`
 
+## Docker quick start
+
+Docker Compose is the canonical runtime from `0.3.0-preview1` onward:
+
+```bash
+export HH_RUNTIME_PROJECT=hosthunter-local
+./scripts/runtime/hosthunter.sh start
+./scripts/runtime/hosthunter.sh doctor
+./scripts/runtime/hosthunter.sh shell
+```
+
+The runtime creates six external, project-labelled volumes: data, secrets,
+anchors, SSH state, evidence, and the private parser socket. It never migrates
+or deletes native macOS state automatically. The controller runs as UID/GID
+`10001:10001` with a read-only root filesystem, no Linux capabilities, no
+Docker socket, no Docker logging, and explicit CPU, memory, PID, and temporary
+storage bounds. The EVTX parser is a separate networkless container with no
+database, key, anchor, or SSH mounts.
+
+The unattended `DockerVolume` provider keeps core and Forensics keys separate
+from their external anchors. Files are owner-only and bound to the provider,
+domain, version, and canonical data root. It replaces any macOS Keychain or
+Windows credential-store requirement inside Docker. It does not protect
+against a trusted Docker administrator who can read every mounted volume or
+coordinate a whole-environment rollback.
+
+Stopping preserves state. Permanent deletion is deliberately separate:
+
+```bash
+./scripts/runtime/hosthunter.sh stop
+./scripts/runtime/hosthunter.sh destroy \
+  --confirm-project "$HH_RUNTIME_PROJECT" \
+  --destroy-volumes
+```
+
+Docker has no atomic multi-volume deletion API. HostHunter preflights all six
+volumes and reports exact survivors if deletion is only partly completed. Back
+up the six volumes as one consistency set. Losing the secret volume makes the
+encrypted databases unreadable; restoring data without its matching key and
+anchor volumes fails closed.
+
 ## SSH quick start
 
 Import the module and explicitly pin the endpoint's complete OpenSSH SHA-256
@@ -55,7 +98,9 @@ host-key fingerprint. Password authentication uses the native interactive SSH
 prompt; HostHunter never accepts or stores a password parameter.
 
 ```powershell
-Import-Module ./src/HostHunterNextGeneration/HostHunterNextGeneration.psd1
+# The canonical container shell loads the packaged module.
+# For optional native use:
+# Import-Module ./src/HostHunterNextGeneration/HostHunterNextGeneration.psd1
 
 Set-HHTarget `
     -Name server01-pwsh `
@@ -70,7 +115,7 @@ Invoke-HHCommand `
     -CaseId 'INC-1234'
 ```
 
-On macOS, the default data root is
+Native macOS use remains an optional compatibility mode. Its default data root is
 `~/Library/Application Support/HostHunterNextGeneration`. HostHunter binds its
 managed `known_hosts` path to each native SSH session without embedding that
 space-containing path in the SSH option argument. Custom data roots containing
@@ -176,15 +221,14 @@ Exceeding it stops the pipeline and records an explicit failure. If connectivity
 is lost after dispatch and completion cannot be proven, the terminal audit
 outcome is `Unknown`.
 
-The v1 macOS contract stores the audit master key in the user's login Keychain
-under a data-root-specific account. A bounded child process uses native Security
+The optional native macOS contract stores the audit master key in the user's
+login Keychain under a data-root-specific account. A bounded child process uses native Security
 framework byte APIs; the raw 32-byte key is passed only through anonymous pipes,
 never command arguments, environment variables, or a plaintext key file. A
 legacy plaintext `audit.key` blocks remote activity until it is deliberately
-migrated. Other controller platforms use a restrictive per-user file fallback
-until a platform credential-store design is qualified. The ledger is
-tamper-evident; it is not tamper-proof against an administrator who controls
-both the evidence and credential material.
+migrated. The canonical Docker runtime instead uses independently mounted
+secret and anchor volumes. The ledger is tamper-evident; it is not tamper-proof
+against an administrator who controls the evidence, keys, and anchors together.
 
 ## Public repository policy
 
@@ -201,24 +245,29 @@ credentials, private keys, target stores, ledgers, or `.hhout` evidence.
 
 ## Local validation
 
-All canonical proof runs in local containers:
+All canonical proof runs in local containers. The full command builds the
+production controller and isolated parser, runs every one of the eleven public
+cmdlets through the package-backed user journey, verifies real Sysmon 1 and
+Security 4688 Process Start fixtures, checks restart persistence, and scans the
+resulting production images:
 
 ```bash
 ./scripts/verify-local.sh
 ```
 
-The current working-tree product unit proof passed on 2026-08-25: 647/647 tests
-passed, including the authenticated SQLite v1-to-v2 migration phase. Product
-coverage was 95.3557% statements (7761/8139), 90.0669% branches (2557/2839),
-96.3504% functions (264/274), and 95.3931% lines (6419/6729). The exact-candidate
-gate will rerun static, security,
-filesystem/image, integration, package, and build proof from a clean checkout.
+Focused implementation evidence is not release evidence. The exact-candidate
+gate reruns static, security, filesystem/image, unit coverage, integration,
+SQLite fault, runtime, package, and user-journey proof from one clean checkout.
+Its compact successful proof bundle and coverage working set are each capped at
+20 MiB; scanner caches, raw branch-hit events, copied checkouts, and superseded
+candidate trees are never retained as proof.
 
-That receipt proves the current working tree. It is not an exact-commit or live
-Windows PowerShell 5.1 qualification receipt. Those checks, public repository
-creation, and the live GitHub owner-only settings re-read remain pending.
+The release is complete only after the same exact runtime image is qualified
+against the Windows target for PowerShell 7, Windows PowerShell 5.1, all six
+streams, process-audit policy and command-line behavior, privilege restoration,
+SSH-key transition, password recovery, and exact cleanup.
 
 GitHub does not rerun the suite. The repository uses a gate-owned model: commit
 and push hooks run their declared local lanes. The HostHunter-specific
-standalone laptop gate and clean-checkout candidate runner are implemented;
-they own full exact-SHA proof before the first publication.
+standalone laptop gate and clean-checkout candidate runner own full exact-SHA
+proof before every push to `main`.

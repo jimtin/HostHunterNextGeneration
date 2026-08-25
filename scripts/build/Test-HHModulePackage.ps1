@@ -13,7 +13,13 @@ param(
     [string]$MetadataRoot,
 
     [Parameter(Mandatory)]
-    [string]$DurabilityHelperRoot
+    [string]$DurabilityHelperRoot,
+
+    [Parameter(Mandatory)]
+    [string]$EvtxParserRoot,
+
+    [Parameter(Mandatory)]
+    [string]$EvtxMetadataRoot
 )
 
 Set-StrictMode -Version Latest
@@ -25,7 +31,17 @@ $provider = (Resolve-Path -LiteralPath $ProviderRoot).Path
 $metadata = (Resolve-Path -LiteralPath $MetadataRoot).Path
 $durabilityHelper = (Resolve-Path -LiteralPath `
         (Join-Path $DurabilityHelperRoot 'HostHunter.Persistence.Durability.dll')).Path
-$packageRoot = Join-Path $artifact 'HostHunterNextGeneration/0.2.1'
+$evtxParser = (Resolve-Path -LiteralPath $EvtxParserRoot).Path
+$evtxMetadata = (Resolve-Path -LiteralPath $EvtxMetadataRoot).Path
+$sourceManifestPath = Join-Path $source 'HostHunterNextGeneration.psd1'
+$sourceManifest = Test-ModuleManifest -Path $sourceManifestPath -ErrorAction Stop
+$expectedModuleVersion = $sourceManifest.Version.ToString()
+$expectedPrerelease = [string]$sourceManifest.PrivateData.PSData.Prerelease
+$expectedPackageVersion = if ([string]::IsNullOrWhiteSpace($expectedPrerelease)) {
+    $expectedModuleVersion
+}
+else { "$expectedModuleVersion-$expectedPrerelease" }
+$packageRoot = Join-Path $artifact "HostHunterNextGeneration/$expectedPackageVersion"
 if (Test-Path -LiteralPath $packageRoot) {
     Remove-Item -LiteralPath $packageRoot -Recurse -Force
 }
@@ -89,10 +105,45 @@ foreach ($metadataFile in $metadataFiles) {
 Copy-Item -LiteralPath (Join-Path $provider 'asset-sha256.txt') `
     -Destination (Join-Path $dependencyMetadataRoot 'asset-sha256.txt')
 
+$evtxMetadataPath = Join-Path $evtxMetadata 'evtx-dump-assets.json'
+$evtxInventory = Get-Content -LiteralPath $evtxMetadataPath -Raw |
+    ConvertFrom-Json -Depth 10
+if ($evtxInventory.name -cne 'evtx_dump' -or
+    $evtxInventory.version -cne '0.12.2' -or
+    $evtxInventory.licenseExpression -cne 'MIT OR Apache-2.0') {
+    throw 'The evtx_dump dependency metadata is invalid.'
+}
+$evtxRids = @('linux-arm64', 'linux-x64', 'osx-arm64', 'osx-x64')
+$evtxHashes = [ordered]@{}
+foreach ($rid in $evtxRids) {
+    $sourceParser = Join-Path $evtxParser "$rid/evtx_dump"
+    $destinationRoot = Join-Path $packageRoot "tools/evtx_dump/$rid"
+    [IO.Directory]::CreateDirectory($destinationRoot) | Out-Null
+    $destinationParser = Join-Path $destinationRoot 'evtx_dump'
+    Copy-Item -LiteralPath $sourceParser -Destination $destinationParser
+    $actualHash = (Get-FileHash -LiteralPath $destinationParser -Algorithm SHA256).Hash.ToLowerInvariant()
+    $expectedHash = [string]$evtxInventory.assets.$rid.sha256
+    if ($actualHash -cne $expectedHash) {
+        throw "The packaged evtx_dump asset digest is invalid for '$rid'."
+    }
+    $evtxHashes[$rid] = $actualHash
+}
+$evtxDependencyRoot = Join-Path $packageRoot 'dependencies/evtx_dump'
+[IO.Directory]::CreateDirectory($evtxDependencyRoot) | Out-Null
+Copy-Item -LiteralPath $evtxMetadataPath -Destination $evtxDependencyRoot
+Copy-Item -LiteralPath (Join-Path $evtxMetadata 'licenses/LICENSE-APACHE') `
+    -Destination $evtxDependencyRoot
+Copy-Item -LiteralPath (Join-Path $evtxMetadata 'licenses/LICENSE-MIT') `
+    -Destination $evtxDependencyRoot
+
 $manifestPath = Join-Path $packageRoot 'HostHunterNextGeneration.psd1'
 $manifest = Test-ModuleManifest -Path $manifestPath -ErrorAction Stop
-if ($manifest.Version.ToString() -ne '0.2.1') {
+if ($manifest.Version.ToString() -ne $expectedModuleVersion) {
     throw "Unexpected packaged module version '$($manifest.Version)'."
+}
+$packagedPrerelease = [string]$manifest.PrivateData.PSData.Prerelease
+if ($packagedPrerelease -cne $expectedPrerelease) {
+    throw "Unexpected packaged prerelease label '$packagedPrerelease'."
 }
 
 Import-Module $manifestPath -Force -ErrorAction Stop
@@ -160,7 +211,7 @@ foreach ($rid in $nativeAssets.Keys) {
 
 $receipt = [ordered]@{
     status = 'passed'
-    moduleVersion = $manifest.Version.ToString()
+    moduleVersion = $expectedPackageVersion
     packagePath = $packageRoot
     exports = $actual
     provider = [ordered]@{
@@ -179,7 +230,15 @@ $receipt = [ordered]@{
         sha256 = (Get-FileHash -LiteralPath $packagedDurabilityHelper -Algorithm SHA256).Hash.ToLowerInvariant()
         thirdPartyPackages = 0
     }
+    evtxParser = [ordered]@{
+        version = '0.12.2'
+        licenseExpression = 'MIT OR Apache-2.0'
+        runtimeIdentifiers = $evtxRids
+        assetSha256 = $evtxHashes
+    }
 }
 $receiptPath = Join-Path $artifact 'module-package.json'
 $receipt | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $receiptPath -Encoding utf8NoBOM
+$manifestPath | Set-Content -LiteralPath (Join-Path $artifact 'module-path.txt') `
+    -Encoding utf8NoBOM -NoNewline
 $receipt

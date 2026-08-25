@@ -1,0 +1,229 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hosthunter.local/contracts/hosthunter.process_start.v1.schema.json",
+  "title": "HostHunter ECS Process Start contract",
+  "description": "ECS 9.5.0 process-start and bounded pipeline-error events emitted from verified EVTX evidence.",
+  "oneOf": [
+    {
+      "type": "object",
+      "required": ["@timestamp", "ecs", "event", "host", "hosthunter", "process"],
+      "properties": {
+        "@timestamp": { "$ref": "#/$defs/timestamp" },
+        "ecs": { "$ref": "#/$defs/ecs" },
+        "event": { "$ref": "#/$defs/processEvent" },
+        "host": { "$ref": "#/$defs/host" },
+        "hosthunter": { "$ref": "#/$defs/hosthunter" },
+        "process": { "$ref": "#/$defs/process" },
+        "user": { "$ref": "#/$defs/user" }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": ["@timestamp", "ecs", "error", "event", "host", "hosthunter"],
+      "properties": {
+        "@timestamp": { "$ref": "#/$defs/timestamp" },
+        "ecs": { "$ref": "#/$defs/ecs" },
+        "error": { "$ref": "#/$defs/error" },
+        "event": { "$ref": "#/$defs/pipelineErrorEvent" },
+        "host": { "$ref": "#/$defs/host" },
+        "hosthunter": { "$ref": "#/$defs/hosthunter" }
+      },
+      "additionalProperties": false
+    }
+  ],
+  "$defs": {
+    "timestamp": { "type": "string", "format": "date-time" },
+    "ecs": {
+      "type": "object",
+      "required": ["version"],
+      "properties": { "version": { "const": "9.5.0" } },
+      "additionalProperties": false
+    },
+    "host": {
+      "type": "object",
+      "required": ["id", "name", "os"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "os": {
+          "type": "object",
+          "required": ["type"],
+          "properties": { "type": { "const": "windows" } },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "user": {
+      "type": "object",
+      "required": ["name"],
+      "properties": { "name": { "type": "string", "minLength": 1 } },
+      "additionalProperties": false
+    },
+    "processUser": {
+      "type": "object",
+      "required": ["name"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "id": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "parentProcess": {
+      "type": "object",
+      "properties": {
+        "entity_id": { "type": "string", "minLength": 1 },
+        "executable": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "pid": { "type": "integer", "minimum": 0 },
+        "command_line": { "type": "string", "maxLength": 1048576 }
+      },
+      "additionalProperties": false
+    },
+    "process": {
+      "type": "object",
+      "required": ["entity_id", "executable", "name", "pid", "start"],
+      "properties": {
+        "entity_id": { "type": "string", "minLength": 1 },
+        "executable": { "type": "string", "minLength": 1 },
+        "name": { "type": "string", "minLength": 1 },
+        "pid": { "type": "integer", "minimum": 0 },
+        "start": { "$ref": "#/$defs/timestamp" },
+        "command_line": { "type": "string", "maxLength": 1048576 },
+        "parent": { "$ref": "#/$defs/parentProcess" },
+        "user": { "$ref": "#/$defs/processUser" }
+      },
+      "not": { "required": ["args"] },
+      "additionalProperties": false
+    },
+    "processEvent": {
+      "type": "object",
+      "required": ["action", "category", "code", "dataset", "id", "kind", "module", "original", "provider", "type"],
+      "properties": {
+        "action": { "const": "process-started" },
+        "category": { "const": ["process"] },
+        "code": { "enum": ["1", "4688"] },
+        "dataset": { "enum": ["hosthunter.windows_sysmon_operational", "hosthunter.windows_security"] },
+        "id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "kind": { "const": "event" },
+        "module": { "const": "hosthunter" },
+        "original": { "type": "string", "minLength": 1, "maxLength": 4194304 },
+        "provider": { "enum": ["Microsoft-Windows-Sysmon", "Microsoft-Windows-Security-Auditing"] },
+        "type": { "const": ["start"] }
+      },
+      "not": { "required": ["outcome"] },
+      "additionalProperties": false
+    },
+    "pipelineErrorEvent": {
+      "type": "object",
+      "required": ["action", "category", "code", "id", "kind", "module", "original", "provider"],
+      "properties": {
+        "action": { "const": "process-start-normalization-failed" },
+        "category": { "const": ["process"] },
+        "code": { "enum": ["1", "4688"] },
+        "id": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+        "kind": { "const": "pipeline_error" },
+        "module": { "const": "hosthunter" },
+        "original": { "type": "string", "minLength": 1, "maxLength": 4194304 },
+        "provider": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "error": {
+      "type": "object",
+      "required": ["code", "message", "type"],
+      "properties": {
+        "code": { "enum": ["unsupported_event_version", "invalid_event_shape"] },
+        "message": { "type": "string", "minLength": 1 },
+        "type": { "const": "HostHunter.ProcessStartNormalizationError" }
+      },
+      "additionalProperties": false
+    },
+    "hosthunter": {
+      "type": "object",
+      "required": ["contract", "evidence", "parser", "sensitive_fields"],
+      "properties": {
+        "contract": {
+          "type": "object",
+          "required": ["name", "version"],
+          "properties": {
+            "name": { "const": "hosthunter.process_start" },
+            "version": { "const": "1.0.0" }
+          },
+          "additionalProperties": false
+        },
+        "evidence": {
+          "type": "object",
+          "required": ["artifact_sha256", "channel", "event_record_id", "original_sha256", "provider", "source_identity", "source_ordinal", "source_version"],
+          "properties": {
+            "artifact_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+            "artifact_id": { "type": "string", "minLength": 1, "maxLength": 1024 },
+            "channel": { "type": "string", "minLength": 1, "maxLength": 1024 },
+            "event_record_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+            "original_sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+            "provider": { "type": "string", "minLength": 1, "maxLength": 1024 },
+            "relative_path": { "type": "string", "minLength": 1, "maxLength": 4096 },
+            "source_identity": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+            "source_ordinal": { "type": "integer", "minimum": 1 },
+            "source_version": { "type": "string", "minLength": 1, "maxLength": 128 }
+          },
+          "additionalProperties": false
+        },
+        "parser": {
+          "type": "object",
+          "required": ["name", "version"],
+          "properties": {
+            "name": { "const": "evtx_dump" },
+            "version": { "const": "0.12.2" }
+          },
+          "additionalProperties": false
+        },
+        "sensitive_fields": {
+          "type": "array",
+          "items": { "type": "string" },
+          "contains": { "const": "event.original" }
+        },
+        "acquisition": {
+          "type": "object",
+          "required": ["id"],
+          "properties": { "id": { "type": "string", "minLength": 1, "maxLength": 1024 } },
+          "additionalProperties": false
+        },
+        "event_data": {
+          "type": "object",
+          "required": ["pairs", "unconsumed_names", "warnings"],
+          "properties": {
+            "pairs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["ordinal", "name", "value"],
+                "properties": {
+                  "ordinal": { "type": "integer", "minimum": 1 },
+                  "name": { "type": ["string", "null"] },
+                  "value": { "type": ["string", "null"] }
+                },
+                "additionalProperties": false
+              }
+            },
+            "unconsumed_names": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+            "warnings": { "type": "array", "items": { "type": "string" } }
+          },
+          "additionalProperties": false
+        },
+        "normalization": {
+          "type": "object",
+          "required": ["process_user_null_reason"],
+          "properties": {
+            "process_user_null_reason": {
+              "enum": ["target_subject_placeholders", "target_user_name_placeholder", "target_user_sid_placeholder"]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

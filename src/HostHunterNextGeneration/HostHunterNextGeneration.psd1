@@ -1,11 +1,11 @@
 @{
     RootModule = 'HostHunterNextGeneration.psm1'
-    ModuleVersion = '0.2.1'
+    ModuleVersion = '0.3.0'
     GUID = 'a29e4ed1-e148-49ec-9b3b-ab930d2e968d'
     Author = 'James Hinton'
     CompanyName = 'HostHunter'
     Copyright = '(c) 2026 James Hinton. MIT License.'
-    Description = 'Accountable PowerShell remoting target management and command execution.'
+    Description = 'Containerized accountable PowerShell remoting, Windows policy control, and protected ECS Process Start processing.'
     PowerShellVersion = '7.4'
     CompatiblePSEditions = @('Core')
     FunctionsToExport = @(
@@ -26,7 +26,7 @@
     AliasesToExport = @()
     PrivateData = @{
         PSData = @{
-            Tags = @('PowerShell', 'Remoting', 'SSH', 'Audit')
+            Tags = @('PowerShell', 'Remoting', 'SSH', 'Audit', 'Docker', 'ECS', 'Forensics')
             LicenseUri = 'https://opensource.org/license/mit'
             ProjectUri = 'https://github.com/jimtin/HostHunterNextGeneration'
             Prerelease = 'preview1'

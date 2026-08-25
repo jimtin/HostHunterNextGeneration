@@ -15,7 +15,7 @@
 | Preserve accountability | semantic operation, exact manifest, arm-before-dispatch, structured policy outcome | SQLite v2 round-trip, substitution/tamper, output query | implemented and focused verified | commands outside HostHunter |
 | Preserve partial-failure truth | preflight both capabilities, verify each surface, bounded conditional compensation, no retry | every mutation/verification/compensation/uncertain boundary | implemented and focused verified; native Windows pending | cross-target distributed rollback |
 | Preserve normal target reuse | omitted `-Target` selects saved active targets; explicit selection remains 1..8 | public unit and package journeys | implemented and focused verified | more than eight targets |
-| Maintain package and release proof | version 0.2.1, eleven exports, local containers, exact SHA and native Windows receipt | module/package contracts, canonical gate, pre-push security | macOS default-root SSH correction focused verified; exact SHA/native/push pending | GitHub-hosted test execution |
+| Maintain package and release proof | version 0.3.0-preview1, eleven exports, canonical Docker runtime, exact SHA and live Windows receipt | module/package/runtime contracts, canonical gate, pre-push security | Docker runtime and compact-proof implementation in progress; exact SHA/live Windows/push pending | GitHub-hosted test execution |
 
 The test ledger for this slice is the corresponding action matrix in
 `docs/testing/e2e-workflow-inventory.md`. No canonical full gate starts until

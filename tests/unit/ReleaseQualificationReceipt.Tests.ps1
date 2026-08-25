@@ -3,22 +3,30 @@ BeforeAll {
     $script:publishSource = Get-Content -LiteralPath $script:publishPath -Raw
 }
 
-Describe 'Publication native qualification receipt contract' -Tag Unit {
-    It 'requires proven macOS rollback and exact Keychain cleanup' {
+Describe 'Publication Docker qualification receipt contract' -Tag Unit {
+    It 'requires the exact hardened production runtime without macOS qualification' {
         foreach ($requiredPredicate in @(
-                '.platform == "macOS"',
-                '.rollbackRejected == true',
-                '.spaceContainingDataRootVerified == true',
-                '.keychainItemCount == 2',
-                '.cleanupComplete == true',
-                '.redacted == true'
+                '.controller.dockerSocketMounted == false',
+                '.parser.networkMode == "none"',
+                '.parser.secretDatabaseOrSshMountCount == 0',
+                '.exactVolumeDestructionVerified == true',
+                '.cliJourney.journeys == 23',
+                '.cliJourney.spaceContainingDataRootVerified == true',
+                '.runtimeReceiptSha256 == $runtimeSha'
             )) {
             $script:publishSource | Should -Match ([regex]::Escape($requiredPredicate))
         }
+        $script:publishSource | Should -Not -Match 'macos_receipt='
     }
 
-    It 'requires both runtimes, mixed attribution, protected-key use, and exact cleanup' {
+    It 'requires both runtimes, audit policy, protected-key use, and exact volume cleanup' {
         foreach ($requiredPredicate in @(
+                '.controllerMode == "LinuxDockerVolume"',
+                '.controllerImageId == $imageId',
+                '.controllerVolumeCount == 6',
+                '.controllerVolumeCleanupComplete == true',
+                '.controllerVolumesDestroyed == 6',
+                '.stablePackagedModuleVerified == true',
                 '.directRuntime == "PowerShell7"',
                 '.directEdition == "Core"',
                 '.directExecutionMode == "Direct"',
@@ -26,6 +34,13 @@ Describe 'Publication native qualification receipt contract' -Tag Unit {
                 '.compatibilityEdition == "Desktop"',
                 '.compatibilityExecutionMode == "WindowsPowerShellCompatibility"',
                 '.mixedTargetCount == 2',
+                '.restartPersistenceVerified == true',
+                '.escalationPreferenceVerified == true',
+                '.processAuditPowerShell7Verified == true',
+                '.processAuditWindowsPowerShell51Verified == true',
+                '.commandLineEnabledEventVerified == true',
+                '.commandLineDisabledEventVerified == true',
+                '.processAuditPolicyRestored == true',
                 '.spaceContainingDataRootVerified == true',
                 '.keyTransitionSucceeded == true',
                 '.runScopedSshAgentVerified == true',

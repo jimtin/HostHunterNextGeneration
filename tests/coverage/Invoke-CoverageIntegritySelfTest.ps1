@@ -46,12 +46,50 @@ $env:HH_COVERAGE_CASE = 'early-control-shared-phase'
 $instrumented = Get-HHEarlyControlResult | ConvertTo-Json -Depth 8 -Compress
 Invoke-HHCorrelatedLoopFixture -Items @(1) | Out-Null
 Invoke-HHCorrelatedLoopFixture -Items @() | Out-Null
+foreach ($iteration in 1..5000) {
+    Invoke-HHTryReturnFixture -Value repeated | Out-Null
+}
 if ($instrumented -cne $original) {
     throw 'Early-control instrumentation changed returned values or escaping errors.'
 }
 
+# Parser record consumers deliberately run in a minimal isolated PowerShell
+# runspace. Probes must therefore rely only on language and .NET primitives,
+# not on modules such as Microsoft.PowerShell.Management being auto-loaded.
+$isolatedPowerShell = [PowerShell]::Create()
+try {
+    [void]$isolatedPowerShell.AddScript(
+        'param($Path) . $Path; Invoke-HHTryReturnFixture -Value isolated'
+    ).AddArgument($instrumentedPath)
+    $isolatedOutput = @($isolatedPowerShell.Invoke())
+    if ($isolatedPowerShell.HadErrors -or
+        $isolatedOutput.Count -ne 1 -or
+        [string]$isolatedOutput[0] -cne 'return-isolated') {
+        $isolatedErrors = @(
+            $isolatedPowerShell.Streams.Error | ForEach-Object {
+                '{0}: {1}' -f $_.Exception.GetType().FullName, $_.Exception.Message
+            }
+        )
+        throw ('Isolated-runspace branch probes failed; errors={0}; output={1}' -f
+            ($isolatedErrors -join ' | '),
+            (@($isolatedOutput | ForEach-Object { [string]$_ }) -join ' | '))
+    }
+}
+finally {
+    $isolatedPowerShell.Dispose()
+}
+
 $report = & $gatePath -ManifestPath $manifestPath -EventPath $eventPath `
     -Minimum 0 -ReportPath $reportPath | ConvertFrom-Json
+$repeatReport = & $gatePath -ManifestPath $manifestPath -EventPath $eventPath `
+    -Minimum 0 | ConvertFrom-Json
+if (($report | ConvertTo-Json -Depth 8 -Compress) -cne
+    ($repeatReport | ConvertTo-Json -Depth 8 -Compress)) {
+    throw 'Compact branch merge was not deterministic.'
+}
+if ([long]$report.compactWorkingBytes -gt 1MB) {
+    throw 'Repeated branch hits did not remain compact.'
+}
 $returnTry = @($report.outcomes | Where-Object function -CEQ 'Invoke-HHTryReturnFixture')
 $loopTry = @($report.outcomes | Where-Object function -CEQ 'Invoke-HHTryLoopControlFixture')
 $outcomeTry = @($report.outcomes | Where-Object function -CEQ 'Invoke-HHTryOutcomeFixture')
@@ -123,34 +161,53 @@ function Assert-HHCorruptShardRejected {
 
 Assert-HHCorruptShardRejected -Name malformed -Corrupt {
     param($ShardRoot)
-    $eventFile = Get-ChildItem -LiteralPath $ShardRoot -Filter '*.events.jsonl' -File |
+    $eventFile = Get-ChildItem -LiteralPath $ShardRoot -Filter '*.compact.json' -File |
         Select-Object -First 1
     Add-Content -LiteralPath $eventFile.FullName -Value '{'
 }
 Assert-HHCorruptShardRejected -Name unknown -Corrupt {
     param($ShardRoot)
-    $eventFile = Get-ChildItem -LiteralPath $ShardRoot -Filter '*.events.jsonl' -File |
+    $eventFile = Get-ChildItem -LiteralPath $ShardRoot -Filter '*.compact.json' -File |
         Select-Object -First 1
-    $lines = @(Get-Content -LiteralPath $eventFile.FullName)
-    $record = $lines[0] | ConvertFrom-Json
-    $record.eventId = 'aaaaaaaaaaaa-if-L1C1-0-unknown'
-    $lines[0] = $record | ConvertTo-Json -Compress
-    Set-Content -LiteralPath $eventFile.FullName -Value $lines -Encoding utf8NoBOM
+    $record = Get-Content -LiteralPath $eventFile.FullName -Raw | ConvertFrom-Json
+    $record.hits[0].eventId = 'aaaaaaaaaaaa-if-L1C1-0-unknown'
+    $record | ConvertTo-Json -Depth 5 -Compress |
+        Set-Content -LiteralPath $eventFile.FullName -Encoding utf8NoBOM
 }
 Assert-HHCorruptShardRejected -Name lost-event -Corrupt {
     param($ShardRoot)
-    $indexFile = Get-ChildItem -LiteralPath $ShardRoot -Filter '*.index.tsv' -File |
+    $eventFile = Get-ChildItem -LiteralPath $ShardRoot -Filter '*.compact.json' -File |
         Select-Object -First 1
-    $lines = @(Get-Content -LiteralPath $indexFile.FullName)
-    Set-Content -LiteralPath $indexFile.FullName -Value @($lines | Select-Object -SkipLast 1) `
-        -Encoding utf8NoBOM
+    $record = Get-Content -LiteralPath $eventFile.FullName -Raw | ConvertFrom-Json
+    $record.hits = @($record.hits | Select-Object -SkipLast 1)
+    $record | ConvertTo-Json -Depth 5 -Compress |
+        Set-Content -LiteralPath $eventFile.FullName -Encoding utf8NoBOM
 }
 Assert-HHCorruptShardRejected -Name lost-shard -Corrupt {
     param($ShardRoot)
-    $eventFile = Get-ChildItem -LiteralPath $ShardRoot -Filter '*.events.jsonl' -File |
+    $eventFile = Get-ChildItem -LiteralPath $ShardRoot -Filter '*.compact.json' -File |
         Select-Object -First 1
     Remove-Item -LiteralPath $eventFile.FullName -Force
 }
+
+$budgetEventPath = Join-Path $artifactPath 'budget-events.jsonl'
+Copy-Item -LiteralPath "$concurrentEventPath.shards" `
+    -Destination "$budgetEventPath.shards" -Recurse
+$budgetShard = Get-ChildItem -LiteralPath "$budgetEventPath.shards" `
+    -Filter '*.compact.json' -File | Select-Object -First 1
+$budgetStream = [IO.File]::Open($budgetShard.FullName, [IO.FileMode]::Open,
+    [IO.FileAccess]::Write, [IO.FileShare]::None)
+try { $budgetStream.SetLength(20MB + 1) } finally { $budgetStream.Dispose() }
+$budgetRejected = $false
+try {
+    & $gatePath -ManifestPath $manifestPath -EventPath $budgetEventPath -Minimum 0 |
+        Out-Null
+}
+catch {
+    $budgetRejected = $_.Exception.Message -like 'ArtifactBudgetExceeded:*'
+}
+Remove-Item -LiteralPath "$budgetEventPath.shards" -Recurse -Force
+if (-not $budgetRejected) { throw 'Coverage working data over 20 MiB did not fail with ArtifactBudgetExceeded.' }
 
 $env:HH_BRANCH_LOG = $null
 $env:HH_COVERAGE_CASE = $null
@@ -158,7 +215,11 @@ $env:HH_COVERAGE_CASE = $null
     Status = 'passed'
     SemanticEquivalence = $true
     EarlyControl = $true
+    IsolatedRunspace = $true
     ConcurrentShards = $concurrentReport.shardCount
     CorruptionCases = 4
+    BudgetOverflowRejected = $true
+    RepeatedHits = 5000
+    CompactWorkingBytes = [long]$report.compactWorkingBytes
     Report = $reportPath
 }

@@ -16,6 +16,7 @@ HH_SQLITE_RESTORE_INSIDE=1 \
 
 provider_root="$artifact_root/dependencies/sqlite/provider"
 durability_helper_root="${HH_DURABILITY_HELPER_ROOT:-/opt/hosthunter-durability}"
+evtx_parser_root="${HH_EVTX_PARSER_ROOT:-/opt/hosthunter-evtx}"
 
 pwsh -NoLogo -NoProfile -NonInteractive \
   -File scripts/build/Test-HHModulePackage.ps1 \
@@ -23,10 +24,8 @@ pwsh -NoLogo -NoProfile -NonInteractive \
   -ArtifactRoot "$build_artifacts" \
   -ProviderRoot "$provider_root" \
   -MetadataRoot eng/sqlite \
-  -DurabilityHelperRoot "$durability_helper_root"
-
-printf '%s\n' \
-  "$build_artifacts/HostHunterNextGeneration/0.2.1/HostHunterNextGeneration.psd1" \
-  > "$build_artifacts/module-path.txt"
+  -DurabilityHelperRoot "$durability_helper_root" \
+  -EvtxParserRoot "$evtx_parser_root" \
+  -EvtxMetadataRoot eng/forensics
 
 printf 'Module package validation passed\n'

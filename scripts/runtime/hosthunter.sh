@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+runtime_script_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly runtime_script_root
+# shellcheck source=scripts/runtime/lib.sh
+source "$runtime_script_root/lib.sh"
+
+usage() {
+  printf '%s\n' \
+    'usage: hosthunter.sh init|doctor|build|start|status|shell|run|stop|destroy|verify [arguments]' >&2
+  exit 64
+}
+
+action="${1:-}"
+[[ -n "$action" ]] || usage
+shift
+
+case "$action" in
+  init | doctor | status | stop)
+    [[ "$#" -eq 0 ]] || usage
+    exec "$runtime_script_root/$action.sh"
+    ;;
+  build)
+    [[ "$#" -eq 0 ]] || usage
+    runtime_require_docker
+    runtime_compose build controller parser
+    ;;
+  start)
+    [[ "$#" -eq 0 ]] || usage
+    "$runtime_script_root/init.sh"
+    runtime_compose up --build --detach parser controller
+    ;;
+  shell)
+    [[ "$#" -eq 0 ]] || usage
+    exec docker compose \
+      --project-name "$HH_RUNTIME_PROJECT" \
+      --file "$runtime_compose_file" \
+      exec controller pwsh -NoLogo -NoProfile
+    ;;
+  run)
+    [[ "$#" -gt 0 ]] || usage
+    exec docker compose \
+      --project-name "$HH_RUNTIME_PROJECT" \
+      --file "$runtime_compose_file" \
+      exec --no-TTY controller pwsh -NoLogo -NoProfile "$@"
+    ;;
+  destroy)
+    exec "$runtime_script_root/destroy.sh" "$@"
+    ;;
+  verify)
+    [[ "$#" -eq 0 ]] || usage
+    exec "$runtime_script_root/verify.sh"
+    ;;
+  *)
+    usage
+    ;;
+esac

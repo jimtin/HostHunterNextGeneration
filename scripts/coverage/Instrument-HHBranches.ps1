@@ -230,26 +230,25 @@ foreach ($loopType in $preTestLoopTypes) {
             }, $true)) {
         $kind = $loopAst.GetType().Name.Replace('StatementAst', '').ToLowerInvariant()
         $branchId = Get-HHIdentifier -Node $loopAst -Kind $kind
-        $evaluationId = "$branchId-evaluated"
-        $bodyId = "$branchId-body"
-        $correlationVariable = '__hhBranchCorrelation_{0}' -f `
+        $enteredId = "$branchId-entered"
+        $emptyId = "$branchId-empty"
+        $enteredVariable = '__hhBranchEntered_{0}' -f `
             ($branchId -replace '[^A-Za-z0-9_]', '_')
         Register-HHEdit -Start $loopAst.Extent.StartOffset -Length 0 `
-            -Text ('$' + $correlationVariable + " = New-HHBranchCorrelationId; " +
-                "Invoke-HHBranchProbe -Id '$evaluationId' -CorrelationId `$$correlationVariable; ") `
-            -Purpose "$kind evaluation $branchId"
+            -Text ('$' + $enteredVariable + ' = $false; ') `
+            -Purpose "$kind entry state $branchId"
         Register-HHEdit -Start ($loopAst.Body.Extent.StartOffset + 1) -Length 0 `
-            -Text ("`nInvoke-HHBranchProbe -Id '$bodyId' -CorrelationId `$$correlationVariable`n") `
-            -Purpose "correlated block outcome $bodyId"
+            -Text ("`nif (-not `$$enteredVariable) { `$$enteredVariable = `$true; " +
+                "Invoke-HHBranchProbe -Id '$enteredId' }`n") `
+            -Purpose "entered outcome $enteredId"
+        Register-HHEdit -Start $loopAst.Extent.EndOffset -Length 0 `
+            -Text ("; if (-not `$$enteredVariable) { Invoke-HHBranchProbe -Id '$emptyId' }") `
+            -Purpose "empty outcome $emptyId"
         $branches.Add((Get-HHBranchManifestEntry -Node $loopAst -Id $branchId -Kind $kind `
-                -Strategy evaluation-vs-body -Outcomes @(
-                [pscustomobject]@{ id = "$branchId-entered"; label = 'entered' },
-                [pscustomobject]@{ id = "$branchId-empty"; label = 'not-entered' }
-            ) -StrategyData @{
-                evaluationId = $evaluationId
-                bodyId = $bodyId
-                correlation = 'invocation'
-            }))
+                -Strategy direct -Outcomes @(
+                [pscustomobject]@{ id = $enteredId; label = 'entered' },
+                [pscustomobject]@{ id = $emptyId; label = 'not-entered' }
+            )))
     }
 }
 
@@ -387,10 +386,6 @@ foreach ($trapAst in $ast.FindAll({
 }
 
 $prelude = @'
-function New-HHBranchCorrelationId {
-    return [Guid]::NewGuid().ToString('N')
-}
-
 function Get-HHBranchProbeChecksum {
     param([Parameter(Mandatory)][string]$Payload)
 
@@ -413,6 +408,9 @@ function Invoke-HHBranchProbe {
     if ([string]::IsNullOrWhiteSpace($env:HH_COVERAGE_CASE)) {
         throw 'HH_COVERAGE_CASE is required for instrumented coverage execution.'
     }
+    if ($env:HH_COVERAGE_CASE.Length -gt 256 -or $env:HH_COVERAGE_CASE -match "[`r`n`t]") {
+        throw 'HH_COVERAGE_CASE must be at most 256 characters and contain no control separators.'
+    }
     if ($Id -notmatch '^[a-f0-9]{12}-[A-Za-z0-9-]+-L[0-9]+C[0-9]+-[0-9]+-[A-Za-z0-9-]+$') {
         throw "Invalid branch event identifier '$Id'."
     }
@@ -425,10 +423,15 @@ function Invoke-HHBranchProbe {
     $shardRoot = "$basePath.shards"
     [IO.Directory]::CreateDirectory($shardRoot) | Out-Null
     $process = [Diagnostics.Process]::GetCurrentProcess()
-    $runspaceId = $Host.Runspace.InstanceId.ToString('N')
+    $currentRunspace = [Management.Automation.Runspaces.Runspace]::DefaultRunspace
+    if ($null -eq $currentRunspace) {
+        throw 'The active runspace identity is unavailable for branch coverage.'
+    }
+    $runspaceId = $currentRunspace.InstanceId.ToString('N')
     $shardId = '{0}-{1}-{2}' -f $PID, $process.StartTime.ToUniversalTime().Ticks, $runspaceId
-    $mutexIdentity = Get-HHBranchProbeChecksum -Payload "$basePath|$shardId"
-    $mutex = [Threading.Mutex]::new($false, "HostHunterBranchCoverage-$mutexIdentity")
+    $stateIdentity = Get-HHBranchProbeChecksum -Payload "$basePath|$shardId"
+    $budgetIdentity = Get-HHBranchProbeChecksum -Payload $basePath
+    $mutex = [Threading.Mutex]::new($false, "HostHunterBranchCoverage-$budgetIdentity")
     $lockTaken = $false
     try {
         $lockTaken = $mutex.WaitOne([TimeSpan]::FromSeconds(30))
@@ -439,65 +442,94 @@ function Invoke-HHBranchProbe {
         if ($null -eq (Get-Variable -Name HHBranchProbeState -Scope Global -ErrorAction Ignore)) {
             $global:HHBranchProbeState = @{}
         }
-        $markerPath = Join-Path $shardRoot "$shardId.expected.json"
-        if (-not $global:HHBranchProbeState.ContainsKey($mutexIdentity) -or
-            -not [IO.File]::Exists($markerPath)) {
-            $existingEventPath = Join-Path $shardRoot "$shardId.events.jsonl"
-            $existingIndexPath = Join-Path $shardRoot "$shardId.index.tsv"
-            if ([IO.File]::Exists($existingEventPath) -or [IO.File]::Exists($existingIndexPath)) {
-                throw "Branch shard '$shardId' cannot resume without its in-memory state and marker."
+        $shardPath = [IO.Path]::Combine($shardRoot, "$shardId.compact.json")
+        $markerPath = [IO.Path]::Combine($shardRoot, "$shardId.expected.json")
+        if (-not $global:HHBranchProbeState.ContainsKey($stateIdentity)) {
+            if ([IO.File]::Exists($shardPath) -or [IO.File]::Exists($markerPath)) {
+                throw "Branch shard '$shardId' cannot resume without its in-memory state."
             }
-            $marker = [ordered]@{
-                schemaVersion = 2
+            $markerContent = [ordered]@{
+                schemaVersion = 3
                 shardId = $shardId
                 processId = $PID
                 processStartUtcTicks = $process.StartTime.ToUniversalTime().Ticks
                 runspaceId = $runspaceId
             }
-            [IO.File]::WriteAllText(
-                $markerPath,
-                ($marker | ConvertTo-Json -Compress),
-                [Text.UTF8Encoding]::new($false)
-            )
-            $global:HHBranchProbeState[$mutexIdentity] = [pscustomobject]@{
-                Sequence = [long]0
-                PreviousChecksum = ('0' * 64)
+            $markerPayload = $markerContent | ConvertTo-Json -Compress
+            $marker = [ordered]@{
+                schemaVersion = $markerContent.schemaVersion
+                shardId = $markerContent.shardId
+                processId = $markerContent.processId
+                processStartUtcTicks = $markerContent.processStartUtcTicks
+                runspaceId = $markerContent.runspaceId
+                checksum = Get-HHBranchProbeChecksum -Payload $markerPayload
+            }
+            [IO.File]::WriteAllText($markerPath, ($marker | ConvertTo-Json -Compress),
+                [Text.UTF8Encoding]::new($false))
+            $global:HHBranchProbeState[$stateIdentity] = [pscustomobject]@{
+                EventCount = [long]0
+                Hits = @{}
             }
         }
 
-        $state = $global:HHBranchProbeState[$mutexIdentity]
-        $sequence = [long]$state.Sequence + 1
+        $state = $global:HHBranchProbeState[$stateIdentity]
         $caseId = [string]$env:HH_COVERAGE_CASE
-        $correlation = if ([string]::IsNullOrEmpty($CorrelationId)) { '' } else { $CorrelationId }
-        $payload = '{0}{1}{2}{1}{3}{1}{4}{1}{5}{1}{6}' -f @(
-            $shardId, [char]9, $sequence, $caseId, $Id, $correlation,
-            $state.PreviousChecksum
+        $hitKey = "$caseId`t$Id"
+        $currentCount = if ($state.Hits.ContainsKey($hitKey)) {
+            [int]$state.Hits[$hitKey]
+        } else { 0 }
+        if ($currentCount -ge 2) { return }
+        $state.Hits[$hitKey] = $currentCount + 1
+        $state.EventCount = [long]$state.EventCount + 1
+        $hits = @(
+            foreach ($key in @($state.Hits.Keys | Sort-Object)) {
+                $parts = $key -split "`t", 2
+                [ordered]@{
+                    caseId = $parts[0]
+                    eventId = $parts[1]
+                    count = [int]$state.Hits[$key]
+                }
+            }
         )
-        $checksum = Get-HHBranchProbeChecksum -Payload $payload
-        $record = [ordered]@{
-            schemaVersion = 2
+        $content = [ordered]@{
+            schemaVersion = 3
             shardId = $shardId
-            sequence = $sequence
-            caseId = $caseId
-            eventId = $Id
-            correlationId = $correlation
-            previousChecksum = $state.PreviousChecksum
-            checksum = $checksum
+            processId = $PID
+            processStartUtcTicks = $process.StartTime.ToUniversalTime().Ticks
+            runspaceId = $runspaceId
+            eventCount = [long]$state.EventCount
+            hits = $hits
         }
-        $eventPath = Join-Path $shardRoot "$shardId.events.jsonl"
-        $indexPath = Join-Path $shardRoot "$shardId.index.tsv"
-        [IO.File]::AppendAllText(
-            $eventPath,
-            (($record | ConvertTo-Json -Compress) + [Environment]::NewLine),
+        $payload = $content | ConvertTo-Json -Depth 5 -Compress
+        $record = [ordered]@{
+            schemaVersion = $content.schemaVersion
+            shardId = $content.shardId
+            processId = $content.processId
+            processStartUtcTicks = $content.processStartUtcTicks
+            runspaceId = $content.runspaceId
+            eventCount = $content.eventCount
+            hits = $content.hits
+            checksum = Get-HHBranchProbeChecksum -Payload $payload
+        }
+        $temporaryPath = "$shardPath.$([Guid]::NewGuid().ToString('N')).tmp"
+        [IO.File]::WriteAllText(
+            $temporaryPath,
+            ($record | ConvertTo-Json -Depth 5 -Compress),
             [Text.UTF8Encoding]::new($false)
         )
-        [IO.File]::AppendAllText(
-            $indexPath,
-            ("$sequence`t$checksum" + [Environment]::NewLine),
-            [Text.UTF8Encoding]::new($false)
-        )
-        $state.Sequence = $sequence
-        $state.PreviousChecksum = $checksum
+        $existingLength = if ([IO.File]::Exists($shardPath)) {
+            ([IO.FileInfo]$shardPath).Length
+        } else { 0L }
+        $workingBytes = ([long](@(
+            [IO.Directory]::EnumerateFiles($shardRoot) |
+                Where-Object { $_ -cne $temporaryPath } |
+                ForEach-Object { ([IO.FileInfo]$_).Length }
+        ) | Measure-Object -Sum).Sum) - $existingLength + ([IO.FileInfo]$temporaryPath).Length
+        if ($workingBytes -gt 20MB) {
+            [IO.File]::Delete($temporaryPath)
+            throw "ArtifactBudgetExceeded: coverage working data is $workingBytes bytes; limit is 20971520 bytes."
+        }
+        [IO.File]::Move($temporaryPath, $shardPath, $true)
     }
     finally {
         if ($lockTaken) {

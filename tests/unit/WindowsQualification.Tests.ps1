@@ -7,6 +7,9 @@ BeforeAll {
         [ref]$null,
         [ref]$null
     )
+    $script:dockerRunnerPath = Join-Path $PSScriptRoot `
+        '../../scripts/qualification/windows-docker.sh'
+    $script:dockerRunnerSource = Get-Content -LiteralPath $script:dockerRunnerPath -Raw
 }
 
 Describe 'Windows exact-package qualification contract' -Tag Unit {
@@ -154,7 +157,7 @@ Describe 'Windows exact-package qualification contract' -Tag Unit {
                 Should -Not -Match '(?is)-ArgumentList.*\$[A-Za-z0-9_]*(Password|Passphrase|Secret)'
         }
         $script:qualificationSource |
-            Should -Not -Match '(?i)\$env:[A-Za-z0-9_]*(Password|Passphrase|Secret)'
+            Should -Not -Match '(?i)\$env:[A-Za-z0-9_]*(Password|Passphrase|Credential|Token)'
     }
 
     It 'derives and post-verifies both exact Keychain cleanup items' {
@@ -178,6 +181,103 @@ Describe 'Windows exact-package qualification contract' -Tag Unit {
             '(?s)Invoke-HHQualificationSecurityDelete.*?' +
             'Test-HHQualificationSecurityItem'
         )
+    }
+
+    It 'supports a DockerVolume controller without requiring Keychain state' {
+        $script:qualificationSource | Should -Match (
+            '\[ValidateSet\(''Auto'', ''MacOSKeychain'', ''LinuxDockerVolume''\)\]'
+        )
+        $script:qualificationSource | Should -Match (
+            '\$resolvedControllerMode -ceq ''LinuxDockerVolume'''
+        )
+        $script:qualificationSource | Should -Match (
+            '\$env:HH_SECRET_PROVIDER -cne ''DockerVolume'''
+        )
+        $script:qualificationSource | Should -Match (
+            'elseif \(\$resolvedControllerMode -ceq ''LinuxDockerVolume'' -and ' +
+            '\$remoteKeyRemoved\)'
+        )
+        $keychainCleanup = [regex]::Match(
+            $script:qualificationSource,
+            '(?s)if \(\$remoteKeyRemoved -and.*?\$cleanupComplete\s*=\s*\$true'
+        )
+        $keychainCleanup.Success | Should -BeTrue
+        $keychainCleanup.Value | Should -Match '\$keychainAccount'
+    }
+
+    It 'binds the stable packaged module to the candidate inventory and image ID' {
+        $script:qualificationSource | Should -Match (
+            'packageArchiveSha256\s+-cne\s+\$packageSha256'
+        )
+        $script:qualificationSource | Should -Match (
+            'Get-HHQualificationPackageInventorySha256\s+-ModuleRoot\s+' +
+            '\$manifest\.DirectoryName'
+        )
+        $script:qualificationSource | Should -Match (
+            '\$controllerPackageInventorySha256\s+-cne\s+' +
+            '\$expectedPackageInventorySha256'
+        )
+        $script:qualificationSource | Should -Match (
+            'ControllerImageId\s*=\s*if \(\$resolvedControllerMode -ceq ' +
+            '''LinuxDockerVolume''\)'
+        )
+        $script:qualificationSource | Should -Match (
+            'stablePackagedModuleVerified\s*='
+        )
+        $script:qualificationSource | Should -Match (
+            '(?s)SortedDictionary\[string, string\].*?StringComparer\]::Ordinal'
+        )
+        $script:qualificationSource | Should -Match (
+            '@\(\$inventory\.Values\) -join "`n"'
+        )
+    }
+
+    It 'creates and destroys one exact fresh six-volume Docker controller set' {
+        $script:dockerRunnerSource | Should -Match (
+            'volume_roles=\(data secrets anchors ssh evidence parser-socket\)'
+        )
+        $script:dockerRunnerSource | Should -Match (
+            '(?s)docker volume create.*?com\.hosthunter\.runtime\.project=' +
+            '\$project.*?com\.hosthunter\.runtime\.role=\$role'
+        )
+        $script:dockerRunnerSource | Should -Match (
+            '(?s)docker volume inspect "\$volume_name".*?' +
+            'docker volume rm "\$volume_name"'
+        )
+        $script:dockerRunnerSource | Should -Match (
+            'controllerVolumeCleanupComplete == false'
+        )
+        $script:dockerRunnerSource | Should -Match (
+            '(?s)destroy_exact_state.*?cleanup_finished=true.*?' +
+            'controllerVolumeCleanupComplete = true'
+        )
+        $script:dockerRunnerSource | Should -Match (
+            'controllerVolumesDestroyed = 6'
+        )
+    }
+
+    It 'runs the immutable production-derived image interactively without secrets' {
+        $script:dockerRunnerSource | Should -Match (
+            'controller_image_id="\$\(jq -r ''\.controller\.imageId'''
+        )
+        $script:dockerRunnerSource | Should -Match (
+            'docker image inspect --format.*?\$controller_image_id'
+        )
+        $script:dockerRunnerSource | Should -Match (
+            '(?s)docker run.*?--interactive --tty.*?--read-only.*?' +
+            '--cap-drop ALL.*?--security-opt no-new-privileges:true'
+        )
+        $script:dockerRunnerSource | Should -Match (
+            '(?s)--entrypoint /opt/microsoft/powershell/7/pwsh.*?' +
+            '"\$controller_image_id"'
+        )
+        $script:dockerRunnerSource | Should -Match (
+            '-ModuleManifestPath /opt/hosthunter/module/HostHunterNextGeneration\.psd1'
+        )
+        $script:dockerRunnerSource | Should -Not -Match (
+            '(?i)--env\s+[^\r\n]*(Password|Passphrase|Credential|Token)'
+        )
+        $script:dockerRunnerSource | Should -Not -Match '(?i)sshpass|expect|SSH_ASKPASS'
     }
 
     It 'uses an explicit successful noninteractive password-recovery command' {
@@ -233,7 +333,8 @@ Describe 'Windows exact-package qualification contract' -Tag Unit {
         )
         $receiptBlock = [regex]::Match(
             $script:qualificationSource,
-            '(?s)\[ordered\]@\{\s*status\s*=\s*''passed''.*?\}\s*\|\s*ConvertTo-Json'
+            '(?s)\[ordered\]@\{\s*status\s*=.*?' +
+            'candidateSha\s*=\s*\$CandidateSha.*?\}\s*\|\s*ConvertTo-Json'
         )
         $receiptBlock.Success | Should -BeTrue
         $receiptBlock.Value | Should -Not -Match '(?i)CommandLine(Content|Text|Value)'

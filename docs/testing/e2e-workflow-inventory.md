@@ -16,6 +16,47 @@ exact-candidate lane. The current package-backed working-tree E2E lane passes
 CLI session are covered by the package integration lane and public-boundary
 units. Exact-candidate reproduction remains pending.
 
+## Confirmed Forensics Part 1 extension
+
+The confirmed ECS 9.5.0 Process Start work is tracked in
+[`forensics-part1-action-matrix.md`](forensics-part1-action-matrix.md). Its
+first slice is a package-backed local EVTX-to-ECS/outbox service journey. The
+seven planned forensics cmdlets remain unexported until their complete remote
+and local workflows are implemented, so the current exact-eleven export
+assertion remains correct for the released surface.
+
+## Docker runtime completion extension
+
+Docker is the canonical operator runtime from `0.3.0-preview1` onward. The
+package-only CLI matrix below must therefore execute from the production
+controller image, with fresh external data, key, anchor, and SSH-key volumes.
+The runtime journey is incomplete until every one of the eleven exported
+cmdlets has been exercised from that image and the same image has completed
+the exact Windows qualification.
+
+The runtime E2E adds these non-negotiable actions:
+
+- initialize an empty external-volume set without macOS Keychain or a Windows
+  credential-store dependency;
+- stop and restart the controller, preserving authenticated target, audit,
+  escalation-preference, and encrypted output state;
+- run the complete existing eleven-cmdlet matrix through the packaged module;
+- run the internal Sysmon 1 and Security 4688 ECS 9.5 Process Start journey in
+  the network-isolated parser service without mounting secrets, databases, or
+  SSH keys there;
+- reject missing, swapped, unsafe-mode, or wrong-provider key/anchor volumes;
+- prove `docker compose down` does not remove external state volumes;
+- require an explicit exact-project confirmation before the lifecycle command
+  destroys disposable volumes; and
+- keep all seven incomplete Forensics acquisition cmdlets absent from the
+  export inventory.
+
+The live Windows qualification remains part of the user-action proof, rather
+than a mock-only supplement. It covers PowerShell 7, Windows PowerShell 5.1,
+mixed-runtime stream attribution, Windows Process Start audit policy including
+the optional command-line warning and 4688 observation, privilege restoration,
+and the protected Ed25519/password-recovery lifecycle.
+
 ## SQLite post-approval action matrix
 
 This matrix is authoritative for the confirmed persistence amendment.
@@ -107,7 +148,8 @@ runtime evidence into release qualification.
 | Invoke through the run-scoped agent | `Invoke-HHCommand` | local operator; exact protected identity loaded | subsequent key-only command succeeds without runtime fallback | exact-package Windows receipt required | transport and qualification contract tests | implemented; live qualification pending |
 | Preserve password recovery after key transition | native Windows qualification controller | endpoint has HostHunter public key and password login remains enabled | password-only SSH succeeds independently; this is recovery authentication, not runtime fallback | exact-package Windows receipt required | qualification contract preserves public-key-disabled password probe | implemented; live qualification pending |
 | Remove the exact qualification identity and agent | native Windows qualification controller | live key journey completed | exact remote authorized-key line and local agent identity are removed, agent stops, prior agent environment is restored | exact-package Windows receipt requires all cleanup booleans | bootstrap rollback and qualification cleanup tests | implemented; live qualification pending |
-| Remove exact native Keychain items | macOS and Windows qualification controllers | disposable data-root-scoped audit key and anchor exist | both production-derived items exist before deletion, deletion succeeds, and both are absent afterward | exact macOS and Windows receipts require cleanupComplete | focused macOS/Windows qualification cleanup tests | implemented; exact native qualification pending |
+| Destroy exact Docker qualification state | Docker Windows qualification controller | six fresh labelled qualification volumes exist | controller, remote key, agent, process policy, and all six volumes are cleaned; partial survivors block success | exact Windows receipt requires controllerVolumeCleanupComplete and six destroyed volumes | focused lifecycle and Windows qualification cleanup tests | implemented; exact live qualification pending |
+| Remove exact optional native Keychain items | optional macOS qualification controller | disposable data-root-scoped audit key and anchor exist | both production-derived items exist before deletion, deletion succeeds, and both are absent afterward | optional macOS receipt requires cleanupComplete | focused macOS qualification cleanup tests | compatibility-only; not a Docker release gate |
 | Remove saved or missing profiles | `Remove-HHTarget` | local operator; named runtime profiles | selected names removed atomically; missing name fails without temporary state | direct fresh-process remove and missing-profile journeys | atomic and CAS removal unit cases | covered |
 | Attempt a WinRM target mutation | `Set-HHTarget -Transport WinRM` | local operator; any endpoint | clear deferred error, no session, no saved mutation | negative fresh-process journey | fail-closed WinRM unit cases | covered negative; positive WinRM deferred |
 | Exceed per-target output limit | remote invocation | local operator; output crosses 100 MiB | shared pipeline stops and offender is classified | intentionally not duplicated through CLI | real streaming integration | covered |

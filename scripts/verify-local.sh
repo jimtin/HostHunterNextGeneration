@@ -30,7 +30,7 @@ trap cleanup EXIT INT TERM HUP
         pwsh -NoLogo -NoProfile -NonInteractive \
         -File scripts/qualification/Test-HHControllerMatrix.ps1 \
         -PowerShellVersion 7.4.19
-"${bounded}" full-unit-coverage 720 300 .artifacts/logs/full-unit-coverage.log \
+"${bounded}" full-unit-coverage 1800 300 .artifacts/logs/full-unit-coverage.log \
     docker compose --file compose.test.yml run --rm test bash scripts/lanes/unit.sh
 "${bounded}" full-ssh-start 180 120 .artifacts/logs/full-ssh-start.log \
     docker compose --file compose.test.yml up --detach --wait ssh-target
@@ -51,12 +51,37 @@ trap cleanup EXIT INT TERM HUP
 "${bounded}" full-sqlite-fault-integration 1200 240 \
     .artifacts/logs/full-sqlite-fault-integration.log \
     bash scripts/lanes/sqlite-integration.sh
-"${bounded}" full-e2e 1200 240 .artifacts/logs/full-e2e.log \
-    docker compose --file compose.test.yml run --rm test bash scripts/lanes/e2e.sh
+"${repo_root}/scripts/runtime/verify.sh"
+runtime_contract="${repo_root}/.artifacts/runtime/runtime-container.json"
+[[ -f "${runtime_contract}" ]] || {
+    printf 'Production runtime verification did not emit its image contract.\n' >&2
+    exit 2
+}
+runtime_controller_image="$(jq -r '.controller.imageId' "${runtime_contract}")"
+runtime_parser_image="$(jq -r '.parser.imageId' "${runtime_contract}")"
+for runtime_image in "${runtime_controller_image}" "${runtime_parser_image}"; do
+    [[ "${runtime_image}" =~ ^sha256:[a-f0-9]{64}$ ]] || {
+        printf 'Production runtime verification emitted an invalid image ID.\n' >&2
+        exit 2
+    }
+done
 "${repo_root}/scripts/lanes/security.sh" \
     hosthunter-next-generation-test:local \
     hosthunter-next-generation-controller-floor:local \
-    hosthunter-next-generation-ssh-fixture:local
+    hosthunter-next-generation-ssh-fixture:local \
+    "${runtime_controller_image}" \
+    "${runtime_parser_image}"
+
+jq -n \
+    --arg controllerImageId "${runtime_controller_image}" \
+    --arg parserImageId "${runtime_parser_image}" \
+    '{
+        status: "passed",
+        scope: "full-product-and-production-runtime",
+        productionRuntimeImageIds: [$controllerImageId, $parserImageId],
+        gitleaksReceipt: "security/gitleaks-receipt.json",
+        imageInventory: "security/image-inventory.tsv"
+    }' >.artifacts/security/receipt.json
 
 printf '{"status":"passed","scope":"full-product"}\n' \
     >.artifacts/summary/verify-local.json

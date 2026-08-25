@@ -36,12 +36,17 @@ lock_path="$package_root/dependencies/sqlite/packages.lock.json"
 sbom_path="$package_root/dependencies/sqlite/sqlite-dependencies.cdx.json"
 notice_path="$package_root/dependencies/sqlite/THIRD-PARTY-NOTICES.md"
 durability_helper_path="$package_root/Private/Interop/HostHunter.Persistence.Durability.dll"
+evtx_metadata_path="$package_root/dependencies/evtx_dump/evtx-dump-assets.json"
 for required_path in "$lock_path" "$sbom_path" "$notice_path"; do
   [[ -f "$required_path" ]] || {
     printf 'release package metadata is missing: %s\n' "$required_path" >&2
     exit 2
   }
 done
+[[ -f "$evtx_metadata_path" ]] || {
+  printf 'release package is missing evtx_dump dependency metadata\n' >&2
+  exit 2
+}
 [[ -f "$durability_helper_path" ]] || {
   printf 'release package is missing the durable publication helper\n' >&2
   exit 2
@@ -52,6 +57,25 @@ if [[ "$(find "$package_root" -type f \
   exit 2
 fi
 durability_helper_sha256="$(shasum -a 256 "$durability_helper_path" | awk '{print $1}')"
+
+for rid in linux-arm64 linux-x64 osx-arm64 osx-x64; do
+  parser_path="$package_root/tools/evtx_dump/$rid/evtx_dump"
+  [[ -f "$parser_path" ]] || {
+    printf 'release package is missing evtx_dump for RID: %s\n' "$rid" >&2
+    exit 2
+  }
+  expected_parser_hash="$(jq -r --arg rid "$rid" '.assets[$rid].sha256' "$evtx_metadata_path")"
+  actual_parser_hash="$(shasum -a 256 "$parser_path" | awk '{print $1}')"
+  [[ "$actual_parser_hash" == "$expected_parser_hash" ]] || {
+    printf 'release package evtx_dump digest mismatch for RID: %s\n' "$rid" >&2
+    exit 2
+  }
+done
+[[ -f "$package_root/dependencies/evtx_dump/LICENSE-APACHE" &&
+  -f "$package_root/dependencies/evtx_dump/LICENSE-MIT" ]] || {
+  printf 'release package is missing evtx_dump licenses\n' >&2
+  exit 2
+}
 
 expected_packages=(
   Microsoft.Data.Sqlite.Core
@@ -165,6 +189,11 @@ jq -n \
       relativePath: "Private/Interop/HostHunter.Persistence.Durability.dll",
       sha256: $durabilityHelperSha256,
       thirdPartyPackageCount: 0
+    },
+    evtxParser: {
+      version: "0.12.2",
+      runtimeIdentifierCount: 4,
+      licenseExpression: "MIT OR Apache-2.0"
     }
   }' > "$report_root/receipt.json"
 

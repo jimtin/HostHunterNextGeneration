@@ -5,9 +5,9 @@
   "metadata": {
     "component": {
       "type": "application",
-      "bom-ref": "pkg:generic/HostHunterNextGeneration@0.2.1",
+      "bom-ref": "pkg:generic/HostHunterNextGeneration@0.3.0-preview1",
       "name": "HostHunterNextGeneration",
-      "version": "0.2.1"
+      "version": "0.3.0-preview1"
     }
   },
   "components": [
@@ -62,7 +62,7 @@
   ],
   "dependencies": [
     {
-      "ref": "pkg:generic/HostHunterNextGeneration@0.2.1",
+      "ref": "pkg:generic/HostHunterNextGeneration@0.3.0-preview1",
       "dependsOn": [
         "pkg:nuget/Microsoft.Data.Sqlite.Core@10.0.11",
         "pkg:nuget/SQLitePCLRaw.bundle_e_sqlite3@3.0.5"

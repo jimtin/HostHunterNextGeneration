@@ -2,16 +2,16 @@
 
 ## 1. Status
 
-**ADOPTED SQLITE FOUNDATION; MACOS DEFAULT-ROOT SSH AND NATIVE
-REQUALIFICATION PENDING 2026-08-25**
+**ADOPTED DOCKER RUNTIME; EXACT-CANDIDATE AND LIVE WINDOWS
+QUALIFICATION PENDING 2026-08-26**
 
 The user explicitly confirmed this design on 2026-08-23. The testing foundation
 and dual-runtime product slice are implemented. The canonical working-tree gate
 passed on 2026-08-24 as the pre-migration baseline. The user confirmed the
 SQLite product direction and the material `.hhout` v2 and recovery amendments
-on 2026-08-24. Working-tree implementation and container requalification are
-complete.
-Exact-commit proof and positive live Windows
+on 2026-08-24. The canonical runtime is now the hardened Docker controller and
+networkless parser sidecar. Focused runtime/provider/lifecycle validation is
+green; one exact-candidate proof remains pending. Exact-commit proof and positive live Windows
 PowerShell 5.1 qualification remain separate release lanes. WinRM is explicitly
 deferred and rejected in v1.
 
@@ -30,17 +30,18 @@ deferred and rejected in v1.
 - Repo truth: PowerShell 7 module with eleven implemented public cmdlets,
   containerized validation, installed local
   hooks, and no hosted test workflow or deployment. Publication remains pending.
-- Controller evidence: macOS uses supported PowerShell-over-SSH. A real Windows
-  target proved direct PowerShell 7 and the local Windows PowerShell 5.1
-  compatibility approach; exact-candidate qualification remains a release lane.
+- Controller evidence: Docker/Linux uses supported PowerShell-over-SSH. The
+  Windows PowerShell 5.1 compatibility session runs on the remote Windows host,
+  not on the controller. Native macOS remains optional compatibility evidence.
 
 ## 3. Gap Map
 
 | Area | Current state | Target |
 |---|---|---|
+| Production runtime | focused implementation green | Non-root Docker controller plus networkless parser, six external volumes, no host credential-store dependency |
 | Unit lane | adopted | Containerized Pester plus a proven four-metric coverage gate |
 | Integration lane | adopted | Real Compose PowerShell-over-SSH target plus deterministic seams |
-| macOS default-root SSH | working-tree focused proof complete; exact native pending | Real password, command, wrong-pin, restart, and key-auth paths under `Library/Application Support`; no space-free substitute |
+| Space-containing SSH data root | working-tree focused proof complete; exact runtime pending | Real password, command, wrong-pin, restart, and key-auth paths under `Library/Application Support`; no space-free substitute |
 | Browser/E2E lane | not-applicable | Black-box CLI/service journeys are the equivalent E2E layer |
 | Production build/build smoke | adopted | Manifest/package smoke and exact export contract |
 | Static checks lane | adopted | PowerShell, Markdown, shell, YAML, Dockerfile, and EditorConfig checks |
@@ -163,7 +164,7 @@ must import this package rather than the source module.
 | WinRM transport | Fail-closed interface seam only; no success simulation or first-release support claim |
 | Credential prompt | Test-only PTY driver; passwords never enter product logs or target state |
 | SSH agent/key store | Run-scoped fake agent and disposable key directory |
-| OS credential store | Interface fake in canonical containers; disposable live macOS Keychain contract outside the canonical lane |
+| Key and anchor provider | Real Docker-volume provider in canonical containers; optional disposable macOS Keychain compatibility lane |
 | Audit sink | In-memory and SQLite adapter fakes plus real DB/operation-event/artifact/anchor fault integration |
 | Clock/IDs/DNS | Injected deterministic clock, ID source, and resolver |
 | Filesystem | Per-run database/WAL/SHM/writer/operation-lock, fallback key/anchor, known-hosts, reserved output, and recovery roots; legacy sentinels are negative fixtures only |
@@ -174,8 +175,7 @@ the container gate. Every test run uses a unique namespace and cleanup trap.
 
 ## 7. Enforcement Model
 
-**Gate-owned proof.** The HostHunter-specific standalone laptop gate is a
-required release deliverable and does not yet exist. It must re-prove the exact
+**Gate-owned proof.** The HostHunter-specific standalone laptop gate must re-prove the exact
 candidate SHA through `./scripts/release/verify-candidate.sh <sha>` from a clean
 checkout before the first push. Developer pushes do not run the full suite.
 
@@ -285,7 +285,7 @@ updated in the same change as any affected feature.
 | Audit SQLite adapter and anchor | Intent/operation/terminal transactions, HMAC projection binding, atomic platform anchor, live-owner-safe recovery | verified working tree; exact native anchor pending |
 | Output v2 writer | Invocation-bound chunks/footer, durable publication, capacity reservation, streaming/backpressure | Linux and macOS verified; exact Windows pending |
 | Audit query cmdlets | Exact types/parameters/errors, pending/cursor records, single-artifact ordered output | verified |
-| Candidate/release runners | Package scan, clean-checkout SHA proof, native macOS and Windows qualification against one package hash | implemented; exact candidate execution pending |
+| Candidate/release runners | Package scan, clean-checkout SHA and production-image proof, Docker-controller live Windows qualification against the same package/image hashes | implemented; exact candidate execution pending |
 | `AGENTS.md` | Documented commands reconciled to executable files | verified |
 
 ### Parallel Work

@@ -8,35 +8,89 @@ param(
     [ValidatePattern('^SHA256:[A-Za-z0-9+/]{43}$')]
     [string]$HostKeyFingerprint,
     [ValidateRange(1, 65535)][int]$Port = 22,
-    [string]$ReceiptPath
+    [string]$ReceiptPath,
+    [ValidateSet('Auto', 'MacOSKeychain', 'LinuxDockerVolume')]
+    [string]$ControllerMode = 'Auto',
+    [string]$CandidateReceiptPath,
+    [string]$ModuleManifestPath,
+    [ValidateScript({
+            [string]::IsNullOrWhiteSpace($_) -or $_ -cmatch '^sha256:[a-f0-9]{64}$'
+        })]
+    [string]$ControllerImageId,
+    [ValidatePattern('^[a-z0-9][a-z0-9_-]{2,63}$')]
+    [string]$ControllerVolumeProject
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-if (-not $IsMacOS) {
-    throw 'The Windows qualification must run from the qualified macOS HostHunter controller.'
+$resolvedControllerMode = if ($ControllerMode -ceq 'Auto') {
+    if ($IsMacOS) { 'MacOSKeychain' }
+    elseif ($IsLinux) { 'LinuxDockerVolume' }
+    else { throw 'The Windows qualification controller platform is unsupported.' }
 }
-$repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '../..')).Path
+else { $ControllerMode }
+if ($resolvedControllerMode -ceq 'MacOSKeychain' -and -not $IsMacOS) {
+    throw 'The MacOSKeychain qualification mode requires macOS.'
+}
+if ($resolvedControllerMode -ceq 'LinuxDockerVolume' -and -not $IsLinux) {
+    throw 'The LinuxDockerVolume qualification mode requires Linux.'
+}
+
+$repoRoot = $null
+if ($resolvedControllerMode -ceq 'MacOSKeychain') {
+    $repoRoot = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '../..')).Path
+    if ([string]::IsNullOrWhiteSpace($CandidateReceiptPath)) {
+        $CandidateReceiptPath = Join-Path $repoRoot ".artifacts/release/$CandidateSha/receipt.json"
+    }
+}
+elseif ([string]::IsNullOrWhiteSpace($CandidateReceiptPath)) {
+    throw 'LinuxDockerVolume qualification requires the exact candidate receipt path.'
+}
 $archive = (Resolve-Path -LiteralPath $PackageArchivePath).Path
-$candidateReceiptPath = Join-Path $repoRoot ".artifacts/release/$CandidateSha/receipt.json"
-if (-not [IO.File]::Exists($candidateReceiptPath)) {
+$candidateReceiptFile = (Resolve-Path -LiteralPath $CandidateReceiptPath).Path
+if (-not [IO.File]::Exists($candidateReceiptFile)) {
     throw 'The exact-candidate receipt is missing.'
 }
-$candidateReceipt = Get-Content -LiteralPath $candidateReceiptPath -Raw | ConvertFrom-Json
+$candidateReceipt = Get-Content -LiteralPath $candidateReceiptFile -Raw | ConvertFrom-Json
 $packageSha256 = (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant()
 if ($candidateReceipt.status -cne 'passed' -or
     $candidateReceipt.candidateSha -cne $CandidateSha -or
-    $candidateReceipt.packageArchiveSha256 -cne $packageSha256) {
+    $candidateReceipt.packageArchiveSha256 -cne $packageSha256 -or
+    [string]$candidateReceipt.packageInventorySha256 -cnotmatch '^[a-f0-9]{64}$') {
     throw 'The package archive is not bound to the successful exact-candidate receipt.'
 }
-$head = (& git -C $repoRoot rev-parse HEAD).Trim()
-$status = @(& git -C $repoRoot status --porcelain=v1 --untracked-files=all)
-if ($LASTEXITCODE -ne 0 -or $head -cne $CandidateSha -or $status.Count -ne 0) {
-    throw 'Windows qualification requires the clean exact candidate at repository HEAD.'
+$expectedPackageInventorySha256 = [string]$candidateReceipt.packageInventorySha256
+if ($resolvedControllerMode -ceq 'MacOSKeychain') {
+    $head = (& git -C $repoRoot rev-parse HEAD).Trim()
+    $status = @(& git -C $repoRoot status --porcelain=v1 --untracked-files=all)
+    if ($LASTEXITCODE -ne 0 -or $head -cne $CandidateSha -or $status.Count -ne 0) {
+        throw 'Windows qualification requires the clean exact candidate at repository HEAD.'
+    }
+}
+else {
+    if ([string]::IsNullOrWhiteSpace($ControllerImageId) -or
+        [string]::IsNullOrWhiteSpace($ControllerVolumeProject)) {
+        throw 'Docker qualification requires the exact controller image and volume project.'
+    }
+    if ($env:HH_SECRET_PROVIDER -cne 'DockerVolume' -or
+        [string]::IsNullOrWhiteSpace($env:HH_DATA_ROOT) -or
+        [string]::IsNullOrWhiteSpace($env:HH_SECRET_ROOT) -or
+        [string]::IsNullOrWhiteSpace($env:HH_ANCHOR_ROOT) -or
+        [string]::IsNullOrWhiteSpace($env:HH_SSH_ROOT) -or
+        [string]::IsNullOrWhiteSpace($env:HH_EVIDENCE_ROOT) -or
+        $env:HH_QUALIFICATION_VOLUME_COUNT -cne '6') {
+        throw 'The DockerVolume controller environment is incomplete.'
+    }
+    if ([string]::IsNullOrWhiteSpace($ModuleManifestPath)) {
+        $ModuleManifestPath = $env:HH_RUNTIME_MODULE_PATH
+    }
 }
 
 if ([string]::IsNullOrWhiteSpace($ReceiptPath)) {
+    if ($resolvedControllerMode -ceq 'LinuxDockerVolume') {
+        throw 'LinuxDockerVolume qualification requires an explicit receipt path.'
+    }
     $ReceiptPath = Join-Path $repoRoot ".artifacts/qualification/windows/$CandidateSha/receipt.json"
 }
 $receipt = [IO.Path]::GetFullPath($ReceiptPath)
@@ -46,20 +100,25 @@ if ([string]::IsNullOrWhiteSpace($canonicalTempRoot) -or
     -not [IO.Directory]::Exists($canonicalTempRoot)) {
     throw 'The Windows qualification temporary root could not be canonicalized.'
 }
-$qualificationRoot = Join-Path $canonicalTempRoot (
-    'hosthunter-windows-qualification-' + [Guid]::NewGuid().ToString('N')
-)
-$dataRoot = Join-Path $qualificationRoot `
-    'Library/Application Support/HostHunterNextGeneration'
-$extractRoot = Join-Path $canonicalTempRoot (
-    'hosthunter-windows-package-' + [Guid]::NewGuid().ToString('N')
-)
+$qualificationRoot = $null
+$extractRoot = $null
+$dataRoot = if ($resolvedControllerMode -ceq 'MacOSKeychain') {
+    $qualificationRoot = Join-Path $canonicalTempRoot (
+        'hosthunter-windows-qualification-' + [Guid]::NewGuid().ToString('N')
+    )
+    $extractRoot = Join-Path $canonicalTempRoot (
+        'hosthunter-windows-package-' + [Guid]::NewGuid().ToString('N')
+    )
+    Join-Path $qualificationRoot 'Library/Application Support/HostHunterNextGeneration'
+}
+else { [IO.Path]::GetFullPath($env:HH_DATA_ROOT) }
 $remoteArchiveName = 'HostHunterNextGeneration-' + [Guid]::NewGuid().ToString('N') + '.tar.gz'
 $module = $null
 $keychainAccount = $null
 $keychainPath = $null
 $auditService = $null
 $anchorService = $null
+$controllerPackageInventorySha256 = $null
 $exactInstalledKeyLine = $null
 $remoteKeyRemoved = $false
 $cleanupComplete = $false
@@ -80,11 +139,13 @@ $commandLineDisabledEventVerified = $false
 $escalationPreferenceVerified = $false
 $processAuditPolicyRestored = $false
 $spaceContainingDataRootVerified = $false
+$restartPersistenceVerified = $false
 $processAuditRestoreRequired = $false
 $processAuditBeforeFlag = $null
 $commandLineBeforeState = $null
 $originalSshAuthSock = [Environment]::GetEnvironmentVariable('SSH_AUTH_SOCK', 'Process')
 $originalSshAgentPid = [Environment]::GetEnvironmentVariable('SSH_AGENT_PID', 'Process')
+$originalDataRoot = [Environment]::GetEnvironmentVariable('HH_DATA_ROOT', 'Process')
 
 function Write-HHQualificationPhase {
     param(
@@ -221,6 +282,35 @@ function Invoke-HHQualificationSshAgentStart {
         Socket = $socketMatch.Groups['Value'].Value
         ProcessId = $pidMatch.Groups['Value'].Value
     }
+}
+
+function Get-HHQualificationPackageInventorySha256 {
+    param([Parameter(Mandatory)][string]$ModuleRoot)
+
+    $canonicalRoot = (Resolve-Path -LiteralPath $ModuleRoot).Path
+    $inventory = [Collections.Generic.SortedDictionary[string, string]]::new(
+        [StringComparer]::Ordinal
+    )
+    foreach ($file in @(Get-ChildItem -LiteralPath $canonicalRoot -File -Recurse)) {
+        $relativePath = [IO.Path]::GetRelativePath(
+            $canonicalRoot,
+            $file.FullName
+        ).Replace('\', '/')
+        $fileSha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).
+            Hash.ToLowerInvariant()
+        $inventory.Add($relativePath, "$fileSha256  ./$relativePath")
+    }
+    if ($inventory.Count -eq 0) {
+        throw 'The packaged controller module inventory is empty.'
+    }
+    $inventoryBytes = [Text.Encoding]::UTF8.GetBytes(
+        (@($inventory.Values) -join "`n") + "`n"
+    )
+    try {
+        $inventoryHash = [Security.Cryptography.SHA256]::HashData($inventoryBytes)
+        return [Convert]::ToHexString($inventoryHash).ToLowerInvariant()
+    }
+    finally { [Array]::Clear($inventoryBytes, 0, $inventoryBytes.Length) }
 }
 
 function Get-HHRemoteWindowsBootstrapScript {
@@ -441,27 +531,42 @@ $commandLine = [string]$matched['CommandLine']
 
 try {
     Write-HHQualificationPhase -Phase NativePackage -Status Started
-    [IO.Directory]::CreateDirectory($extractRoot) | Out-Null
-    & tar -xzf $archive -C $extractRoot
-    if ($LASTEXITCODE -ne 0) { throw 'Candidate package extraction failed.' }
-    $manifest = Get-ChildItem -LiteralPath $extractRoot -Recurse `
-        -Filter HostHunterNextGeneration.psd1 -File | Select-Object -First 1
-    if ($null -eq $manifest) { throw 'Candidate module manifest is missing.' }
+    if ($resolvedControllerMode -ceq 'MacOSKeychain') {
+        [IO.Directory]::CreateDirectory($extractRoot) | Out-Null
+        & tar -xzf $archive -C $extractRoot
+        if ($LASTEXITCODE -ne 0) { throw 'Candidate package extraction failed.' }
+        $manifest = Get-ChildItem -LiteralPath $extractRoot -Recurse `
+            -Filter HostHunterNextGeneration.psd1 -File | Select-Object -First 1
+        if ($null -eq $manifest) { throw 'Candidate module manifest is missing.' }
+    }
+    else {
+        $manifest = Get-Item -LiteralPath $ModuleManifestPath -ErrorAction Stop
+        if ($manifest.Name -cne 'HostHunterNextGeneration.psd1') {
+            throw 'The stable controller module manifest is invalid.'
+        }
+        $controllerPackageInventorySha256 =
+            Get-HHQualificationPackageInventorySha256 -ModuleRoot $manifest.DirectoryName
+        if ($controllerPackageInventorySha256 -cne $expectedPackageInventorySha256) {
+            throw 'The controller image module is not the exact candidate package.'
+        }
+    }
     $env:HH_DATA_ROOT = $dataRoot
     $module = Import-Module $manifest.FullName -Force -PassThru
-    $identity = & $module {
-        param($QualificationDataRoot)
-        [pscustomobject]@{
-            Account = Get-HHAuditKeychainAccount -DataRoot $QualificationDataRoot
-            KeychainPath = Get-HHMacOSLoginKeychainPath
-            AuditService = $script:HHAuditKeychainService
-            AnchorService = $script:HHPersistenceAnchorKeychainService
-        }
-    } $dataRoot
-    $keychainAccount = [string]$identity.Account
-    $keychainPath = [string]$identity.KeychainPath
-    $auditService = [string]$identity.AuditService
-    $anchorService = [string]$identity.AnchorService
+    if ($resolvedControllerMode -ceq 'MacOSKeychain') {
+        $identity = & $module {
+            param($QualificationDataRoot)
+            [pscustomobject]@{
+                Account = Get-HHAuditKeychainAccount -DataRoot $QualificationDataRoot
+                KeychainPath = Get-HHMacOSLoginKeychainPath
+                AuditService = $script:HHAuditKeychainService
+                AnchorService = $script:HHPersistenceAnchorKeychainService
+            }
+        } $dataRoot
+        $keychainAccount = [string]$identity.Account
+        $keychainPath = [string]$identity.KeychainPath
+        $auditService = [string]$identity.AuditService
+        $anchorService = [string]$identity.AnchorService
+    }
 
     $null = Invoke-HHInteractiveNativeProcess -FileName 'scp' -ArgumentList @(
         '-P', [string]$Port, $archive, "${UserName}@${SshHost}:$remoteArchiveName"
@@ -507,8 +612,9 @@ try {
                 -ReferenceObject @('windows-ps51', 'windows-ps7') `
                 -DifferenceObject @($reloadedTargets.Name)).Count -ne 0 -or
         @($reloadedTargets | Where-Object Authentication -cne 'Password').Count -ne 0) {
-        throw 'The space-containing data root did not persist both password targets across restart.'
+        throw 'The controller persistence root did not retain both password targets across restart.'
     }
+    $restartPersistenceVerified = $true
     Write-HHQualificationPhase -Phase RestartPersistence -Status Passed
 
     $streamCommand = @'
@@ -624,10 +730,12 @@ Write-Error 'error' -ErrorAction Continue
     }
     $keyResult = Invoke-HHCommand -Command "'key-proof'" -Target windows-ps7
     if (-not $keyResult.Succeeded) { throw 'The committed key profile could not execute.' }
-    if ($dataRoot -notmatch 'Library/Application Support/HostHunterNextGeneration') {
-        throw 'The Windows qualification did not use the required macOS-style data root.'
+    if ($resolvedControllerMode -ceq 'MacOSKeychain') {
+        if ($dataRoot -notmatch 'Library/Application Support/HostHunterNextGeneration') {
+            throw 'The Windows qualification did not use the required macOS-style data root.'
+        }
+        $spaceContainingDataRootVerified = $true
     }
-    $spaceContainingDataRootVerified = $true
     Write-HHQualificationPhase -Phase AgentKeyProof -Status Passed
 
     Write-HHQualificationPhase -Phase PasswordRecovery -Status Started
@@ -743,12 +851,17 @@ finally {
             -ErrorAction Stop
         $cleanupComplete = $true
     }
+    elseif ($resolvedControllerMode -ceq 'LinuxDockerVolume' -and $remoteKeyRemoved) {
+        $cleanupComplete = $true
+    }
     if ($null -ne $module) {
         Remove-Module $module -Force -Confirm:$false -ErrorAction SilentlyContinue
     }
-    Remove-Item -LiteralPath $extractRoot -Recurse -Force -Confirm:$false `
-        -ErrorAction SilentlyContinue
-    $env:HH_DATA_ROOT = $null
+    if (-not [string]::IsNullOrWhiteSpace($extractRoot)) {
+        Remove-Item -LiteralPath $extractRoot -Recurse -Force -Confirm:$false `
+            -ErrorAction SilentlyContinue
+    }
+    $env:HH_DATA_ROOT = $originalDataRoot
 }
 
 if (-not $cleanupComplete) {
@@ -760,10 +873,33 @@ if (-not $sshAgentIdentityRemoved -or -not $sshAgentStopped) {
 Write-HHQualificationPhase -Phase Cleanup -Status Passed
 [IO.Directory]::CreateDirectory((Split-Path -Parent $receipt)) | Out-Null
 [ordered]@{
-    status = 'passed'
+    status = if ($resolvedControllerMode -ceq 'LinuxDockerVolume') {
+        'controller-passed'
+    }
+    else { 'passed' }
     candidateSha = $CandidateSha
     packageArchiveSha256 = $packageSha256
-    controllerPlatform = 'macOS'
+    packageInventorySha256 = $expectedPackageInventorySha256
+    controllerMode = $resolvedControllerMode
+    controllerPlatform = if ($resolvedControllerMode -ceq 'LinuxDockerVolume') {
+        'Linux'
+    }
+    else { 'macOS' }
+    controllerImageId = if ($resolvedControllerMode -ceq 'LinuxDockerVolume') {
+        $ControllerImageId
+    }
+    else { $null }
+    controllerVolumeProject = if ($resolvedControllerMode -ceq 'LinuxDockerVolume') {
+        $ControllerVolumeProject
+    }
+    else { $null }
+    controllerVolumeCount = if ($resolvedControllerMode -ceq 'LinuxDockerVolume') { 6 }
+        else { 0 }
+    controllerVolumeCleanupComplete =
+        $resolvedControllerMode -cne 'LinuxDockerVolume'
+    stablePackagedModuleVerified =
+        $resolvedControllerMode -cne 'LinuxDockerVolume' -or
+        $controllerPackageInventorySha256 -ceq $expectedPackageInventorySha256
     targetPlatform = 'Windows'
     targetPowerShellVersion = [string]$nativeProof.PowerShellVersion
     sqliteVersion = [string]$nativeProof.SQLiteVersion
@@ -783,6 +919,7 @@ Write-HHQualificationPhase -Phase Cleanup -Status Passed
     escalationPreferenceVerified = $escalationPreferenceVerified
     processAuditPolicyRestored = $processAuditPolicyRestored
     keyTransitionSucceeded = [bool]$keyResult.Succeeded
+    restartPersistenceVerified = $restartPersistenceVerified
     spaceContainingDataRootVerified = $spaceContainingDataRootVerified
     runScopedSshAgentVerified = $sshAgentStarted -and $sshAgentKeyAdded -and
         [bool]$keyResult.Succeeded

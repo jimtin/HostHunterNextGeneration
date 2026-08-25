@@ -11,6 +11,14 @@
   may only orchestrate Docker and maintain ignored artifacts.
 - GitHub stores source and review state. Do not add GitHub Actions that rerun
   repository validation.
+- Docker is the canonical HostHunter controller runtime and validation
+  environment from `0.3.0-preview1` onward. Native macOS providers remain
+  optional compatibility adapters; no release may require an OS credential
+  store to run the production controller image.
+- Retained successful proof bundles and coverage working data are each limited
+  to 20 MiB. Scanner caches, checked-out candidates, package trees, raw
+  per-hit coverage events, and duplicated reports are reproducible working
+  data, not retained release evidence.
 - Publication must leave the repository owner-written: only `jimtin` may push,
   merge, administer, or install repository-scoped integrations. This remote
   state is not proven until the post-publication settings re-read. Never execute
@@ -60,6 +68,9 @@ SQLite integration and CLI E2E must import the generated package through
   `WindowsPowerShell51` uses a bounded local compatibility PSSession only after
   Desktop 5.1 identity proof. Never add silent runtime or transport fallback.
 - Generated reports belong under `.artifacts/` and must never be committed.
+- Product runtime state belongs only in explicitly named external Docker
+  volumes. Tests must never reuse operator volumes, and `docker compose down`
+  must not delete them.
 - Scanner/image references and downloaded tool archives require exact version
   plus immutable digest or checksum. No floating tags are allowed.
 - The dated Trivy exception is path-specific and must be removed or renewed

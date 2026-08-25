@@ -45,8 +45,12 @@ $branchTestPhases = @(
     [pscustomobject]@{ Name = 'module internals'; Paths = $otherUnitTests; Tag = 'Unit' }
     [pscustomobject]@{ Name = 'public cmdlets'; Paths = @($publicCmdletTest); Tag = 'Unit' }
     [pscustomobject]@{
-        Name = 'authenticated SQLite migration'
-        Paths = @(Join-Path $repoRoot 'tests/integration/SqliteMigrationV2.Tests.ps1')
+        Name = 'authenticated persistence and API integration'
+        Paths = @(
+            Join-Path $repoRoot 'tests/integration/SqliteMigrationV2.Tests.ps1'
+            Join-Path $repoRoot 'tests/integration/ForensicsMigration.Tests.ps1'
+            Join-Path $repoRoot 'tests/integration/ForensicsApiClient.Tests.ps1'
+        )
         Tag = 'Integration'
     }
 )
