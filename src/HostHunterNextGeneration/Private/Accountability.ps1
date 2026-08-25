@@ -79,7 +79,8 @@ function ConvertTo-HHCanonicalRemoteOperationManifest {
         'BootstrapReconcile',
         'BootstrapKeyOnlyOuterIdentity',
         'BootstrapKeyOnlyRuntimeIdentity',
-        'BootstrapRollback'
+        'BootstrapRollback',
+        'ProcessAuditPolicyMutation'
     )
     $canonicalOperations = [Collections.Generic.List[object]]::new()
     for ($index = 0; $index -lt $RemoteOperations.Count; $index++) {
@@ -294,6 +295,61 @@ function Get-HHTransportAuditBootstrapOutcome {
     }
 }
 
+function Get-HHTransportAuditPolicyOutcome {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][object]$TransportResult,
+        [Parameter(Mandatory)][object]$IntentMetadata,
+        [Parameter(Mandatory)][string]$DispatchState
+    )
+
+    $state = Get-HHAuditObjectPropertyState -InputObject $TransportResult `
+        -Name PolicyOutcome -Context 'Transport result' -Optional
+    $isPolicyIntent =
+        $IntentMetadata.Operation -ceq 'SetWindowsProcessAuditPolicy'
+    if (-not $state.Exists) {
+        if ($isPolicyIntent -and $DispatchState -ceq 'Completed') {
+            throw 'A completed process audit policy operation requires a policy outcome.'
+        }
+        return [pscustomobject]@{ HasOutcome = $false; Outcome = $null }
+    }
+    if (-not $isPolicyIntent) {
+        throw 'A process audit policy outcome is valid only for its matching operation.'
+    }
+    $outcome = $state.Value
+    if ($null -eq $outcome -or
+        -not (Test-HHWindowsProcessAuditPolicyOutcome -Outcome $outcome)) {
+        throw 'Transport result supplied an invalid process audit policy outcome.'
+    }
+    foreach ($name in @(
+            'Succeeded', 'Changed', 'ConflictDetected', 'ReconciliationRequired',
+            'EscalationRequested', 'PrivilegeActivated', 'PrivilegeChanged'
+        )) {
+        if ($outcome.$name -isnot [bool]) {
+            throw "Process audit policy outcome property '$name' must be Boolean."
+        }
+    }
+    if ($null -ne $outcome.PrivilegeRestored -and
+        $outcome.PrivilegeRestored -isnot [bool]) {
+        throw "Process audit policy outcome property 'PrivilegeRestored' must be Boolean or null."
+    }
+    if ([string]$outcome.RequiredPrivilege -cne 'SeSecurityPrivilege') {
+        throw 'Process audit policy outcome supplied an unsupported privilege.'
+    }
+    if ([bool]$outcome.EscalationRequested) {
+        if ([string]$outcome.EscalationMethod -cne 'WindowsTokenPrivilege') {
+            throw 'Escalated process audit policy outcome supplied an unsupported method.'
+        }
+    }
+    elseif ($null -ne $outcome.EscalationMethod) {
+        throw 'A non-escalated process audit policy outcome cannot contain an escalation method.'
+    }
+    if ([bool]$outcome.ReconciliationRequired -and [bool]$outcome.Succeeded) {
+        throw 'A process audit policy outcome requiring reconciliation cannot succeed.'
+    }
+    return [pscustomobject]@{ HasOutcome = $true; Outcome = $outcome }
+}
+
 function Assert-HHAuditRemoteIdentity {
     [CmdletBinding()]
     param(
@@ -409,6 +465,14 @@ function Assert-HHTransportAuditResult {
     $bootstrapOutcome = Get-HHTransportAuditBootstrapOutcome `
         -TransportResult $TransportResult `
         -IntentMetadata $IntentMetadata
+    $policyOutcome = Get-HHTransportAuditPolicyOutcome `
+        -TransportResult $TransportResult `
+        -IntentMetadata $IntentMetadata `
+        -DispatchState $dispatchState
+    if ($policyOutcome.HasOutcome -and
+        [bool]$policyOutcome.Outcome.Succeeded -ne $succeeded) {
+        throw 'Transport success contradicts the process audit policy outcome.'
+    }
     if ($bootstrapOutcome.HasOutcome) {
         if ($bootstrapOutcome.CommitState -ceq 'Unknown' -and
             $outcomeStatus -cne 'Unknown') {
@@ -675,5 +739,7 @@ function Assert-HHTransportAuditResult {
         RollbackSucceeded = $bootstrapOutcome.RollbackSucceeded
         ReconciliationRequired = $bootstrapOutcome.ReconciliationRequired
         CommitState = $bootstrapOutcome.CommitState
+        HasPolicyOutcome = $policyOutcome.HasOutcome
+        PolicyOutcome = $policyOutcome.Outcome
     }
 }

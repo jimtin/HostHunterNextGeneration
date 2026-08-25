@@ -3,10 +3,10 @@
 ## Status
 
 **SQLITE CRITICAL PATHS IMPLEMENTED; EXACT-CANDIDATE NATIVE PROOF PENDING
-2026-08-24**
+2026-08-25**
 
-The SQLite working tree has 544/544 passing product units, all four coverage
-metrics above 90%, 18/18 package CLI journeys, and nine passing process/fault
+The SQLite v2 working tree has 632/632 passing product tests, all four coverage
+metrics above 90%, 21/21 package CLI journeys, and nine passing process/fault
 scenarios. The declared PowerShell 7.4 floor is verified in its pinned
 container. Exact-candidate reproduction, native Windows, and post-publication
 GitHub verification remain pending.

@@ -1,12 +1,4 @@
-function Invoke-HHCommand {
-    <#
-    .SYNOPSIS
-    Runs a PowerShell command against active or selected HostHunter targets.
-    .DESCRIPTION
-    Records durable per-target intent before opening any connection, captures
-    every PowerShell stream into encrypted artifacts, and never retries an
-    uncertain command automatically.
-    #>
+function Invoke-HHRemoteCommandCoordinator {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory, Position = 0)]
@@ -20,19 +12,20 @@ function Invoke-HHCommand {
         [int]$ThrottleLimit = 8,
 
         [string]$Reason,
-        [string]$CaseId
-    )
+        [string]$CaseId,
 
-    $tokens = $null
-    $parseErrors = $null
-    [System.Management.Automation.Language.Parser]::ParseInput(
-        $Command,
-        [ref]$tokens,
-        [ref]$parseErrors
-    ) | Out-Null
-    if ($parseErrors.Count -gt 0) {
-        throw "Command text is not valid PowerShell: $($parseErrors[0].Message)"
-    }
+        [ValidateSet('InvokeCommand', 'SetWindowsProcessAuditPolicy')]
+        [string]$Operation = 'InvokeCommand',
+
+        [scriptblock]$RemoteScriptBlock,
+
+        [AllowEmptyCollection()]
+        [object[]]$RemoteArgumentList = @(),
+
+        [scriptblock]$RemoteOperationManifestFactory,
+
+        [scriptblock]$TransportResultAugmenter
+    )
 
     $runtime = Get-HHRuntimeContext
     if (-not [IO.File]::Exists($runtime.DatabasePath)) {
@@ -71,27 +64,42 @@ function Invoke-HHCommand {
         throw 'WinRM command execution is not qualified in this release.'
     }
 
-    $remoteCommand = {
-        param([Parameter(Mandatory)][string]$CommandText)
-        $remoteScript = [scriptblock]::Create($CommandText)
-        & $remoteScript
+    $remoteCommand = if ($null -eq $RemoteScriptBlock) {
+        {
+            param([Parameter(Mandatory)][string]$CommandText)
+            $remoteScript = [scriptblock]::Create($CommandText)
+            & $remoteScript
+        }
     }
+    else { $RemoteScriptBlock }
+    $remoteArguments = if ($null -eq $RemoteScriptBlock) {
+        @($Command)
+    }
+    else { @($RemoteArgumentList) }
 
     $request = @(
         foreach ($selectedTarget in $selectedTargets) {
             [pscustomobject]@{
                 Target = $selectedTarget
                 CommandText = $Command
-                RemoteOperations = @(Get-HHCommandRemoteOperationManifest `
-                        -Target $selectedTarget -ScriptBlock $remoteCommand `
-                        -ArgumentList @($Command))
+                RemoteOperations = @(
+                    if ($null -eq $RemoteOperationManifestFactory) {
+                        Get-HHCommandRemoteOperationManifest `
+                            -Target $selectedTarget -ScriptBlock $remoteCommand `
+                            -ArgumentList $remoteArguments
+                    }
+                    else {
+                        & $RemoteOperationManifestFactory $selectedTarget $remoteCommand `
+                            $remoteArguments
+                    }
+                )
                 Reason = $Reason
                 CaseId = $CaseId
             }
         }
     )
     $registered = @(Register-HHAuthenticatedAuditBatch -Context $context `
-            -Operation InvokeCommand -Request $request)
+            -Operation $Operation -Request $request)
     $capacityReservation = Start-HHAuthenticatedAuditCapacityReservation `
         -Context $context -Intent $registered
     $batchId = $registered[0].BatchId
@@ -233,7 +241,7 @@ function Invoke-HHCommand {
             $fanOutResults = Invoke-HHSshSessionFanOut `
                 -SessionContextByName $sessionByName `
                 -ScriptBlock $remoteCommand `
-                -ArgumentList @($Command) `
+                -ArgumentList $remoteArguments `
                 -ThrottleLimit $ThrottleLimit `
                 -EventObserver $streamObserver
             foreach ($targetName in $fanOutResults.Keys) {
@@ -374,29 +382,43 @@ function Invoke-HHCommand {
                 DispatchState = $commandResult.DispatchState
                 OutcomeStatus = $commandResult.OutcomeStatus
             }
+            if ($null -ne $TransportResultAugmenter) {
+                $augmentedResult = & $TransportResultAugmenter `
+                    $selectedTarget $transportResult $commandResult
+                if ($null -eq $augmentedResult) {
+                    throw 'The transport result augmenter returned no result.'
+                }
+                $transportResult = $augmentedResult
+            }
             Complete-HHAuthenticatedTransportAudit -Context $context `
                 -Intent $intentByName[$selectedTarget.Name] `
                 -TransportResult $transportResult `
                 -ArmedOrdinal $armedOrdinalByName[$selectedTarget.Name].ToArray() `
                 -ArtifactWriter $artifactWriterByName[$selectedTarget.Name] | Out-Null
-            [pscustomobject]@{
+            $publicResult = [pscustomobject]@{
                 BatchId = $batchId
                 InvocationId = $intentByName[$selectedTarget.Name].InvocationId
                 Target = $selectedTarget.Name
                 PowerShellRuntime = $selectedTarget.PowerShellRuntime
-                Succeeded = $commandResult.Succeeded
-                FailureKind = $commandResult.FailureKind
-                DispatchState = $commandResult.DispatchState
-                OutcomeStatus = $commandResult.OutcomeStatus
+                Succeeded = $transportResult.Succeeded
+                FailureKind = $transportResult.FailureKind
+                DispatchState = $transportResult.DispatchState
+                OutcomeStatus = $transportResult.OutcomeStatus
                 RemotePowerShellVersion = $transportResult.RemotePowerShellVersion
                 RemotePSEdition = $transportResult.RemotePSEdition
                 ExecutionMode = $transportResult.ExecutionMode
                 HostKeyFingerprint = $transportResult.HostKeyFingerprint
                 OutputBytes = $commandResult.OutputBytes
-                ExceptionType = $commandResult.ExceptionType
+                ExceptionType = $transportResult.ExceptionType
                 SessionRemovalFailure = $transportResult.SessionRemovalFailure
                 StreamEvents = $commandResult.StreamEvents
             }
+            $policyOutcomeProperty = $transportResult.PSObject.Properties['PolicyOutcome']
+            if ($null -ne $policyOutcomeProperty) {
+                $publicResult | Add-Member -NotePropertyName PolicyOutcome `
+                    -NotePropertyValue $policyOutcomeProperty.Value
+            }
+            $publicResult
         }
     )
     }
@@ -409,4 +431,50 @@ function Invoke-HHCommand {
         }
         Close-HHAuthenticatedPersistence -Context $context
     }
+}
+
+function Invoke-HHCommand {
+    <#
+    .SYNOPSIS
+    Runs a PowerShell command against active or selected HostHunter targets.
+    .DESCRIPTION
+    Records durable per-target intent before opening any connection, captures
+    every PowerShell stream into encrypted artifacts, and never retries an
+    uncertain command automatically.
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory, Position = 0)]
+        [ValidateNotNullOrEmpty()]
+        [string]$Command,
+
+        [ValidateCount(1, 8)]
+        [string[]]$Target,
+
+        [ValidateRange(1, 8)]
+        [int]$ThrottleLimit = 8,
+
+        [string]$Reason,
+        [string]$CaseId
+    )
+
+    $tokens = $null
+    $parseErrors = $null
+    [System.Management.Automation.Language.Parser]::ParseInput(
+        $Command,
+        [ref]$tokens,
+        [ref]$parseErrors
+    ) | Out-Null
+    if ($parseErrors.Count -gt 0) {
+        throw "Command text is not valid PowerShell: $($parseErrors[0].Message)"
+    }
+
+    $parameters = @{
+        Command = $Command
+        ThrottleLimit = $ThrottleLimit
+        Reason = $Reason
+        CaseId = $CaseId
+    }
+    if ($PSBoundParameters.ContainsKey('Target')) { $parameters.Target = $Target }
+    Invoke-HHRemoteCommandCoordinator @parameters
 }

@@ -20,4 +20,7 @@ Export-ModuleMember -Function @(
     'Enable-HHSshKeyAuthentication'
     'Get-HHAuditRecord'
     'Get-HHAuditOutput'
+    'Set-HHWindowsProcessAuditPolicy'
+    'Set-HHEscalationPreference'
+    'Get-HHEscalationPreference'
 )

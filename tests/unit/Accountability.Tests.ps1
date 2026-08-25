@@ -57,6 +57,120 @@ Describe 'transport accountability validation' -Tag Unit {
             $validated.ValidatedAtUtc | Should -Match '^2026-08-24T00:00:00'
         }
 
+        It 'requires and retains a correlated process audit policy outcome' {
+            $script:intent.IntentRecord.payload.operation = 'SetWindowsProcessAuditPolicy'
+            $script:result | Add-Member PolicyOutcome ([pscustomobject][ordered]@{
+                    Marker = 'HostHunter.WindowsProcessAuditPolicyResult.v1'
+                    Succeeded = $true
+                    FailureKind = $null
+                    FailureMessage = $null
+                    AuditBefore = [pscustomobject]@{ ProcessCreation = 0 }
+                    AuditDesired = [pscustomobject]@{ ProcessCreation = 1 }
+                    AuditAfter = [pscustomobject]@{ ProcessCreation = 1 }
+                    CommandLineBefore = 'NotConfigured'
+                    CommandLineDesired = 'Enabled'
+                    CommandLineAfter = 'Enabled'
+                    Changed = $true
+                    CompensationStatus = 'NotRequired'
+                    ConflictDetected = $false
+                    ReconciliationRequired = $false
+                    EscalationRequested = $true
+                    EscalationMethod = 'WindowsTokenPrivilege'
+                    RequiredPrivilege = 'SeSecurityPrivilege'
+                    PrivilegeActivated = $true
+                    PrivilegeChanged = $true
+                    PrivilegeRestored = $true
+                })
+            $validated = Assert-HHTransportAuditResult -TransportResult $script:result `
+                -IntentMetadata (Get-HHAuditIntentTransportContext $script:intent)
+            $validated.HasPolicyOutcome | Should -BeTrue
+            $validated.PolicyOutcome.CommandLineAfter | Should -BeExactly Enabled
+        }
+
+        It 'rejects a completed process audit operation without its policy outcome' {
+            $script:intent.IntentRecord.payload.operation = 'SetWindowsProcessAuditPolicy'
+            { Assert-HHTransportAuditResult -TransportResult $script:result `
+                    -IntentMetadata (Get-HHAuditIntentTransportContext $script:intent) } |
+                Should -Throw '*requires a policy outcome*'
+        }
+
+        It 'rejects contradictory or misplaced process audit policy outcomes' {
+            $outcome = [pscustomobject][ordered]@{
+                Marker = 'HostHunter.WindowsProcessAuditPolicyResult.v1'
+                Succeeded = $false
+                FailureKind = 'PolicyMutationFailed'
+                FailureMessage = 'failure'
+                AuditBefore = [pscustomobject]@{ ProcessCreation = 0 }
+                AuditDesired = [pscustomobject]@{ ProcessCreation = 1 }
+                AuditAfter = [pscustomobject]@{ ProcessCreation = 0 }
+                CommandLineBefore = 'Unchanged'
+                CommandLineDesired = 'Unchanged'
+                CommandLineAfter = 'Unchanged'
+                Changed = $false
+                CompensationStatus = 'NotRequired'
+                ConflictDetected = $false
+                ReconciliationRequired = $false
+                EscalationRequested = $false
+                EscalationMethod = $null
+                RequiredPrivilege = 'SeSecurityPrivilege'
+                PrivilegeActivated = $false
+                PrivilegeChanged = $false
+                PrivilegeRestored = $null
+            }
+            $script:result | Add-Member PolicyOutcome $outcome
+            { Assert-HHTransportAuditResult -TransportResult $script:result `
+                    -IntentMetadata (Get-HHAuditIntentTransportContext $script:intent) } |
+                Should -Throw '*matching operation*'
+            $script:intent.IntentRecord.payload.operation = 'SetWindowsProcessAuditPolicy'
+            { Assert-HHTransportAuditResult -TransportResult $script:result `
+                    -IntentMetadata (Get-HHAuditIntentTransportContext $script:intent) } |
+                Should -Throw '*contradicts*'
+        }
+
+        It 'validates every finite process audit policy outcome invariant' {
+            $script:intent.IntentRecord.payload.operation = 'SetWindowsProcessAuditPolicy'
+            $metadata = Get-HHAuditIntentTransportContext $script:intent
+            (Get-HHTransportAuditPolicyOutcome -TransportResult $script:result `
+                    -IntentMetadata $metadata -DispatchState NotDispatched).HasOutcome |
+                Should -BeFalse
+            $valid = [pscustomobject][ordered]@{
+                Marker = 'HostHunter.WindowsProcessAuditPolicyResult.v1'
+                Succeeded = $true; FailureKind = $null; FailureMessage = $null
+                AuditBefore = [pscustomobject]@{}; AuditDesired = [pscustomobject]@{}
+                AuditAfter = [pscustomobject]@{}
+                CommandLineBefore = 'Disabled'; CommandLineDesired = 'Disabled'
+                CommandLineAfter = 'Disabled'; Changed = $false
+                CompensationStatus = 'NotRequired'; ConflictDetected = $false
+                ReconciliationRequired = $false; EscalationRequested = $false
+                EscalationMethod = $null; RequiredPrivilege = 'SeSecurityPrivilege'
+                PrivilegeActivated = $false; PrivilegeChanged = $false
+                PrivilegeRestored = $null
+            }
+            foreach ($mutation in @(
+                    { param($o) $o.Changed = 'false' },
+                    { param($o) $o.PrivilegeRestored = 'true' },
+                    { param($o) $o.RequiredPrivilege = 'SeDebugPrivilege' },
+                    { param($o) $o.EscalationRequested = $true; $o.EscalationMethod = 'Other' },
+                    { param($o) $o.EscalationMethod = 'WindowsTokenPrivilege' },
+                    { param($o) $o.ReconciliationRequired = $true }
+                )) {
+                $candidate = $valid.PSObject.Copy()
+                & $mutation $candidate
+                $transport = $script:result.PSObject.Copy()
+                $transport | Add-Member PolicyOutcome $candidate
+                { Get-HHTransportAuditPolicyOutcome -TransportResult $transport `
+                        -IntentMetadata $metadata -DispatchState Completed } |
+                    Should -Throw
+            }
+            $valid.EscalationRequested = $true
+            $valid.EscalationMethod = 'WindowsTokenPrivilege'
+            $transport = $script:result.PSObject.Copy()
+            $transport | Add-Member PolicyOutcome $valid
+            (Get-HHTransportAuditPolicyOutcome -TransportResult $transport `
+                    -IntentMetadata $metadata -DispatchState Completed).HasOutcome |
+                Should -BeTrue
+        }
+
         It 'accepts a complete successful Windows PowerShell 5.1 result' {
             $script:intent.IntentRecord.payload.requestedPowerShellRuntime = 'WindowsPowerShell51'
             $script:result.RemotePowerShellVersion = '5.1.26100.9168'

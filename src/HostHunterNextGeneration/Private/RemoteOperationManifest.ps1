@@ -13,7 +13,8 @@ function Get-HHRemoteOperationManifestEntry {
             'BootstrapReconcile',
             'BootstrapKeyOnlyOuterIdentity',
             'BootstrapKeyOnlyRuntimeIdentity',
-            'BootstrapRollback'
+            'BootstrapRollback',
+            'ProcessAuditPolicyMutation'
         )]
         [string] $Phase,
 
@@ -143,5 +144,30 @@ function Get-HHCommandRemoteOperationManifest {
                 -PowerShellRuntime ([string] $Target.PowerShellRuntime) `
                 -ScriptText $ScriptBlock.ToString() `
                 -ArgumentList $ArgumentList))
+    return @($operations)
+}
+
+function Get-HHWindowsProcessAuditRemoteOperationManifest {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [object] $Target,
+
+        [Parameter(Mandatory)]
+        [scriptblock] $ScriptBlock,
+
+        [Parameter(Mandatory)]
+        [object] $Request
+    )
+
+    $operations = [Collections.Generic.List[object]]::new()
+    foreach ($operation in @(Get-HHTargetValidationRemoteOperationManifest -Target $Target)) {
+        $operations.Add($operation)
+    }
+    $operations.Add((Get-HHRemoteOperationManifestEntry `
+                -Phase ProcessAuditPolicyMutation `
+                -PowerShellRuntime ([string] $Target.PowerShellRuntime) `
+                -ScriptText $ScriptBlock.ToString() `
+                -ArgumentList @($Request)))
     return @($operations)
 }

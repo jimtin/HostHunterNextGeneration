@@ -58,7 +58,7 @@ evidence; `unknown` means the final external state has not yet been verified.
 
 | Component | Role | Entrypoints | Evidence | Confidence |
 |---|---|---|---|---|
-| PowerShell module | Target CRUD, runtime validation, command dispatch, SSH-key transition, and audit retrieval | Eight exported cmdlets | `src/HostHunterNextGeneration/` | confirmed |
+| PowerShell module | Target CRUD, runtime validation, command dispatch, SSH-key transition, audit retrieval, escalation preference, and Windows process-audit policy | Eleven exported cmdlets | `src/HostHunterNextGeneration/` | confirmed |
 | Target repository | Secret-free profiles, authenticated complete-set state, generation/revision CAS | Target cmdlets | `Private/TargetModel.ps1`, `Private/TargetRepository.ps1` | confirmed |
 | Audit subsystem | Encrypted intent/manifests, per-operation arming, HMAC chain, streaming artifacts, and crash recovery | Remote-operation and audit-query cmdlets | `Private/AuditRepository.ps1`, `Private/AuditOrchestration.ps1`, `Private/AuditRecovery.ps1` | confirmed |
 | Audit-key providers | macOS login Keychain; restrictive file fallback on other controllers | Audit startup | `Private/AuditKeyStore.ps1`, `Private/Workers/MacOSKeychainWorker.ps1`, `Private/Configuration.ps1` | confirmed |
@@ -70,7 +70,9 @@ evidence; `unknown` means the final external state has not yet been verified.
 
 | Component | Planned role | Planned entrypoints | Evidence | Confidence |
 |---|---|---|---|---|
-| SQLite provider/schema | Sole structured target and audit store with checksummed migration | All eight public cmdlets | `Private/SqliteProvider.ps1`, `Private/SqlitePersistence.ps1`, `Private/Migrations/0001_initial_sqlite.sql` | confirmed |
+| SQLite provider/schema | Sole structured target, configuration, and audit store with checksummed migrations | All eleven public cmdlets | `Private/SqliteProvider.ps1`, `Private/SqlitePersistence.ps1`, `Private/Migrations/` | focused proof; exact candidate pending |
+| Windows audit-policy adapter | Native Process Creation/Termination policy and optional 4688 command-line inclusion | `Set-HHWindowsProcessAuditPolicy` | `Private/WindowsProcessAuditPolicy.ps1` | focused proof; native exact-candidate proof pending |
+| Privilege activation adapter | Activates only a declared privilege already present in the remote token and restores prior state | `-Escalate`, `WindowsTokenPrivilege` | `Private/PrivilegeEscalation.ps1`, authenticated preference repository | focused proof; native exact-candidate proof pending |
 | External output artifacts | Invocation-bound chunked encrypted ordered evidence in `.hhout` v2 | Remote completion and `Get-HHAuditOutput` | `Private/AuditArtifactV2.ps1`, `Private/DurableFilePublisher.ps1`, package-backed E2E | confirmed on Linux/macOS; Windows native proof pending |
 | Database/target anchor | Atomic monotonic Keychain item on macOS; owner-private colocated fallback on Linux/Windows | Structured writes and remote-capable startup | `Private/PersistenceAnchor.ps1`, `Private/AuditKeyStore.ps1` | confirmed |
 | Operation ownership | Distinct bounded lock prevents recovery of a live remote batch | Recovery and remote-capable cmdlets | `Private/PersistenceLock.ps1`, `Private/AuthenticatedPersistence.ps1` | confirmed |
@@ -110,6 +112,7 @@ evidence; `unknown` means the final external state has not yet been verified.
 | SQLite heads to platform anchor | DB commit to atomic Keychain or colocated seal update | Writer mutex, expected-value update and exact readback | Linux/Windows whole-root rollback remains undetectable | authenticated persistence and anchor tests |
 | Operation lock to recovery | Remote batch ownership to next-process crash recovery | Separate no-follow lock held through terminal seal; killed unarmed/armed workers and live-owner contention tested without retry | Exact-candidate rerun remains pending | recovery source and SQLite fault lane |
 | Windows user to persistence tree | Controller process to key, anchor, DB, and output state | Exact non-inherited ACL permits current user, SYSTEM, and local Administrators only; existing unsafe ACLs fail closed | Local administrators remain trusted; native exact-candidate proof is pending | `Private/WindowsPersistenceAcl.ps1`, persistence safety tests |
+| HostHunter to Windows audit and registry APIs | Authenticated remote PowerShell to effective audit policy and command-line inclusion | Exact GUID/value allowlists, query-before-write, requery, privacy-first ordering, conditional compensation, no retry | Group Policy or another administrator can race or later replace effective state | policy and privilege adapters; native qualification pending |
 | Owner to public GitHub | Authenticated owner and installed integrations to public repository | Intended single-owner write/admin, Actions disabled, branch deletion/force-push protection | Final collaborators, apps, rules, visibility, and Actions state require live verification | release plan; post-publication audit pending |
 
 There is no public-network listener, browser session, tenant boundary, webhook,
@@ -169,6 +172,11 @@ Non-capabilities:
 | AP-09 | Exhaust or stall the controller | Compromised endpoint → unlimited-duration direct or 5.1 command → controller resources | availability | medium | medium | medium | Per-target 100 MiB cap, connection timeout, no retry, bounded test lanes | transport source |
 | AP-10 | Persist unintended remote access | Key bootstrap → wrong or lingering authorized-key entry → managed endpoint access | access | low | high | medium | Ed25519-only exact marker, separate key-only proof, exact-entry rollback, password profile retained on failure | bootstrap source and tests |
 | AP-21 | Leak or retain qualification credentials | Native qualification → passphrase in process configuration, lingering agent identity, or wrong Keychain service cleanup → reusable local/remote authority | access | low | high | medium | Interactive passphrases only, run-scoped agent, exact identity removal and agent stop, production-derived Keychain services, pre-delete presence and post-delete absence checks | qualification scripts and focused contract tests; exact native receipts pending |
+| AP-22 | Mistake token activation for elevation | Filtered token → `-Escalate` → operator assumes UAC/admin boundary was crossed | authorization | medium | high | high | Closed method registry; declared privilege only; ERROR_NOT_ALL_ASSIGNED fails; explicit no-UAC documentation | privilege adapter and focused tests; native proof pending |
+| AP-23 | Leave a privilege enabled | success/error/cancellation → restore skipped or fails → later code inherits privilege | authorization | low | high | high | exact prior token state restored in finally; failed restore prevents success and requires reconciliation | privilege adapter tests; native proof pending |
+| AP-24 | Expose secrets through 4688 command lines | inclusion enabled → sensitive arguments enter Security log | disclosure | medium | high | high | explicit non-default option; plaintext warning; no redaction claim; exact state verification | public tests; Windows qualification pending |
+| AP-25 | Overwrite concurrent policy ownership | query → GPO/admin change → stale mutation or compensation | integrity | medium | high | high | requery, compare-before-compensate, conflict/reconciliation result, no retry | compensation tests; native proof pending |
+| AP-26 | Redirect privileged execution through preference tampering | edit saved method → future `-Escalate` selects unintended method | authorization | low | high | high | closed enum, authenticated mutation chain, monotonic anchor, explicit-call precedence | schema-v2 and configuration tests |
 | AP-11 | Confuse runtime attribution | Compromised endpoint → forged or malformed 5.1 stream protocol → incorrect audit result | integrity | low | high | medium | Outer PS7 and child Desktop 5.1 proof, stream/sequence/state allowlists, runspace attribution, fail-closed errors | transport source and tests |
 | AP-12 | Gain repository write authority | Compromised owner or app → public repository mutation → later trusted execution | access | low | high | medium | Single-owner policy, no collaborators/teams, Actions disabled, planned branch protection and live settings audit | release plan; live state pending |
 | AP-13 | Execute a substituted native provider | Tampered package/RID resolution → malicious SQLite library load → controller-user code execution | execution/integrity | low | high | high | Locked restore, exact hashes, package-relative RID allowlist, version assertion, SBOM and package scan | provider/package implementation and scans |
@@ -210,6 +218,11 @@ authority without a new threat review.
 | AP-18 | Preserve real capacity reservation and external ENOSPC/SQLITE_FULL fault cases in the exact-candidate gate | Output/persistence integration | Resource control |
 | AP-19 | Keep the Linux/Windows whole-root rollback limitation explicit; require a future OS-external anchor for stronger claims | Platform storage | Honest residual-risk boundary |
 | AP-20 | Run native Windows ACL creation/reopen/rejection proof against the immutable release package before publication | Windows qualification | Least privilege and fail-closed validation |
+| AP-22 | Keep escalation providers closed and privilege-aware; never infer or enable every privilege for arbitrary command text | Public command and privilege resolver | Least privilege |
+| AP-23 | Treat restoration failure as terminal failure with reconciliation required and finite evidence | Privilege scope and accountability | Cleanup integrity |
+| AP-24 | Keep command-line inclusion explicit, warn before dispatch, and never claim Security-log redaction | Public policy cmdlet and documentation | Informed consent and data minimization |
+| AP-25 | Preserve compare-before-compensate and no-retry semantics; report effective-now state and GPO override risk | Windows policy adapter | Concurrency integrity |
+| AP-26 | Authenticate and anchor every preference mutation; reject unknown methods before dispatch | SQLite configuration repository | Integrity and allowlisting |
 
 ## 9. Assumptions and Open Questions
 

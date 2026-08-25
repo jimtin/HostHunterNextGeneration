@@ -249,7 +249,13 @@ function Register-HHSqliteAuditBatch {
         [Parameter(Mandatory)][object]$Connection,
         [Parameter(Mandatory)][object]$Transaction,
         [Parameter(Mandatory)][byte[]]$MasterKey,
-        [Parameter(Mandatory)][ValidateSet('ValidateTarget', 'TestTarget', 'InvokeCommand', 'EnableSshKeyAuthentication')]
+        [Parameter(Mandatory)][ValidateSet(
+            'ValidateTarget',
+            'TestTarget',
+            'InvokeCommand',
+            'EnableSshKeyAuthentication',
+            'SetWindowsProcessAuditPolicy'
+        )]
         [string]$Operation,
         [Parameter(Mandatory)][ValidateCount(1, 8)][object[]]$Request,
         [Parameter(Mandatory)][DateTimeOffset]$IntentAtUtc,

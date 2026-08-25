@@ -40,6 +40,7 @@ Describe 'Windows exact-package qualification contract' -Tag Unit {
             'DirectPowerShell7',
             'DirectWindowsPowerShell51',
             'MixedRuntime',
+            'WindowsProcessAuditPolicy',
             'SshKeyBootstrap',
             'AgentKeyProof',
             'PasswordRecovery',
@@ -168,5 +169,43 @@ Describe 'Windows exact-package qualification contract' -Tag Unit {
         )
         $script:qualificationSource |
             Should -Not -Match '"''HH_PASSWORD_AUTH_STILL_ENABLED''"'
+    }
+
+    It 'qualifies process auditing on both runtimes and restores the starting state' {
+        $script:qualificationSource | Should -Match (
+            '(?s)' +
+            'Set-HHWindowsProcessAuditPolicy\s+-State\s+Enabled.*?' +
+            '-Target\s+windows-ps7\s+-Escalate'
+        )
+        $script:qualificationSource | Should -Match (
+            '(?s)Set-HHWindowsProcessAuditPolicy\s+-State\s+Enabled.*?' +
+            '-Target\s+windows-ps51\s+-Escalate'
+        )
+        $script:qualificationSource |
+            Should -Match 'Set-HHEscalationPreference\s+-Method\s+WindowsTokenPrivilege'
+        $script:qualificationSource |
+            Should -Match '(?s)Invoke-HHWindowsProcessAuditEventProbe.*?-ExpectCommandLine\s+\$true'
+        $script:qualificationSource |
+            Should -Match '(?s)Invoke-HHWindowsProcessAuditEventProbe.*?-ExpectCommandLine\s+\$false'
+        $script:qualificationSource |
+            Should -Match '(?s)finally\s*\{.*?Set-HHWindowsProcessAuditPolicy\s+-State\s+\$restoreAuditState'
+        $script:qualificationSource |
+            Should -Match 'processAuditPolicyRestored\s*=\s*\$processAuditPolicyRestored'
+    }
+
+    It 'polls event 4688 by process identity without persisting command-line content' {
+        $script:qualificationSource | Should -Match "Id\s*=\s*4688"
+        $script:qualificationSource | Should -Match "\['NewProcessId'\]"
+        $script:qualificationSource | Should -Match 'AddSeconds\(30\)'
+        $script:qualificationSource | Should -Match (
+            'HostHunter\.WindowsProcessAuditEventProbe\.v1'
+        )
+        $receiptBlock = [regex]::Match(
+            $script:qualificationSource,
+            '(?s)\[ordered\]@\{\s*status\s*=\s*''passed''.*?\}\s*\|\s*ConvertTo-Json'
+        )
+        $receiptBlock.Success | Should -BeTrue
+        $receiptBlock.Value | Should -Not -Match '(?i)CommandLine(Content|Text|Value)'
+        $receiptBlock.Value | Should -Not -Match '(?i)MarkerProcessId|NewProcessId'
     }
 }

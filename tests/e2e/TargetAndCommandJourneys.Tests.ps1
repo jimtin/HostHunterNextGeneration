@@ -41,16 +41,19 @@ BeforeAll {
 }
 
 Describe 'packaged HostHunter SQLite operator journeys' -Tag E2E {
-    It 'imports exactly eight public commands without creating local state' {
+    It 'imports exactly eleven public commands without creating local state' {
         $commands = @(Get-Command -Module HostHunterNextGeneration | Sort-Object Name)
         $commands.Name | Should -Be @(
             'Enable-HHSshKeyAuthentication'
             'Get-HHAuditOutput'
             'Get-HHAuditRecord'
+            'Get-HHEscalationPreference'
             'Get-HHTarget'
             'Invoke-HHCommand'
             'Remove-HHTarget'
+            'Set-HHEscalationPreference'
             'Set-HHTarget'
+            'Set-HHWindowsProcessAuditPolicy'
             'Test-HHTarget'
         )
         Test-Path -LiteralPath $env:HH_DATA_ROOT | Should -BeFalse
@@ -81,6 +84,19 @@ Describe 'packaged HostHunter SQLite operator journeys' -Tag E2E {
         Test-Path -LiteralPath $env:HH_DATA_ROOT | Should -BeFalse
     }
 
+    It 'previews escalation preference and process audit policy without creating state' {
+        (Get-HHEscalationPreference).Source | Should -BeExactly BuiltIn
+        $null = Set-HHEscalationPreference -Method WindowsTokenPrivilege -WhatIf
+        $warnings = @(
+            Set-HHWindowsProcessAuditPolicy -State Enabled `
+                -CommandLineLogging Enabled -Escalate -WhatIf 3>&1
+        )
+        @($warnings | Where-Object {
+                $_ -is [Management.Automation.WarningRecord]
+            }).Count | Should -Be 1
+        Test-Path -LiteralPath $env:HH_DATA_ROOT | Should -BeFalse
+    }
+
     It 'validates and saves a password target through the real SSH fixture' {
         $target = Set-HHTarget -Name alpha -HostName $script:targetHost `
             -Port $script:targetPort -UserName $script:userName `
@@ -105,6 +121,20 @@ Describe 'packaged HostHunter SQLite operator journeys' -Tag E2E {
         $target = $fresh.Output[-1] | ConvertFrom-Json
         $target.Name | Should -BeExactly alpha
         $target.Authentication | Should -BeExactly Password
+    }
+
+    It 'persists and reloads the authenticated escalation preference' {
+        $saved = Set-HHEscalationPreference -Method WindowsTokenPrivilege -Confirm:$false
+        $saved.Method | Should -BeExactly WindowsTokenPrivilege
+        $saved.Source | Should -BeExactly Persisted
+        $fresh = Invoke-HHFreshPowerShell -Script (
+            (Get-HHFreshImportPrefix) +
+            'Get-HHEscalationPreference | ConvertTo-Json -Compress'
+        )
+        $fresh.ExitCode | Should -Be 0
+        $preference = $fresh.Output[-1] | ConvertFrom-Json
+        $preference.Method | Should -BeExactly WindowsTokenPrivilege
+        $preference.Source | Should -BeExactly Persisted
     }
 
     It 'previews runtime-distinct profiles and removal without changing authenticated state' {
@@ -193,6 +223,19 @@ Write-Error 'nonterminating-error' -ErrorAction Continue
         @($script:commandResult.StreamEvents).Count | Should -BeGreaterOrEqual 6
         @($script:commandResult.StreamEvents.Stream | Sort-Object -Unique) |
             Should -Be @('Debug', 'Error', 'Information', 'Output', 'Verbose', 'Warning')
+    }
+
+    It 'fails a Windows process audit request finitely on a non-Windows target' {
+        $result = Set-HHWindowsProcessAuditPolicy -State Enabled `
+            -Target alpha -Escalate -Confirm:$false
+        $result.Succeeded | Should -BeFalse
+        $result.FailureKind | Should -BeExactly RemoteCommandFailure
+        $result.DispatchState | Should -BeExactly Completed
+        $result.OutcomeStatus | Should -BeExactly Failed
+        $result.PolicyOutcome.FailureKind | Should -BeExactly PrivilegeOrOperationFailed
+        $record = @(Get-HHAuditRecord -InvocationId $result.InvocationId `
+                -Operation SetWindowsProcessAuditPolicy -Status Failed -First 1)[0]
+        $record.InvocationId | Should -BeExactly $result.InvocationId
     }
 
     It 'supports bounded, cursor, target, operation, status, case, and time audit queries' {

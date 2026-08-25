@@ -2,7 +2,7 @@
 
 ## Supported version
 
-HostHunterNextGeneration is currently a `0.1.0-preview1` project. Security fixes
+HostHunterNextGeneration is currently a `0.2.0` project. Security fixes
 are applied to the latest revision only until a stable release policy exists.
 
 ## Reporting a vulnerability

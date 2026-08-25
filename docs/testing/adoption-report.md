@@ -54,7 +54,7 @@ path instead of claiming WinRM support.
 | Check | Command | Container/service | Result | Artifact |
 |---|---|---|---|---|
 | Canonical full proof | `./scripts/verify-local.sh` | Docker/Compose and pinned scanner containers | current working-tree wrapper passed after the Windows ACL amendment; exact candidate rerun pending | `.artifacts/summary/verify-local.json` |
-| Four-metric product proof | `scripts/lanes/unit.sh` | test container | 544/544 passed; 96.8122% statements (6894/7121), 90.048% branches (2253/2502), 96.1039% functions (222/231), 96.8729% lines (5700/5884) | `.artifacts/unit/product/coverage-summary.json` |
+| Four-metric product proof | `scripts/lanes/unit.sh` | test container | 632/632 passed; 95.3352% statements (7664/8039), 90.0214% branches (2526/2806), 96.31% functions (261/271), 95.3677% lines (6341/6649) | `.artifacts/unit/product/coverage-summary.json` |
 | SSH protocol contract | fixture contract script | test client plus disposable SSH target | password authentication and the pinned PowerShell 7 fixture passed | `.artifacts/integration/ssh-fixture-contract.json` |
 | Critical package/SSH integration | `scripts/lanes/integration.sh` | test client plus disposable SSH target | 22/22 passed; two privileged capacity cases are run separately | `.artifacts/integration/integration-tests.xml` |
 | CLI E2E equivalent | `scripts/lanes/e2e.sh` | fresh PowerShell processes plus SSH target | 18/18 SQLite package journeys passed | `.artifacts/e2e/e2e-tests.xml` |

@@ -1,5 +1,26 @@
 # HostHunterNextGeneration Implementation Ledger
 
+## Windows process-audit and escalation acceptance ledger
+
+**CONFIRMED 2026-08-25; IMPLEMENTED; EXACT-CANDIDATE NATIVE QUALIFICATION PENDING**
+
+| Requirement | Intended implementation | Focused evidence | Status | Deferred/non-goal |
+| --- | --- | --- | --- | --- |
+| Set Windows process auditing without `auditpol` | `Set-HHWindowsProcessAuditPolicy` uses exact Windows audit APIs with query/set/requery | native-adapter units, package E2E, exact Windows PS7/5.1 qualification | implemented; focused tests verified; exact Windows pending | `auditpol.exe`, `reg.exe`, `gpupdate`, domain GPO mutation |
+| Select creation or termination | `-Subcategory ProcessCreation[,ProcessTermination]`, creation by default | GUID/flag matrix and public parameter journeys | implemented and focused verified | other audit subcategories |
+| Control command-line capture | `-CommandLineLogging Unchanged\|Enabled\|Disabled\|NotConfigured` with exact 64-bit policy state | registry-state matrix, warning tests, live 4688 presence/absence | implemented; focused tests verified; exact Windows pending | redacting the Windows Security log |
+| Warn without an extra gate | one local warning per invocation when enabling plaintext command-line capture | one/eight-target warning cases, normal continuation, `WhatIf` preview | implemented and focused verified | overriding explicit `-WarningAction Stop` |
+| Activate required privilege on demand | closed `WindowsTokenPrivilege` provider activates only declared existing privileges and restores exact state | token/PInvoke failure and restoration matrix | implemented and focused verified; native Windows pending | UAC bypass or creation of a more privileged token |
+| Choose or save escalation method | explicit method overrides authenticated global preference; no fallback | preference repository, restart, precedence, tamper and no-network tests | implemented and focused verified | per-target preference in this release |
+| Preserve accountability | semantic operation, exact manifest, arm-before-dispatch, structured policy outcome | SQLite v2 round-trip, substitution/tamper, output query | implemented and focused verified | commands outside HostHunter |
+| Preserve partial-failure truth | preflight both capabilities, verify each surface, bounded conditional compensation, no retry | every mutation/verification/compensation/uncertain boundary | implemented and focused verified; native Windows pending | cross-target distributed rollback |
+| Preserve normal target reuse | omitted `-Target` selects saved active targets; explicit selection remains 1..8 | public unit and package journeys | implemented and focused verified | more than eight targets |
+| Maintain package and release proof | version 0.2.0, eleven exports, local containers, exact SHA and native Windows receipt | module/package contracts, canonical gate, pre-push security | package and canonical unit gate verified; exact SHA/native/push pending | GitHub-hosted test execution |
+
+The test ledger for this slice is the corresponding action matrix in
+`docs/testing/e2e-workflow-inventory.md`. No canonical full gate starts until
+every row above has focused evidence or a concrete blocker.
+
 ## Status
 
 **AMENDED SQLITE CONTRACT CONFIRMED; IMPLEMENTATION AND REQUALIFICATION IN
@@ -14,7 +35,7 @@ replacement, exact-commit qualification, or positive live Windows PowerShell
 
 ## Public contract
 
-The confirmed first release exports exactly these cmdlets:
+The current release exports exactly these cmdlets:
 
 1. `Set-HHTarget`
 2. `Get-HHTarget`
@@ -24,6 +45,9 @@ The confirmed first release exports exactly these cmdlets:
 6. `Enable-HHSshKeyAuthentication`
 7. `Get-HHAuditRecord`
 8. `Get-HHAuditOutput`
+9. `Get-HHEscalationPreference`
+10. `Set-HHEscalationPreference`
+11. `Set-HHWindowsProcessAuditPolicy`
 
 All external operations use injectable adapters. Public cmdlets orchestrate
 domain functions; transport, persistence, clock/identifier, key protection,

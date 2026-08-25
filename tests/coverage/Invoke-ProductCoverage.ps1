@@ -42,8 +42,13 @@ $otherUnitTests = @(Get-ChildItem -LiteralPath $unitPath -Filter '*.Tests.ps1' -
         Sort-Object FullName |
         ForEach-Object FullName)
 $branchTestPhases = @(
-    [pscustomobject]@{ Name = 'module internals'; Paths = $otherUnitTests }
-    [pscustomobject]@{ Name = 'public cmdlets'; Paths = @($publicCmdletTest) }
+    [pscustomobject]@{ Name = 'module internals'; Paths = $otherUnitTests; Tag = 'Unit' }
+    [pscustomobject]@{ Name = 'public cmdlets'; Paths = @($publicCmdletTest); Tag = 'Unit' }
+    [pscustomobject]@{
+        Name = 'authenticated SQLite migration'
+        Paths = @(Join-Path $repoRoot 'tests/integration/SqliteMigrationV2.Tests.ps1')
+        Tag = 'Integration'
+    }
 )
 
 try {
@@ -55,7 +60,7 @@ try {
         $branchConfiguration.Run.Path = $phase.Paths
         $branchConfiguration.Run.PassThru = $true
         $branchConfiguration.Run.Exit = $false
-        $branchConfiguration.Filter.Tag = @('Unit')
+        $branchConfiguration.Filter.Tag = @($phase.Tag)
         $branchConfiguration.Output.Verbosity = 'Detailed'
         $branchResult = Invoke-Pester -Configuration $branchConfiguration
         if ($branchResult.Result -ne 'Passed' -or $branchResult.FailedCount -gt 0) {

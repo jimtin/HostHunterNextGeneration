@@ -208,6 +208,10 @@ function Complete-HHAuthenticatedTransportAudit {
         $payload.reconciliationRequired = $validated.ReconciliationRequired
         $payload.commitState = $validated.CommitState
     }
+    if ($null -ne $validated.PSObject.Properties['HasPolicyOutcome'] -and
+        $validated.HasPolicyOutcome) {
+        $payload.policyOutcome = $validated.PolicyOutcome
+    }
     $arguments = [pscustomobject]@{
         Intent = $Intent
         Validated = $validated

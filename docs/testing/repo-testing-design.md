@@ -27,7 +27,7 @@ deferred and rejected in v1.
 - Feature readiness: ready for SSH. Direct PowerShell 7 is the default and
   Windows PowerShell 5.1 is an explicit Windows-target compatibility path.
   WinRM is a deferred non-goal until the user creates a controlled lab.
-- Repo truth: PowerShell 7 module with eight implemented public cmdlets,
+- Repo truth: PowerShell 7 module with eleven implemented public cmdlets,
   containerized validation, installed local
   hooks, and no hosted test workflow or deployment. Publication remains pending.
 - Controller evidence: macOS uses supported PowerShell-over-SSH. A real Windows
@@ -85,9 +85,11 @@ semantic-equivalence tests against the uninstrumented module. An
 `explicit_branch_arm_coverage` approximation is not relabelled as standard
 branch coverage, and thresholds are not approximated or lowered.
 
-The current 2026-08-24 working-tree receipt is 544/544 product unit tests with
-96.8122% statements (6894/7121), 90.048% branches (2253/2502), 96.1039%
-functions (222/231), and 96.8729% lines (5700/5884).
+The current 2026-08-25 working-tree receipt is 632/632 product tests with
+95.3352% statements (7664/8039), 90.0214% branches (2526/2806), 96.31%
+functions (261/271), and 95.3677% lines (6341/6649). The branch phase includes
+the authenticated SQLite migration integration so migration control flow is
+measured by the same integrity-checked branch collector.
 
 Design evidence: [Pester documents command coverage rather than behavioral or
 branch completeness](https://pester.dev/tutorial/code-coverage/measuring), while
@@ -123,7 +125,7 @@ never causes a remote retry or false recovery of a live batch.
 There is no browser surface, so Playwright is not applicable. Fresh
 `pwsh -NoProfile` processes import the generated package through
 `HH_TEST_MODULE_PATH` and exercise every public cmdlet, persisted state across
-processes, all eight confirmed public cmdlets, default and explicit runtime selection, two runtime profiles for one
+processes, all eleven confirmed public cmdlets, default and explicit runtime selection, two runtime profiles for one
 endpoint, negative runtime availability, interactive password onboarding, key
 conversion, full-stream output, multi-target fan-out, trust failures, deferred
 WinRM, SQLite-only restart persistence, legacy/schema refusal, audit filtering,
@@ -135,7 +137,7 @@ behavior, operation-lock contention, and armed/unarmed recovery. The inventory i
 
 The build lane runs `Test-ModuleManifest`, packages the module into an isolated
 artifact directory, imports that package in a clean container process, verifies
-the eight-command export contract, exact managed/native SQLite assets and
+the eleven-command export contract, exact managed/native SQLite assets and
 licenses, asserts `SELECT sqlite_version()`, creates the committed schema, and
 executes a no-network help/smoke path on every claimed controller RID at the
 PowerShell 7.4 minimum and pinned 7.6.5 version. Persistence integration and E2E

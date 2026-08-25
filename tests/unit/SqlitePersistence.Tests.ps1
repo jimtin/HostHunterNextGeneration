@@ -168,6 +168,14 @@ Describe 'SQLite persistence foundation' -Tag Unit {
             }
             { ConvertTo-HHPersistenceAnchorArtifact -Anchor $invalid -MasterKey $masterKey } |
                 Should -Throw '*fields are invalid*'
+            $partialConfiguration = $invalid.PSObject.Copy()
+            $partialConfiguration.SchemaVersion = 1
+            $partialConfiguration | Add-Member -NotePropertyName ConfigurationGeneration `
+                -NotePropertyValue 0
+            {
+                ConvertTo-HHPersistenceAnchorArtifact `
+                    -Anchor $partialConfiguration -MasterKey $masterKey
+            } | Should -Throw '*configuration fields are incomplete*'
             { ConvertFrom-HHPersistenceAnchorArtifact -Artifact ([byte[]](1, 2, 3)) `
                     -MasterKey $masterKey } | Should -Throw -ErrorId 'AuditIntegrityFailed*'
             $wrongMagic = [byte[]]::new(196)
@@ -272,7 +280,7 @@ Describe 'SQLite persistence foundation' -Tag Unit {
             } | Should -Throw -ErrorId 'LegacyPersistenceMigrationRequired*'
         }
 
-        It 'creates and reopens an exact schema-v1 database using parameterized blobs' {
+        It 'creates and reopens an exact schema-v2 database using parameterized blobs' {
             $root = Join-Path $TestDrive 'database'
             $context = Get-HHPersistenceContext -DataRoot $root
             $masterKey = [byte[]](0..31)
@@ -288,8 +296,8 @@ Describe 'SQLite persistence foundation' -Tag Unit {
                 -MasterKey $masterKey `
                 -AnchorWriter $anchorWriter `
                 -Clock { [DateTimeOffset]'2026-08-24T00:00:00Z' }
-            $created.SchemaVersion | Should -Be 1
-            $script:writtenAnchor.Length | Should -Be 196
+            $created.SchemaVersion | Should -Be 2
+            $script:writtenAnchor.Length | Should -Be 236
 
             $connection = New-HHSqliteConnection -DatabasePath $context.DatabasePath
             try {
@@ -303,7 +311,7 @@ Describe 'SQLite persistence foundation' -Tag Unit {
                 $verified = Test-HHSqliteDatabaseSchema `
                     -Connection $connection `
                     -MigrationPath $context.MigrationPath
-                $verified.SchemaVersion | Should -Be 1
+                $verified.SchemaVersion | Should -Be 2
             }
             finally {
                 $connection.Dispose()
@@ -498,6 +506,58 @@ VALUES(-1,@event,'Test',@at,NULL,@mutation,@projection,@related,@previous,@mac);
             } | Should -Throw -ErrorId 'PersistenceRuntimeUnsupported*'
             {
                 Get-HHSqliteMigrationContent -MigrationPath (Join-Path $TestDrive 'missing.sql')
+            } | Should -Throw -ErrorId 'PersistenceSchemaUnsupported*'
+        }
+
+        It 'rejects a missing migration entry path before enumerating its directory' {
+            $missing = Join-Path $TestDrive 'missing/0001_initial_sqlite.sql'
+            {
+                Get-HHSqliteMigrationPath -MigrationPath $missing
+            } | Should -Throw -ErrorId 'PersistenceSchemaUnsupported*'
+        }
+
+        It 'rejects absent and misnumbered migration identity rows' {
+            $connection = [pscustomobject]@{ DataSource = 'mock.db' }
+            $migrationPath = Join-Path (Get-Module HostHunterNextGeneration).ModuleBase `
+                'Private/Migrations/0001_initial_sqlite.sql'
+            Mock Invoke-HHSqliteScalar { 'ok' }
+            Mock Get-HHSqliteSchemaFingerprintFromConnection { [byte[]]::new(32) }
+
+            Mock Invoke-HHSqliteQuery {
+                if ($Sql -match 'foreign_key_check') { return @() }
+                if ($Sql -match 'schema_migrations') { return @() }
+                throw 'unexpected query'
+            }
+            {
+                Test-HHSqliteDatabaseSchema -Connection $connection `
+                    -MigrationPath $migrationPath
+            } | Should -Throw -ErrorId 'PersistenceSchemaUnsupported*'
+
+            Mock Invoke-HHSqliteQuery {
+                if ($Sql -match 'foreign_key_check') { return @() }
+                if ($Sql -match 'schema_migrations') {
+                    return [pscustomobject]@{
+                        version = 2L
+                        name = '0001_initial_sqlite'
+                        sql_checksum = [byte[]]::new(32)
+                    }
+                }
+                throw 'unexpected query'
+            }
+            {
+                Test-HHSqliteDatabaseSchema -Connection $connection `
+                    -MigrationPath $migrationPath
+            } | Should -Throw -ErrorId 'PersistenceSchemaUnsupported*'
+        }
+
+        It 'rejects an upgrade request that is not exactly authenticated schema v1' {
+            {
+                Update-HHSqliteDatabaseToLatest `
+                    -Connection ([pscustomobject]@{ DataSource = 'mock.db' }) `
+                    -PersistenceContext ([pscustomobject]@{}) `
+                    -MasterKey ([byte[]]::new(32)) `
+                    -ExistingSchema ([pscustomobject]@{ SchemaVersion = 2 }) `
+                    -ExistingAnchor ([pscustomobject]@{})
             } | Should -Throw -ErrorId 'PersistenceSchemaUnsupported*'
         }
 

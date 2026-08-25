@@ -1,6 +1,6 @@
 @{
     RootModule = 'HostHunterNextGeneration.psm1'
-    ModuleVersion = '0.1.0'
+    ModuleVersion = '0.2.0'
     GUID = 'a29e4ed1-e148-49ec-9b3b-ab930d2e968d'
     Author = 'James Hinton'
     CompanyName = 'HostHunter'
@@ -17,6 +17,9 @@
         'Enable-HHSshKeyAuthentication'
         'Get-HHAuditRecord'
         'Get-HHAuditOutput'
+        'Set-HHWindowsProcessAuditPolicy'
+        'Set-HHEscalationPreference'
+        'Get-HHEscalationPreference'
     )
     CmdletsToExport = @()
     VariablesToExport = @()

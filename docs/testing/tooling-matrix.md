@@ -41,7 +41,7 @@ evidence require a separate live Windows exact-candidate lane.
 | Trivy image | Built-image scan | Security/build | `ghcr.io/aquasecurity/trivy` | `./scripts/security/scan-images.sh` | 0.74.0 | Monthly; full gate | active | Scans test and SSH fixture images |
 | PowerShell module pin audit | Exact module inventory and drift | Security | Custom test image | `pwsh -File scripts/security/Test-ModulePins.ps1` | repo-owned | On dependency change | active | No stack-native PowerShell audit provides complete advisory coverage |
 | Docker Compose | Local service orchestration | Integration/E2E | Host orchestrates; work runs in services | `./scripts/compose-run.sh ...` | Compose v2 contract | Host maintenance; design-compatible | active | Host orchestration only, never canonical test execution |
-| Test-ModuleManifest | Manifest/build validation | Build | Custom test image | `scripts/lanes/build.sh` | PowerShell 7.6.5 | With PowerShell pin | active | Verifies eight exports, RID assets, versions, schema CRUD, and isolated package import |
+| Test-ModuleManifest | Manifest/build validation | Build | Custom test image | `scripts/lanes/build.sh` | PowerShell 7.6.5 | With PowerShell pin | active | Verifies eleven exports, RID assets, versions, schema CRUD, and isolated package import |
 | Black-box pwsh journeys | All public CLI actions | E2E equivalent | Custom test client plus SSH service | `HH_TEST_MODULE_PATH=<package> scripts/lanes/e2e.sh` | PowerShell 7.6.5 | With feature changes | active | 18 package-backed SQLite journeys; Playwright not applicable |
 
 ## Authoritative commands
@@ -58,7 +58,7 @@ evidence require a separate live Windows exact-candidate lane.
 - Exact clean-checkout candidate: `./scripts/release/verify-candidate.sh <sha>`
 
 All commands in this section are implemented. Current working-tree evidence is
-544/544 product units, 18/18 package-backed CLI journeys, nine SQLite fault
+632/632 product tests, 21/21 package-backed CLI journeys, nine SQLite fault
 scenarios, and all four coverage metrics above 90%. Exact-commit and positive
 live Windows 5.1 execution remain release qualifications, not container claims.
 

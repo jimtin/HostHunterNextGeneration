@@ -18,10 +18,13 @@ Describe 'HostHunter module contract' -Tag Unit {
             'Enable-HHSshKeyAuthentication'
             'Get-HHAuditOutput'
             'Get-HHAuditRecord'
+            'Get-HHEscalationPreference'
             'Get-HHTarget'
             'Invoke-HHCommand'
             'Remove-HHTarget'
+            'Set-HHEscalationPreference'
             'Set-HHTarget'
+            'Set-HHWindowsProcessAuditPolicy'
             'Test-HHTarget'
         )
     }

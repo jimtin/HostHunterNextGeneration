@@ -30,7 +30,7 @@ and an uncertain dispatched command is never retried automatically.
 
 ## Public commands
 
-The current pre-migration module exports exactly:
+The module exports exactly eleven commands:
 
 - `Set-HHTarget`
 - `Get-HHTarget`
@@ -38,10 +38,11 @@ The current pre-migration module exports exactly:
 - `Remove-HHTarget`
 - `Invoke-HHCommand`
 - `Enable-HHSshKeyAuthentication`
-
-The confirmed SQLite persistence plan adds `Get-HHAuditRecord` and
-`Get-HHAuditOutput`. The cmdlets remain planned and test-mapped until their
-implementation and package-backed requalification pass.
+- `Get-HHAuditRecord`
+- `Get-HHAuditOutput`
+- `Get-HHEscalationPreference`
+- `Set-HHEscalationPreference`
+- `Set-HHWindowsProcessAuditPolicy`
 
 ## SSH quick start
 
@@ -95,6 +96,39 @@ no fallback to direct PowerShell 7 if that proof fails.
 Use `Get-HHTarget` to inspect the requested runtime and last validated edition,
 version, and execution mode. `Test-HHTarget` repeats runtime validation without
 changing the saved profile.
+
+## Windows process auditing and privilege activation
+
+Saved active targets are reused automatically, so `-Target` is needed only to
+select a subset. The following enables successful Process Creation auditing
+through the native Windows audit-policy APIs, without invoking `auditpol`:
+
+```powershell
+Set-HHWindowsProcessAuditPolicy `
+    -State Enabled `
+    -Escalate
+```
+
+`-Subcategory ProcessTermination` is optional. `-Escalate` uses the explicit or
+saved escalation method; the initial `WindowsTokenPrivilege` method activates
+`SeSecurityPrivilege` only when it already exists in the remote process token.
+It does not bypass UAC or add missing administrative rights, and HostHunter
+restores the previous privilege state after the operation.
+
+Command-line inclusion is an independent option:
+
+```powershell
+Set-HHWindowsProcessAuditPolicy `
+    -State Enabled `
+    -CommandLineLogging Enabled `
+    -Escalate
+```
+
+HostHunter warns and continues because event 4688 will contain process
+arguments in plaintext, which may expose passwords, tokens, or private data.
+Use `Disabled`, `NotConfigured`, or the default `Unchanged` explicitly. Direct
+policy changes describe the effective state at verification time; Group Policy
+or MDM may subsequently replace it.
 
 ## Passwordless SSH transition
 
@@ -161,11 +195,11 @@ All canonical proof runs in local containers:
 ./scripts/verify-local.sh
 ```
 
-The current working-tree product proof passed on 2026-08-24: 544/544 unit
-tests and 18/18 CLI E2E journeys passed, together with the nine-scenario SQLite
-fault/recovery lane. Product coverage was 96.8122% statements (6894/7121),
-90.048% branches (2253/2502), 96.1039% functions (222/231), and 96.8729%
-lines (5700/5884). The exact-candidate gate will rerun static, security,
+The current working-tree product unit proof passed on 2026-08-25: 632/632 tests
+passed, including the authenticated SQLite v1-to-v2 migration phase. Product
+coverage was 95.3352% statements (7664/8039), 90.0214% branches (2526/2806),
+96.31% functions (261/271), and 95.3677% lines (6341/6649). The exact-candidate
+gate will rerun static, security,
 filesystem/image, integration, package, and build proof from a clean checkout.
 
 That receipt proves the current working tree. It is not an exact-commit or live

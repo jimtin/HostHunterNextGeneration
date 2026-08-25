@@ -53,7 +53,7 @@ The detailed matrix remains
 `docs/testing/e2e-workflow-inventory.md`. Implementation must close these
 groups before the candidate gate:
 
-1. Package import/help and all eight exported commands.
+1. Package import/help and all eleven exported commands.
 2. Target preview, empty read/test, add/replace/remove, filtering, limits,
   unavailable-key display, and mutation/dispatch refusal.
 3. Command selection, one-to-eight dispatch, optional context, exact command,

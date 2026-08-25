@@ -71,6 +71,15 @@ $sshAgentStarted = $false
 $sshAgentKeyAdded = $false
 $sshAgentIdentityRemoved = $false
 $sshAgentStopped = $false
+$processAuditPowerShell7Verified = $false
+$processAuditWindowsPowerShell51Verified = $false
+$commandLineEnabledEventVerified = $false
+$commandLineDisabledEventVerified = $false
+$escalationPreferenceVerified = $false
+$processAuditPolicyRestored = $false
+$processAuditRestoreRequired = $false
+$processAuditBeforeFlag = $null
+$commandLineBeforeState = $null
 $originalSshAuthSock = [Environment]::GetEnvironmentVariable('SSH_AUTH_SOCK', 'Process')
 $originalSshAgentPid = [Environment]::GetEnvironmentVariable('SSH_AGENT_PID', 'Process')
 
@@ -83,6 +92,7 @@ function Write-HHQualificationPhase {
             'DirectPowerShell7',
             'DirectWindowsPowerShell51',
             'MixedRuntime',
+            'WindowsProcessAuditPolicy',
             'SshKeyBootstrap',
             'AgentKeyProof',
             'PasswordRecovery',
@@ -322,6 +332,104 @@ function Assert-HHRuntimeResult {
     }
 }
 
+function Assert-HHWindowsProcessAuditPolicyResult {
+    param(
+        [Parameter(Mandatory)][object]$Result,
+        [Parameter(Mandatory)][string]$Runtime
+    )
+
+    if (-not $Result.Succeeded -or
+        $Result.DispatchState -cne 'Completed' -or
+        $Result.OutcomeStatus -cne 'Succeeded' -or
+        $null -eq $Result.PolicyOutcome -or
+        -not [bool]$Result.PolicyOutcome.Succeeded -or
+        [string]$Result.PolicyOutcome.RequiredPrivilege -cne 'SeSecurityPrivilege' -or
+        -not [bool]$Result.PolicyOutcome.PrivilegeActivated -or
+        -not [bool]$Result.PolicyOutcome.PrivilegeRestored -or
+        [bool]$Result.PolicyOutcome.ReconciliationRequired) {
+        throw "The $Runtime Windows process-audit policy qualification failed."
+    }
+}
+
+function Invoke-HHWindowsProcessAuditEventProbe {
+    param(
+        [Parameter(Mandatory)][string]$Target,
+        [Parameter(Mandatory)][bool]$ExpectCommandLine
+    )
+
+    $marker = 'HHPA' + [Guid]::NewGuid().ToString('N')
+    $probe = @'
+$marker = '__MARKER__'
+$startedAt = [DateTime]::UtcNow.AddSeconds(-5)
+$startInfo = [Diagnostics.ProcessStartInfo]::new()
+$startInfo.FileName = Join-Path $env:SystemRoot 'System32\cmd.exe'
+$startInfo.UseShellExecute = $false
+$startInfo.CreateNoWindow = $true
+$startInfo.Arguments = '/d /c echo ' + $marker + '>NUL'
+$process = [Diagnostics.Process]::new()
+$process.StartInfo = $startInfo
+if (-not $process.Start()) { throw 'The process-audit marker process did not start.' }
+try {
+    if (-not $process.WaitForExit(15000)) {
+        $process.Kill()
+        throw 'The process-audit marker process did not exit in time.'
+    }
+    $markerProcessId = $process.Id
+}
+finally { $process.Dispose() }
+
+$matched = $null
+$deadline = [DateTime]::UtcNow.AddSeconds(30)
+do {
+    $events = @(Get-WinEvent -FilterHashtable @{
+            LogName = 'Security'
+            Id = 4688
+            StartTime = $startedAt
+        } -MaxEvents 256 -ErrorAction Stop)
+    foreach ($eventRecord in $events) {
+        $eventXml = [xml]$eventRecord.ToXml()
+        $fields = @{}
+        foreach ($field in @($eventXml.Event.EventData.Data)) {
+            $fields[[string]$field.Name] = [string]$field.'#text'
+        }
+        $eventProcessId = [string]$fields['NewProcessId']
+        if ($eventProcessId -match '^0x[0-9a-fA-F]+$' -and
+            [Convert]::ToInt64($eventProcessId.Substring(2), 16) -eq $markerProcessId) {
+            $matched = $fields
+            break
+        }
+    }
+    if ($null -eq $matched) { Start-Sleep -Milliseconds 250 }
+} while ($null -eq $matched -and [DateTime]::UtcNow -lt $deadline)
+
+if ($null -eq $matched) { throw 'The expected Security event 4688 was not observed.' }
+$commandLine = [string]$matched['CommandLine']
+[pscustomobject]@{
+    Marker = 'HostHunter.WindowsProcessAuditEventProbe.v1'
+    EventFound = $true
+    CommandLinePresent = -not [string]::IsNullOrWhiteSpace($commandLine)
+    MarkerPresent = $commandLine.Contains($marker)
+}
+'@.Replace('__MARKER__', $marker)
+
+    $result = Invoke-HHCommand -Command $probe -Target $Target
+    if (-not $result.Succeeded) {
+        throw "The process-audit event probe failed on $Target."
+    }
+    $probeReceipts = @($result.StreamEvents | Where-Object {
+            $_.Stream -ceq 'Output' -and
+            $null -ne $_.Value.PSObject.Properties['Marker'] -and
+            $_.Value.Marker -ceq 'HostHunter.WindowsProcessAuditEventProbe.v1'
+        })
+    if ($probeReceipts.Count -ne 1 -or
+        -not [bool]$probeReceipts[0].Value.EventFound -or
+        [bool]$probeReceipts[0].Value.CommandLinePresent -ne $ExpectCommandLine -or
+        [bool]$probeReceipts[0].Value.MarkerPresent -ne $ExpectCommandLine) {
+        throw "Security event 4688 command-line behavior was incorrect on $Target."
+    }
+    return $true
+}
+
 try {
     Write-HHQualificationPhase -Phase NativePackage -Status Started
     [IO.Directory]::CreateDirectory($extractRoot) | Out-Null
@@ -417,6 +525,51 @@ Write-Error 'error' -ErrorAction Continue
     }
     Write-HHQualificationPhase -Phase MixedRuntime -Status Passed
 
+    Write-HHQualificationPhase -Phase WindowsProcessAuditPolicy -Status Started
+    $null = Set-HHEscalationPreference -Method WindowsTokenPrivilege -Confirm:$false
+    $savedEscalation = Get-HHEscalationPreference
+    $escalationPreferenceVerified =
+        $savedEscalation.Method -ceq 'WindowsTokenPrivilege' -and
+        [bool]$savedEscalation.IsPersisted
+    if (-not $escalationPreferenceVerified) {
+        throw 'The authenticated escalation preference was not persisted.'
+    }
+
+    $policyPowerShell7 = Set-HHWindowsProcessAuditPolicy -State Enabled `
+        -Subcategory ProcessCreation -CommandLineLogging Enabled `
+        -Target windows-ps7 -Escalate -Confirm:$false
+    Assert-HHWindowsProcessAuditPolicyResult `
+        -Result $policyPowerShell7 -Runtime PowerShell7
+    $processAuditBeforeFlag =
+        [uint32]$policyPowerShell7.PolicyOutcome.AuditBefore.ProcessCreation
+    $commandLineBeforeState =
+        [string]$policyPowerShell7.PolicyOutcome.CommandLineBefore
+    if ($processAuditBeforeFlag -notin @([uint32]1, [uint32]2, [uint32]3, [uint32]4) -or
+        $commandLineBeforeState -notin @('Enabled', 'Disabled', 'NotConfigured')) {
+        throw 'The starting Windows process-audit policy cannot be restored exactly.'
+    }
+    $processAuditRestoreRequired = $true
+    $processAuditPowerShell7Verified = $true
+    $commandLineEnabledEventVerified = Invoke-HHWindowsProcessAuditEventProbe `
+        -Target windows-ps7 -ExpectCommandLine $true
+
+    $policyWindowsPowerShell51 = Set-HHWindowsProcessAuditPolicy -State Enabled `
+        -Subcategory ProcessCreation -CommandLineLogging Enabled `
+        -Target windows-ps51 -Escalate `
+        -EscalationMethod WindowsTokenPrivilege -Confirm:$false
+    Assert-HHWindowsProcessAuditPolicyResult `
+        -Result $policyWindowsPowerShell51 -Runtime WindowsPowerShell51
+    $processAuditWindowsPowerShell51Verified = $true
+
+    $policyCommandLineDisabled = Set-HHWindowsProcessAuditPolicy -State Enabled `
+        -Subcategory ProcessCreation -CommandLineLogging Disabled `
+        -Target windows-ps51 -Escalate -Confirm:$false
+    Assert-HHWindowsProcessAuditPolicyResult `
+        -Result $policyCommandLineDisabled -Runtime WindowsPowerShell51
+    $commandLineDisabledEventVerified = Invoke-HHWindowsProcessAuditEventProbe `
+        -Target windows-ps51 -ExpectCommandLine $false
+    Write-HHQualificationPhase -Phase WindowsProcessAuditPolicy -Status Passed
+
     Write-HHQualificationPhase -Phase SshKeyBootstrap -Status Started
     $transition = Enable-HHSshKeyAuthentication `
         -Name windows-ps7 -Confirm:$false
@@ -483,9 +636,35 @@ Write-Error 'error' -ErrorAction Continue
         throw 'The exact HostHunter qualification key was not removed remotely.'
     }
 
-    $null = Remove-HHTarget -Name windows-ps7, windows-ps51 -Confirm:$false
 }
 finally {
+    if ($processAuditRestoreRequired -and
+        $null -ne $processAuditBeforeFlag -and
+        -not [string]::IsNullOrWhiteSpace($commandLineBeforeState) -and
+        $null -ne $module) {
+        $restoreAuditState = if (($processAuditBeforeFlag -band [uint32]1) -ne 0) {
+            'Enabled'
+        }
+        else { 'Disabled' }
+        $restoreResult = Set-HHWindowsProcessAuditPolicy -State $restoreAuditState `
+            -Subcategory ProcessCreation -CommandLineLogging $commandLineBeforeState `
+            -Target windows-ps7 -Escalate `
+            -EscalationMethod WindowsTokenPrivilege -Confirm:$false
+        Assert-HHWindowsProcessAuditPolicyResult `
+            -Result $restoreResult -Runtime PowerShell7
+        $processAuditPolicyRestored =
+            [uint32]$restoreResult.PolicyOutcome.AuditAfter.ProcessCreation -eq
+                $processAuditBeforeFlag -and
+            [string]$restoreResult.PolicyOutcome.CommandLineAfter -ceq
+                $commandLineBeforeState
+        if (-not $processAuditPolicyRestored) {
+            throw 'The starting Windows process-audit policy was not restored exactly.'
+        }
+        $processAuditRestoreRequired = $false
+    }
+    if ($remoteKeyRemoved) {
+        $null = Remove-HHTarget -Name windows-ps7, windows-ps51 -Confirm:$false
+    }
     if ($sshAgentStarted) {
         try {
             if ($sshAgentKeyAdded -and $null -ne $transition) {
@@ -571,6 +750,12 @@ Write-HHQualificationPhase -Phase Cleanup -Status Passed
     compatibilityEdition = [string]$compatibilityResult.RemotePSEdition
     compatibilityExecutionMode = [string]$compatibilityResult.ExecutionMode
     mixedTargetCount = $mixedResult.Count
+    processAuditPowerShell7Verified = $processAuditPowerShell7Verified
+    processAuditWindowsPowerShell51Verified = $processAuditWindowsPowerShell51Verified
+    commandLineEnabledEventVerified = $commandLineEnabledEventVerified
+    commandLineDisabledEventVerified = $commandLineDisabledEventVerified
+    escalationPreferenceVerified = $escalationPreferenceVerified
+    processAuditPolicyRestored = $processAuditPolicyRestored
     keyTransitionSucceeded = [bool]$keyResult.Succeeded
     runScopedSshAgentVerified = $sshAgentStarted -and $sshAgentKeyAdded -and
         [bool]$keyResult.Succeeded

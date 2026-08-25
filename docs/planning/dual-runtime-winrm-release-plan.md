@@ -7,7 +7,7 @@
 This remains the confirmed transport/runtime baseline. Its six-cmdlet and
 file-persistence release statements are superseded by the subsequently
 confirmed `docs/planning/sqlite-persistence-plan.md`. The SQLite plan expands
-the target release contract to eight cmdlets and must be implemented and
+the target release contract to eleven cmdlets and must be implemented and
 requalified before exact-commit, live Windows, or publication work resumes.
 
 The user confirmed this contract after a live capability check of PowerShell 7
@@ -31,13 +31,12 @@ uses native Security-framework byte APIs, and its separate-process disposable
 create/read/delete lifecycle passed without placing the key in arguments,
 environment variables, or a plaintext key file.
 
-The canonical `./scripts/verify-local.sh` run passed on 2026-08-24 for the
-current working tree: 544/544 product unit tests, 22/22 ordinary integration
-tests, all nine SQLite fault scenarios, and 18/18 CLI E2E journeys passed.
-Coverage was 96.8122% statements (6894/7121), 90.048% branches (2253/2502),
-96.1039% functions (222/231), and 96.8729% lines (5700/5884); the full static,
-security, filesystem/image, and build program was green. This receipt is not
-an exact-commit or positive live Windows 5.1 proof.
+The current 2026-08-25 working-tree unit receipt is 632/632 with 95.3352%
+statements (7664/8039), 90.0214% branches (2526/2806), 96.31% functions
+(261/271), and 95.3677% lines (6341/6649). The exact-candidate gate must still
+reproduce the full static, security, integration, E2E, package, and image
+program. This receipt is not an exact-commit or positive live Windows 5.1
+proof.
 
 ## Summary
 

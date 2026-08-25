@@ -28,6 +28,13 @@ FROM audit_events
 ORDER BY sequence DESC
 LIMIT 1;
 '@)
+    $configurationRows = @(Invoke-HHSqliteQuery `
+            -Connection $Connection `
+            -Sql @'
+SELECT generation, state_mac
+FROM configuration_store_state
+WHERE singleton_id = 1;
+'@)
     if ($identityRows.Count -ne 1 -or $targetRows.Count -ne 1 -or $auditRows.Count -gt 1) {
         Stop-HHPersistenceOperation `
             -ErrorId 'AuditIntegrityFailed' `
@@ -43,6 +50,15 @@ LIMIT 1;
         [byte[]]::new(32)
     }
     else { [byte[]]$auditRows[0].event_mac }
+    if ($configurationRows.Count -ne 1 -or
+        [long]$configurationRows[0].generation -lt 0 -or
+        ([byte[]]$configurationRows[0].state_mac).Length -ne 32) {
+        Stop-HHPersistenceOperation `
+            -ErrorId 'AuditIntegrityFailed' `
+            -Message 'The authenticated configuration head is invalid.' `
+            -Category ([Management.Automation.ErrorCategory]::InvalidData) `
+            -TargetObject $Connection.DataSource
+    }
     if ($databaseId.Length -ne 16 -or $ledgerId.Length -ne 16 -or
         $targetMac.Length -ne 32 -or $auditMac.Length -ne 32 -or
         [long]$targetRows[0].generation -lt 0 -or $auditSequence -lt 0) {
@@ -61,6 +77,8 @@ LIMIT 1;
         TargetGeneration = [long]$targetRows[0].generation
         TargetStateMac = $targetMac
         SchemaFingerprint = [byte[]]$SchemaFingerprint.Clone()
+        ConfigurationGeneration = [long]$configurationRows[0].generation
+        ConfigurationStateMac = [byte[]]$configurationRows[0].state_mac
     }
 }
 
@@ -104,6 +122,34 @@ function Test-HHPersistenceAnchorState {
             -TargetObject $null
     }
 
+    $databaseHasConfiguration = $null -ne $DatabaseHead.PSObject.Properties['ConfigurationGeneration'] -or
+        $null -ne $DatabaseHead.PSObject.Properties['ConfigurationStateMac']
+    $anchorHasConfiguration = $null -ne $Anchor.PSObject.Properties['ConfigurationGeneration'] -or
+        $null -ne $Anchor.PSObject.Properties['ConfigurationStateMac']
+    if ($databaseHasConfiguration -ne $anchorHasConfiguration -or
+        ($databaseHasConfiguration -and
+            ($null -eq $DatabaseHead.PSObject.Properties['ConfigurationGeneration'] -or
+                $null -eq $DatabaseHead.PSObject.Properties['ConfigurationStateMac'] -or
+                $null -eq $Anchor.PSObject.Properties['ConfigurationGeneration'] -or
+                $null -eq $Anchor.PSObject.Properties['ConfigurationStateMac']))) {
+        Stop-HHPersistenceOperation -ErrorId AuditIntegrityFailed `
+            -Message 'The database and external anchor configuration heads are incompatible.' `
+            -Category ([Management.Automation.ErrorCategory]::InvalidData) `
+            -TargetObject $null
+    }
+    if ($databaseHasConfiguration -and
+        ([long]$DatabaseHead.ConfigurationGeneration -lt 0 -or
+            [long]$Anchor.ConfigurationGeneration -lt 0 -or
+            $DatabaseHead.ConfigurationStateMac -isnot [byte[]] -or
+            $Anchor.ConfigurationStateMac -isnot [byte[]] -or
+            $DatabaseHead.ConfigurationStateMac.Length -ne 32 -or
+            $Anchor.ConfigurationStateMac.Length -ne 32)) {
+        Stop-HHPersistenceOperation -ErrorId AuditIntegrityFailed `
+            -Message 'The database or external anchor configuration head is invalid.' `
+            -Category ([Management.Automation.ErrorCategory]::InvalidData) `
+            -TargetObject $null
+    }
+
     if ([long]$DatabaseHead.AuditSequence -lt 0 -or [long]$Anchor.AuditSequence -lt 0 -or
         [long]$DatabaseHead.TargetGeneration -lt 0 -or [long]$Anchor.TargetGeneration -lt 0) {
         Stop-HHPersistenceOperation `
@@ -114,7 +160,13 @@ function Test-HHPersistenceAnchorState {
     }
     $auditComparison = ([long]$DatabaseHead.AuditSequence).CompareTo([long]$Anchor.AuditSequence)
     $targetComparison = ([long]$DatabaseHead.TargetGeneration).CompareTo([long]$Anchor.TargetGeneration)
-    if ($auditComparison -lt 0 -or $targetComparison -lt 0) {
+    $configurationComparison = if ($databaseHasConfiguration) {
+        ([long]$DatabaseHead.ConfigurationGeneration).CompareTo(
+            [long]$Anchor.ConfigurationGeneration
+        )
+    }
+    else { 0 }
+    if ($auditComparison -lt 0 -or $targetComparison -lt 0 -or $configurationComparison -lt 0) {
         Stop-HHPersistenceOperation `
             -ErrorId 'AuditRollbackDetected' `
             -Message 'The database is behind its external persistence anchor.' `
@@ -126,7 +178,11 @@ function Test-HHPersistenceAnchorState {
                 -Right ([byte[]]$Anchor.AuditMac))) -or
         ($targetComparison -eq 0 -and -not (Test-HHPersistenceBytesEqual `
                 -Left ([byte[]]$DatabaseHead.TargetStateMac) `
-                -Right ([byte[]]$Anchor.TargetStateMac)))) {
+                -Right ([byte[]]$Anchor.TargetStateMac))) -or
+        ($databaseHasConfiguration -and $configurationComparison -eq 0 -and
+            -not (Test-HHPersistenceBytesEqual `
+                -Left ([byte[]]$DatabaseHead.ConfigurationStateMac) `
+                -Right ([byte[]]$Anchor.ConfigurationStateMac)))) {
         Stop-HHPersistenceOperation `
             -ErrorId 'AuditIntegrityFailed' `
             -Message 'The database head differs from the external anchor at the same position.' `
@@ -134,10 +190,13 @@ function Test-HHPersistenceAnchorState {
             -TargetObject $null
     }
     [pscustomobject][ordered]@{
-        IsEqual = $auditComparison -eq 0 -and $targetComparison -eq 0
-        RequiresVerifiedAdvance = $auditComparison -gt 0 -or $targetComparison -gt 0
+        IsEqual = $auditComparison -eq 0 -and $targetComparison -eq 0 -and
+            $configurationComparison -eq 0
+        RequiresVerifiedAdvance = $auditComparison -gt 0 -or $targetComparison -gt 0 -or
+            $configurationComparison -gt 0
         AuditAdvanceRequired = $auditComparison -gt 0
         TargetAdvanceRequired = $targetComparison -gt 0
+        ConfigurationAdvanceRequired = $configurationComparison -gt 0
     }
 }
 
@@ -188,6 +247,7 @@ function Open-HHAuthenticatedPersistence {
         $null = Initialize-HHSqliteDatabase `
             -PersistenceContext $PersistenceContext `
             -MasterKey $masterKey `
+            -AnchorReader $AnchorReader `
             -AnchorWriter $AnchorWriter `
             -ProviderRoot $ProviderRoot
 
@@ -219,6 +279,9 @@ function Open-HHAuthenticatedPersistence {
         $snapshot = Read-HHTargetRepositorySnapshot `
             -Connection $connection `
             -MasterKey $masterKey
+        $configuration = Read-HHConfigurationRepositorySnapshot `
+            -Connection $connection `
+            -MasterKey $masterKey
         $head = Get-HHSqlitePersistenceHead `
             -Connection $connection `
             -SchemaFingerprint $schema.SchemaFingerprint
@@ -227,7 +290,11 @@ function Open-HHAuthenticatedPersistence {
             $snapshot.Generation -ne $head.TargetGeneration -or
             -not (Test-HHPersistenceBytesEqual `
                 -Left $snapshot.StateEvidence.TargetStateMac `
-                -Right $head.TargetStateMac)) {
+                -Right $head.TargetStateMac) -or
+            $configuration.Generation -ne $head.ConfigurationGeneration -or
+            -not (Test-HHPersistenceBytesEqual `
+                -Left $configuration.StateMac `
+                -Right $head.ConfigurationStateMac)) {
             Stop-HHPersistenceOperation `
                 -ErrorId 'AuditIntegrityFailed' `
                 -Message 'The authenticated repository heads do not match their verified state.' `
@@ -263,6 +330,7 @@ function Open-HHAuthenticatedPersistence {
             Anchor = $anchor
             Schema = $schema
             TargetSnapshot = $snapshot
+            ConfigurationSnapshot = $configuration
             OperationLock = $operationLockContext
             WriterLock = $writerLockContext
             ProviderRoot = $ProviderRoot
@@ -356,12 +424,19 @@ function Invoke-HHAnchoredPersistenceTransaction {
         $snapshot = Read-HHTargetRepositorySnapshot `
             -Connection $Context.Connection `
             -MasterKey $Context.MasterKey
+        $configuration = Read-HHConfigurationRepositorySnapshot `
+            -Connection $Context.Connection `
+            -MasterKey $Context.MasterKey
         if ($chain.Sequence -ne $head.AuditSequence -or
             -not (Test-HHPersistenceBytesEqual -Left $chain.LastMac -Right $head.AuditMac) -or
             $snapshot.Generation -ne $head.TargetGeneration -or
             -not (Test-HHPersistenceBytesEqual `
                 -Left $snapshot.StateEvidence.TargetStateMac `
-                -Right $head.TargetStateMac)) {
+                -Right $head.TargetStateMac) -or
+            $configuration.Generation -ne $head.ConfigurationGeneration -or
+            -not (Test-HHPersistenceBytesEqual `
+                -Left $configuration.StateMac `
+                -Right $head.ConfigurationStateMac)) {
             throw 'The committed database head did not verify before sealing.'
         }
         Write-HHPersistenceAnchor `
@@ -377,6 +452,7 @@ function Invoke-HHAnchoredPersistenceTransaction {
         $Context.Anchor = $head
         $Context.Schema = $schema
         $Context.TargetSnapshot = $snapshot
+        $Context.ConfigurationSnapshot = $configuration
         if ($null -ne $preparedReceipt) {
             $preparedReceipt | Add-Member -NotePropertyName Prepared -NotePropertyValue $true -Force
             $preparedReceipt | Add-Member -NotePropertyName Committed -NotePropertyValue $true -Force

@@ -7,7 +7,13 @@ function Get-HHAuditRecord {
         [string]$CaseId,
         [DateTimeOffset]$FromUtc,
         [DateTimeOffset]$ToUtc,
-        [ValidateSet('ValidateTarget', 'TestTarget', 'InvokeCommand', 'EnableSshKeyAuthentication')]
+        [ValidateSet(
+            'ValidateTarget',
+            'TestTarget',
+            'InvokeCommand',
+            'EnableSshKeyAuthentication',
+            'SetWindowsProcessAuditPolicy'
+        )]
         [string[]]$Operation,
         [ValidateSet('Succeeded', 'Failed', 'Cancelled', 'Unknown', 'Pending')]
         [string[]]$Status,

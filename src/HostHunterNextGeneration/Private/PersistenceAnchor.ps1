@@ -1,7 +1,9 @@
 Set-StrictMode -Version Latest
 
-$script:HHPersistenceAnchorLength = 196
-$script:HHPersistenceAnchorBodyLength = 164
+$script:HHPersistenceAnchorV1Length = 196
+$script:HHPersistenceAnchorV1BodyLength = 164
+$script:HHPersistenceAnchorV2Length = 236
+$script:HHPersistenceAnchorV2BodyLength = 204
 
 function Write-HHInt64BigEndian {
     [CmdletBinding()]
@@ -49,20 +51,41 @@ function ConvertTo-HHPersistenceAnchorArtifact {
             throw [System.ArgumentException]::new("Anchor is missing $propertyName.", 'Anchor')
         }
     }
+    $hasConfigurationHead = $null -ne $Anchor.PSObject.Properties['ConfigurationGeneration'] -or
+        $null -ne $Anchor.PSObject.Properties['ConfigurationStateMac']
+    if ($hasConfigurationHead -and
+        ($null -eq $Anchor.PSObject.Properties['ConfigurationGeneration'] -or
+            $null -eq $Anchor.PSObject.Properties['ConfigurationStateMac'])) {
+        throw [System.ArgumentException]::new('Anchor configuration fields are incomplete.', 'Anchor')
+    }
     if (($Anchor.DatabaseId -isnot [byte[]]) -or $Anchor.DatabaseId.Length -ne 16 -or
         ($Anchor.LedgerId -isnot [byte[]]) -or $Anchor.LedgerId.Length -ne 16 -or
         ($Anchor.AuditMac -isnot [byte[]]) -or $Anchor.AuditMac.Length -ne 32 -or
         ($Anchor.TargetStateMac -isnot [byte[]]) -or $Anchor.TargetStateMac.Length -ne 32 -or
         ($Anchor.SchemaFingerprint -isnot [byte[]]) -or $Anchor.SchemaFingerprint.Length -ne 32 -or
         [long]$Anchor.AuditSequence -lt 0 -or [long]$Anchor.TargetGeneration -lt 0 -or
-        [int]$Anchor.SchemaVersion -ne 1) {
+        [int]$Anchor.SchemaVersion -ne 1 -or
+        ($hasConfigurationHead -and
+            ([long]$Anchor.ConfigurationGeneration -lt 0 -or
+                $Anchor.ConfigurationStateMac -isnot [byte[]] -or
+                $Anchor.ConfigurationStateMac.Length -ne 32))) {
         throw [System.ArgumentException]::new('Anchor fields are invalid.', 'Anchor')
     }
 
-    $artifact = [byte[]]::new($script:HHPersistenceAnchorLength)
-    $magic = [System.Text.Encoding]::ASCII.GetBytes('HHANCH01')
+    $artifactLength = if ($hasConfigurationHead) {
+        $script:HHPersistenceAnchorV2Length
+    }
+    else { $script:HHPersistenceAnchorV1Length }
+    $bodyLength = if ($hasConfigurationHead) {
+        $script:HHPersistenceAnchorV2BodyLength
+    }
+    else { $script:HHPersistenceAnchorV1BodyLength }
+    $artifact = [byte[]]::new($artifactLength)
+    $magic = [System.Text.Encoding]::ASCII.GetBytes(
+        $(if ($hasConfigurationHead) { 'HHANCH02' } else { 'HHANCH01' })
+    )
     [Array]::Copy($magic, 0, $artifact, 0, 8)
-    $artifact[8] = 1
+    $artifact[8] = if ($hasConfigurationHead) { 2 } else { 1 }
     [Array]::Copy($Anchor.DatabaseId, 0, $artifact, 16, 16)
     [Array]::Copy($Anchor.LedgerId, 0, $artifact, 32, 16)
     $artifact[48] = 0
@@ -74,13 +97,18 @@ function ConvertTo-HHPersistenceAnchorArtifact {
     Write-HHInt64BigEndian -Buffer $artifact -Offset 92 -Value ([long]$Anchor.TargetGeneration)
     [Array]::Copy($Anchor.TargetStateMac, 0, $artifact, 100, 32)
     [Array]::Copy($Anchor.SchemaFingerprint, 0, $artifact, 132, 32)
+    if ($hasConfigurationHead) {
+        Write-HHInt64BigEndian -Buffer $artifact -Offset 164 `
+            -Value ([long]$Anchor.ConfigurationGeneration)
+        [Array]::Copy($Anchor.ConfigurationStateMac, 0, $artifact, 172, 32)
+    }
     $anchorKey = Get-HHPersistenceDerivedKey -MasterKey $MasterKey -Purpose Anchor
-    $body = [byte[]]::new($script:HHPersistenceAnchorBodyLength)
+    $body = [byte[]]::new($bodyLength)
     try {
         [Array]::Copy($artifact, 0, $body, 0, $body.Length)
         $mac = Get-HHPersistenceMac -Key $anchorKey -Bytes $body
         try {
-            [Array]::Copy($mac, 0, $artifact, 164, 32)
+            [Array]::Copy($mac, 0, $artifact, $bodyLength, 32)
         }
         finally {
             [Array]::Clear($mac, 0, $mac.Length)
@@ -105,20 +133,27 @@ function ConvertFrom-HHPersistenceAnchorArtifact {
         [System.Text.Encoding]::ASCII.GetString($Artifact, 0, 8)
     }
     else { '' }
-    if ($Artifact.Length -ne $script:HHPersistenceAnchorLength -or
-        $magic -cne 'HHANCH01' -or $Artifact[8] -ne 1) {
+    $isV1 = $Artifact.Length -eq $script:HHPersistenceAnchorV1Length -and
+        $magic -ceq 'HHANCH01' -and $Artifact[8] -eq 1
+    $isV2 = $Artifact.Length -eq $script:HHPersistenceAnchorV2Length -and
+        $magic -ceq 'HHANCH02' -and $Artifact[8] -eq 2
+    if (-not $isV1 -and -not $isV2) {
         Stop-HHPersistenceOperation `
             -ErrorId 'AuditIntegrityFailed' `
             -Message 'The persistence anchor has an invalid format.' `
             -Category ([System.Management.Automation.ErrorCategory]::InvalidData) `
             -TargetObject $null
     }
-    $body = [byte[]]::new($script:HHPersistenceAnchorBodyLength)
+    $bodyLength = if ($isV2) {
+        $script:HHPersistenceAnchorV2BodyLength
+    }
+    else { $script:HHPersistenceAnchorV1BodyLength }
+    $body = [byte[]]::new($bodyLength)
     $storedMac = [byte[]]::new(32)
     $anchorKey = Get-HHPersistenceDerivedKey -MasterKey $MasterKey -Purpose Anchor
     try {
         [Array]::Copy($Artifact, 0, $body, 0, $body.Length)
-        [Array]::Copy($Artifact, 164, $storedMac, 0, 32)
+        [Array]::Copy($Artifact, $bodyLength, $storedMac, 0, 32)
         $expectedMac = Get-HHPersistenceMac -Key $anchorKey -Bytes $body
         try {
             if (-not (Test-HHPersistenceBytesEqual -Left $storedMac -Right $expectedMac)) {
@@ -149,7 +184,7 @@ function ConvertFrom-HHPersistenceAnchorArtifact {
     [Array]::Copy($Artifact, 60, $auditMac, 0, 32)
     [Array]::Copy($Artifact, 100, $targetStateMac, 0, 32)
     [Array]::Copy($Artifact, 132, $schemaFingerprint, 0, 32)
-    [pscustomobject]@{
+    $anchor = [pscustomobject]@{
         DatabaseId = $databaseId
         LedgerId = $ledgerId
         SchemaVersion = 1
@@ -160,6 +195,15 @@ function ConvertFrom-HHPersistenceAnchorArtifact {
         SchemaFingerprint = $schemaFingerprint
         Artifact = [byte[]]$Artifact.Clone()
     }
+    if ($isV2) {
+        $configurationStateMac = [byte[]]::new(32)
+        [Array]::Copy($Artifact, 172, $configurationStateMac, 0, 32)
+        $anchor | Add-Member -NotePropertyName ConfigurationGeneration `
+            -NotePropertyValue (Get-HHInt64BigEndian -Buffer $Artifact -Offset 164)
+        $anchor | Add-Member -NotePropertyName ConfigurationStateMac `
+            -NotePropertyValue $configurationStateMac
+    }
+    return $anchor
 }
 
 function Read-HHFilePersistenceAnchor {

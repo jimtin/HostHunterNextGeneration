@@ -31,6 +31,15 @@ accountable commands against them.
 - Route all HostHunter-originated remote execution through
   `Invoke-HHCommand`.
 - Support up to eight concurrent target executions initially.
+- Reuse saved active targets for policy operations when `-Target` is omitted.
+- Set Windows Process Creation and optional Process Termination success auditing
+  through native Windows APIs, never `auditpol`.
+- Treat 4688 command-line inclusion as an explicit independent setting. Enabling
+  it emits a non-blocking plaintext-risk warning before dispatch.
+- `-Escalate` on privilege-aware built-in operations resolves an explicit or
+  authenticated saved method. The initial `WindowsTokenPrivilege` method can
+  activate only a declared privilege already present in the token, cannot
+  bypass UAC, never falls back, and restores exact prior state.
 - Keep `Reason` and `CaseId` optional; generate operation, batch, and
   per-target invocation identifiers automatically.
 

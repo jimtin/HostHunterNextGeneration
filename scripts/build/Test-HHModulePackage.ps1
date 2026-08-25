@@ -25,7 +25,7 @@ $provider = (Resolve-Path -LiteralPath $ProviderRoot).Path
 $metadata = (Resolve-Path -LiteralPath $MetadataRoot).Path
 $durabilityHelper = (Resolve-Path -LiteralPath `
         (Join-Path $DurabilityHelperRoot 'HostHunter.Persistence.Durability.dll')).Path
-$packageRoot = Join-Path $artifact 'HostHunterNextGeneration/0.1.0'
+$packageRoot = Join-Path $artifact 'HostHunterNextGeneration/0.2.0'
 if (Test-Path -LiteralPath $packageRoot) {
     Remove-Item -LiteralPath $packageRoot -Recurse -Force
 }
@@ -91,7 +91,7 @@ Copy-Item -LiteralPath (Join-Path $provider 'asset-sha256.txt') `
 
 $manifestPath = Join-Path $packageRoot 'HostHunterNextGeneration.psd1'
 $manifest = Test-ModuleManifest -Path $manifestPath -ErrorAction Stop
-if ($manifest.Version.ToString() -ne '0.1.0') {
+if ($manifest.Version.ToString() -ne '0.2.0') {
     throw "Unexpected packaged module version '$($manifest.Version)'."
 }
 
@@ -100,10 +100,13 @@ $expected = @(
     'Enable-HHSshKeyAuthentication'
     'Get-HHAuditOutput'
     'Get-HHAuditRecord'
+    'Get-HHEscalationPreference'
     'Get-HHTarget'
     'Invoke-HHCommand'
     'Remove-HHTarget'
+    'Set-HHEscalationPreference'
     'Set-HHTarget'
+    'Set-HHWindowsProcessAuditPolicy'
     'Test-HHTarget'
 )
 $actual = @(Get-Command -Module HostHunterNextGeneration -CommandType Function |

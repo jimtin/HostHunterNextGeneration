@@ -98,6 +98,53 @@ Describe 'authenticated persistence head comparison' -Tag Unit {
             } | Should -Throw -ErrorId 'AuditIntegrityFailed*'
         }
 
+        It 'requires complete and valid configuration heads on both sides' {
+            $database = $script:baseHead.PSObject.Copy()
+            $anchor = $script:baseHead.PSObject.Copy()
+            $database | Add-Member -NotePropertyName ConfigurationGeneration -NotePropertyValue 0L
+            $database | Add-Member -NotePropertyName ConfigurationStateMac `
+                -NotePropertyValue ([byte[]]::new(32))
+            {
+                Test-HHPersistenceAnchorState -DatabaseHead $database -Anchor $anchor
+            } | Should -Throw -ErrorId 'AuditIntegrityFailed*'
+
+            $anchor | Add-Member -NotePropertyName ConfigurationGeneration -NotePropertyValue 0L
+            $anchor | Add-Member -NotePropertyName ConfigurationStateMac `
+                -NotePropertyValue ([byte[]]::new(31))
+            {
+                Test-HHPersistenceAnchorState -DatabaseHead $database -Anchor $anchor
+            } | Should -Throw -ErrorId 'AuditIntegrityFailed*'
+        }
+
+        It 'rejects invalid schema fingerprints and malformed configuration head rows' {
+            {
+                Get-HHSqlitePersistenceHead -Connection ([pscustomobject]@{}) `
+                    -SchemaFingerprint ([byte[]]::new(31))
+            } | Should -Throw '*32 bytes*'
+
+            Mock Invoke-HHSqliteQuery {
+                if ($Sql -match 'database_identity') {
+                    return [pscustomobject]@{
+                        database_id = [byte[]]::new(16)
+                        ledger_id = [byte[]]::new(16)
+                    }
+                }
+                if ($Sql -match 'target_store_state') {
+                    return [pscustomobject]@{
+                        generation = 0L
+                        target_state_mac = [byte[]]::new(32)
+                    }
+                }
+                if ($Sql -match 'configuration_store_state') { return @() }
+                return @()
+            }
+            {
+                Get-HHSqlitePersistenceHead `
+                    -Connection ([pscustomobject]@{ DataSource = 'mock.db' }) `
+                    -SchemaFingerprint ([byte[]]::new(32))
+            } | Should -Throw -ErrorId 'AuditIntegrityFailed*'
+        }
+
         It 'rejects malformed head lengths before comparison' {
             foreach ($propertyName in @(
                     'DatabaseId', 'LedgerId', 'AuditMac', 'TargetStateMac',
@@ -310,6 +357,19 @@ SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name='rollback_probe';
                 Should -BeFalse
         }
 
+        It 'blocks an existing database whose external anchor is missing' -Skip:$IsMacOS {
+            $context = Open-HHAuthenticatedPersistence `
+                -PersistenceContext $script:persistenceContext `
+                -AllowAnchorAdvance
+            Close-HHAuthenticatedPersistence -Context $context
+            [IO.File]::Delete($script:persistenceContext.AnchorPath)
+
+            {
+                Open-HHAuthenticatedPersistence `
+                    -PersistenceContext $script:persistenceContext
+            } | Should -Throw -ErrorId 'AuditKeyUnavailable*'
+        }
+
         It 'acquires and releases an operation lock and accepts a null prepared receipt' -Skip:$IsMacOS {
             $context = Open-HHAuthenticatedPersistence `
                 -PersistenceContext $script:persistenceContext `
@@ -360,11 +420,13 @@ SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name='rollback_probe';
                 $auditMac = [byte[]]::new(32)
                 $targetStateMac = [byte[]]::new(32)
                 $schemaFingerprint = [byte[]]::new(32)
+                $configurationStateMac = [byte[]]::new(32)
                 [Array]::Copy($artifactState.Artifact, 16, $databaseId, 0, 16)
                 [Array]::Copy($artifactState.Artifact, 32, $ledgerId, 0, 16)
                 [Array]::Copy($artifactState.Artifact, 60, $auditMac, 0, 32)
                 [Array]::Copy($artifactState.Artifact, 100, $targetStateMac, 0, 32)
                 [Array]::Copy($artifactState.Artifact, 132, $schemaFingerprint, 0, 32)
+                [Array]::Copy($artifactState.Artifact, 172, $configurationStateMac, 0, 32)
                 [pscustomobject]@{
                     DatabaseId = $databaseId
                     LedgerId = $ledgerId
@@ -374,6 +436,8 @@ SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name='rollback_probe';
                     TargetGeneration = 0L
                     TargetStateMac = $targetStateMac
                     SchemaFingerprint = $schemaFingerprint
+                    ConfigurationGeneration = 0L
+                    ConfigurationStateMac = $configurationStateMac
                     Artifact = [byte[]]$artifactState.Artifact.Clone()
                 }
             }.GetNewClosure()
@@ -385,7 +449,7 @@ SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name='rollback_probe';
                 -AnchorReader $anchorReader
             try {
                 $artifactState.KeyCalls | Should -Be 1
-                $artifactState.Artifact.Length | Should -Be 196
+                $artifactState.Artifact.Length | Should -Be 236
                 Test-Path -LiteralPath (Join-Path $script:stateRoot 'audit/audit.key') |
                     Should -BeFalse
             }
