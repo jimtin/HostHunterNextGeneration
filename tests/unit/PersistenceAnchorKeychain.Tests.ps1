@@ -362,6 +362,21 @@ Describe 'macOS persistence-anchor Keychain boundary' -Tag Unit {
         $result.OutputBytes.Length | Should -Be 0
     }
 
+    It 'accepts legacy and current CAS frame lengths at the native worker boundary' -Skip:(!$IsLinux) {
+        foreach ($expectedLength in @(196, 236)) {
+            $inputBytes = [byte[]]::new($expectedLength + 236)
+            $result = Invoke-HHMacOSKeychainWorker `
+                -Action CompareUpdateAnchor `
+                -KeychainPath '/tmp/test-login.keychain-db' `
+                -Account 'test-anchor-account' `
+                -Service $script:HHPersistenceAnchorKeychainService `
+                -InputKey $inputBytes
+
+            $result.ExitCode | Should -Be 14
+            $result.OutputBytes.Length | Should -Be 0
+        }
+    }
+
     It 'uses the default bounded worker path for anchor commands on Linux' -Skip:(!$IsLinux) {
         $result = Invoke-HHPersistenceAnchorKeychainWorkerCommand `
             -Action ReadAnchor `
