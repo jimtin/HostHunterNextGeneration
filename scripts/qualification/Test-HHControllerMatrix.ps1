@@ -42,7 +42,7 @@ finally {
     Remove-Module $module -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $dataRoot -Recurse -Force -ErrorAction SilentlyContinue
 }
-if ($proof.SQLiteVersion -cne '3.53.4' -or $proof.SchemaVersion -ne 1 -or
+if ($proof.SQLiteVersion -cne '3.53.4' -or $proof.SchemaVersion -ne 2 -or
     $proof.RuntimeIdentifier -notin @('linux-x64', 'linux-arm64')) {
     throw 'The minimum controller failed packaged SQLite schema qualification.'
 }
