@@ -1,8 +1,12 @@
-$sourceRoot = if ([string]::IsNullOrWhiteSpace($env:HH_TEST_SOURCE_ROOT)) {
-    Join-Path $PSScriptRoot '../../src/HostHunterNextGeneration'
+$modulePath = if (-not [string]::IsNullOrWhiteSpace($env:HH_TEST_MODULE_PATH)) {
+    $env:HH_TEST_MODULE_PATH
 }
-else { $env:HH_TEST_SOURCE_ROOT }
-Import-Module (Join-Path $sourceRoot 'HostHunterNextGeneration.psd1') -Force
+elseif ([string]::IsNullOrWhiteSpace($env:HH_TEST_SOURCE_ROOT)) {
+    Join-Path $PSScriptRoot '../../src/HostHunterNextGeneration/HostHunterNextGeneration.psd1'
+}
+else { Join-Path $env:HH_TEST_SOURCE_ROOT 'HostHunterNextGeneration.psd1' }
+Remove-Module HostHunterNextGeneration -Force -ErrorAction SilentlyContinue
+Import-Module $modulePath -Force
 if ([IO.Directory]::Exists('/opt/hosthunter-sqlite/lib')) {
     $env:HH_SQLITE_PROVIDER_ROOT = '/opt/hosthunter-sqlite/lib'
 }
@@ -195,5 +199,9 @@ Import-Module $ModulePath -Force
             $preference.Source | Should -BeExactly Persisted
             $preference.Generation | Should -Be 1
         }
+    }
+
+    AfterAll {
+        Remove-Module HostHunterNextGeneration -Force -ErrorAction SilentlyContinue
     }
 }
