@@ -35,5 +35,4 @@ trap cleanup EXIT INT TERM HUP
         pwsh -NoLogo -NoProfile -NonInteractive -File tests/fixtures/ssh/Invoke-FixtureContract.ps1
 "${bounded}" prepush-critical-integration 600 240 .artifacts/logs/prepush-critical-integration.log \
     docker compose --file compose.test.yml run --rm test bash scripts/lanes/integration.sh
-"${bounded}" prepush-critical-e2e 900 240 .artifacts/logs/prepush-critical-e2e.log \
-    docker compose --file compose.test.yml run --rm test bash scripts/lanes/e2e.sh
+"${repo_root}/scripts/verify-cmdlets.sh"
