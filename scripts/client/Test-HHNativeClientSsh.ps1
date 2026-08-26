@@ -68,9 +68,22 @@ try {
     if ($exports.Count -ne 11) { throw "Native client exported $($exports.Count) cmdlets; expected 11." }
     $observedCommands = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     [void]$observedCommands.Add('Get-HHTarget')
-    $null = @(Get-HHTarget)
+    $emptyTargetInformation = @()
+    $emptyTargets = @(Get-HHTarget -InformationVariable emptyTargetInformation)
+    if ($emptyTargets.Count -ne 0 -or
+        [string]$emptyTargetInformation[-1] -cne 'No currently set' -or
+        'PSHOST' -cnotin @($emptyTargetInformation[-1].Tags)) {
+        throw 'The native empty-target message was not emitted as host-visible console output.'
+    }
     if ((Get-Command Get-HHTargets -CommandType Alias).Definition -cne 'Get-HHTarget') {
         throw 'The native plural target alias is unavailable.'
+    }
+    $pluralInformation = @()
+    $pluralTargets = @(Get-HHTargets -InformationVariable pluralInformation)
+    if ($pluralTargets.Count -ne 0 -or
+        [string]$pluralInformation[-1] -cne 'No currently set' -or
+        'PSHOST' -cnotin @($pluralInformation[-1].Tags)) {
+        throw 'The native plural alias did not emit the host-visible empty-target message.'
     }
 
     $controllerId = Invoke-HHNativeDockerCapture @(

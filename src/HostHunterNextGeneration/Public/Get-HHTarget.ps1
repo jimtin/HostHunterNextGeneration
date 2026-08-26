@@ -3,12 +3,17 @@ function Get-HHTarget {
     .SYNOPSIS
     Lists saved HostHunter targets.
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+        'PSAvoidUsingWriteHost',
+        '',
+        Justification = 'The requested empty-state notice must remain visible in native PS7 hosts.'
+    )]
     [CmdletBinding()]
     param([string[]]$Name)
 
     $runtime = Get-HHRuntimeContext
     if (-not [IO.File]::Exists($runtime.DatabasePath)) {
-        Write-Information 'No currently set' -InformationAction Continue
+        Write-Host 'No currently set'
         return
     }
     $targets = @()
@@ -41,7 +46,7 @@ function Get-HHTarget {
         finally { $connection.Dispose() }
     }
     if ($targets.Count -eq 0) {
-        Write-Information 'No currently set' -InformationAction Continue
+        Write-Host 'No currently set'
         return
     }
     $targets

@@ -192,6 +192,7 @@ Describe 'HostHunter SQLite public cmdlets' -Tag Unit {
             $information = @()
             @(Get-HHTarget -InformationVariable information).Count | Should -Be 0
             [string]$information[-1] | Should -BeExactly 'No currently set'
+            @($information[-1].Tags) | Should -Contain PSHOST
         }
 
         It 'returns no state for a mounted empty data root without opening persistence' {
@@ -200,6 +201,7 @@ Describe 'HostHunter SQLite public cmdlets' -Tag Unit {
             $information = @()
             @(Get-HHTargets -InformationVariable information).Count | Should -Be 0
             [string]$information[-1] | Should -BeExactly 'No currently set'
+            @($information[-1].Tags) | Should -Contain PSHOST
             [IO.File]::Exists($script:runtime.DatabasePath) | Should -BeFalse
             Should -Not -Invoke Open-HHAuthenticatedPersistence
         }
