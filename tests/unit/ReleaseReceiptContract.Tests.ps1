@@ -14,6 +14,18 @@ BeforeAll {
     $script:cleanupPlanner = Get-Content -LiteralPath (
         Join-Path $script:repositoryRoot 'scripts/release/prepare-artifact-cleanup.sh'
     ) -Raw
+    $script:heavyRunner = Get-Content -LiteralPath (
+        Join-Path $script:repositoryRoot 'scripts/verify-local.sh'
+    ) -Raw
+    $script:buildRunner = Get-Content -LiteralPath (
+        Join-Path $script:repositoryRoot 'scripts/release/build-candidate.sh'
+    ) -Raw
+    $script:cmdletRunner = Get-Content -LiteralPath (
+        Join-Path $script:repositoryRoot 'scripts/verify-cmdlets.sh'
+    ) -Raw
+    $script:testCompose = Get-Content -LiteralPath (
+        Join-Path $script:repositoryRoot 'compose.test.yml'
+    ) -Raw
 }
 
 AfterAll {
@@ -133,6 +145,38 @@ Describe 'Immutable exact-SHA release receipt state machine' -Tag Unit {
         $result.receiptSha256.windowsQualification | Should -Match '^[a-f0-9]{64}$'
     }
 
+    It 'binds the immutable build receipt independently from later verdicts' {
+        & python3 $script:stateScript claim --root $script:candidateRoot `
+            --sha $script:candidateSha --tree ('1' * 40) `
+            --started '2026-08-26T00:00:00Z' --pid $PID | Out-Null
+        $source = Join-Path $script:temporaryRoot 'build.json'
+        @{
+            candidateSha = $script:candidateSha
+            candidateTree = ('1' * 40)
+            status = 'passed'
+            retryCount = 0
+            buildCount = 4
+            images = @{
+                controller = @{ tag = 'controller:sha'; id = ('sha256:' + ('a' * 64)) }
+                test = @{ tag = 'test:sha'; id = ('sha256:' + ('b' * 64)) }
+                sshFixture = @{ tag = 'ssh:sha'; id = ('sha256:' + ('c' * 64)) }
+                verifier = @{ tag = 'verifier:sha'; id = ('sha256:' + ('d' * 64)) }
+            }
+        } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $source
+        & python3 $script:stateScript record --root $script:candidateRoot `
+            --sha $script:candidateSha --kind build --source $source | Out-Null
+        & python3 $script:stateScript seal --root $script:candidateRoot `
+            --sha $script:candidateSha --status failed --phase aggregation `
+            --exit-code 1 --reason later-failure --finished '2026-08-26T00:03:00Z' | Out-Null
+
+        $result = & python3 $script:stateScript aggregate --root $script:candidateRoot |
+            ConvertFrom-Json
+        $result.buildVerdict.status | Should -Be 'passed'
+        $result.buildVerdict.buildCount | Should -Be 4
+        $result.buildVerdict.images.controller.id | Should -Be ('sha256:' + ('a' * 64))
+        $result.receiptSha256.build | Should -Match '^[a-f0-9]{64}$'
+    }
+
     It 'copies only allowlisted verdict fields from component receipts' {
         & python3 $script:stateScript claim --root $script:candidateRoot `
             --sha $script:candidateSha --tree ('e' * 40) `
@@ -166,9 +210,55 @@ Describe 'Immutable exact-SHA release receipt state machine' -Tag Unit {
         $script:aggregate | Should -Not -Match '(?m)^\s*(mv|cp|mkdir|tee)\s'
     }
 
+    It 'does not consume an exact SHA before read-only readiness passes' {
+        $clean = $script:runner.IndexOf('status --porcelain=v1')
+        $docker = $script:runner.IndexOf('docker info')
+        $windows = $script:runner.IndexOf('Live Windows qualification command is required')
+        $claim = $script:runner.IndexOf('python3 "$state" claim')
+        $clean | Should -BeGreaterThan -1
+        $docker | Should -BeGreaterThan $clean
+        $windows | Should -BeGreaterThan $docker
+        $claim | Should -BeGreaterThan $windows
+    }
+
+    It 'builds once then runs cmdlets and Windows before the independent heavy phases' {
+        $build = $script:runner.IndexOf('terminal_phase=build')
+        $cmdlets = $script:runner.IndexOf('terminal_phase=cmdlet-verdict')
+        $windows = $script:runner.IndexOf('terminal_phase=windows-qualification')
+        $heavy = $script:runner.IndexOf('terminal_phase=release-proof')
+        $build | Should -BeGreaterThan -1
+        $cmdlets | Should -BeGreaterThan $build
+        $windows | Should -BeGreaterThan $cmdlets
+        $heavy | Should -BeGreaterThan $windows
+        $script:buildRunner | Should -Match 'buildCount:\s*4'
+        ([regex]::Matches($script:buildRunner, '(?m)^docker build ')).Count | Should -Be 4
+        $script:buildRunner | Should -Match 'Invoke-HHBranchProbe\|HH_BRANCH_COVERAGE'
+        $script:cmdletRunner | Should -Match 'HH_RELEASE_IMAGES_PREBUILT'
+        $script:cmdletRunner | Should -Match 'HH_RELEASE_VERIFIER_IMAGE_ID'
+        $script:heavyRunner | Should -Not -Match 'docker\s+compose[^\r\n]*\sbuild(?:\s|$)'
+        $script:heavyRunner | Should -Not -Match '(?m)^\s*(until|while)\s+'
+    }
+
+    It 'continues integration and security after a coverage failure' {
+        $coverage = $script:heavyRunner.IndexOf('run_phase release-unit-coverage')
+        $integration = $script:heavyRunner.IndexOf('run_phase release-critical-integration')
+        $security = $script:heavyRunner.IndexOf('run_phase release-security')
+        $coverage | Should -BeGreaterThan -1
+        $integration | Should -BeGreaterThan $coverage
+        $security | Should -BeGreaterThan $integration
+        $script:heavyRunner | Should -Not -Match 'phase_passed release-unit-coverage'
+        $script:heavyRunner | Should -Match 'run --rm --no-deps coverage'
+        $script:testCompose | Should -Match '(?ms)^  coverage:.*?network_mode: none'
+    }
+
+    It 'rejects a passing component receipt from a failed process' {
+        $script:runner | Should -Match 'contradictory passing receipt'
+        $script:runner | Should -Match '\$exit_code" -ne 0 && "\$source_status" == passed'
+    }
+
     It 'never lets artifact cleanup remove a consumed-SHA tombstone' {
         $script:cleanupPlanner | Should -Match (
-            'claim\.json\|receipt\.json\|cmdlet-receipt\.json\|heavy-receipt\.json\|windows-receipt\.json'
+            'claim\.json\|receipt\.json\|build-receipt\.json\|cmdlet-receipt\.json\|heavy-receipt\.json\|windows-receipt\.json'
         )
         $script:cleanupPlanner | Should -Not -Match (
             'add_target "\$candidate" superseded'

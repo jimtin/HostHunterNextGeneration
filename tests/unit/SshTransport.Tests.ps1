@@ -612,6 +612,20 @@ Describe 'SSH transport trust and planning' -Tag Unit {
                 -SshCapabilityProbe { $false } } | Should -Throw '*environment-variable expansion*'
     }
 
+    It 'requires an explicit and exactly supported target runtime before SSH planning' {
+        { Get-HHSshRequestedPowerShellRuntime -InputObject ([pscustomobject]@{}) } |
+            Should -Throw '*requires an explicit PowerShellRuntime*'
+        { Get-HHSshRequestedPowerShellRuntime -InputObject ([pscustomobject]@{
+                    PowerShellRuntime = ' '
+                }) } | Should -Throw '*requires an explicit PowerShellRuntime*'
+        { Get-HHSshRequestedPowerShellRuntime -InputObject ([pscustomobject]@{
+                    PowerShellRuntime = 'WindowsPowerShell51'
+                }) } | Should -Throw "*Unsupported PowerShell runtime*"
+        Get-HHSshRequestedPowerShellRuntime -InputObject ([pscustomobject]@{
+                PowerShellRuntime = 'PowerShell7'
+            }) | Should -BeExactly PowerShell7
+    }
+
     It 'proves the installed OpenSSH expansion capability and removes its probe binding' {
         $beforeNames = @(Get-ChildItem Env:HH_HH_SSH_CAPABILITY_* -ErrorAction SilentlyContinue |
                 ForEach-Object Name)

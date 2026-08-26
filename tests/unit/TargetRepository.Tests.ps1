@@ -212,6 +212,30 @@ Describe 'SQLite target repository domain and transaction adapter' -Tag Unit {
             @($added | Where-Object IsActive).Name | Should -Be @('delta', 'gamma')
         }
 
+        It 'handles an authenticated empty repository and first-target mutation explicitly' {
+            @(Select-HHTargetRepositoryTarget -Target @()).Count | Should -Be 0
+            @(Select-HHTargetRepositoryTarget -Target @() -Name @('alpha')).Count |
+                Should -Be 0
+
+            $alpha = New-RepositoryTestTarget
+            $merged = @(Merge-HHTargetRepositoryRecord `
+                    -ExistingTarget @() `
+                    -IncomingTarget @($alpha))
+            $merged.Count | Should -Be 1
+            $merged[0].Name | Should -BeExactly alpha
+            $merged[0].IsActive | Should -BeTrue
+
+            @(Get-HHTargetRepositoryEntriesForMutation `
+                    -ExistingEntry @() `
+                    -Target @()).Count | Should -Be 0
+            $created = @(Get-HHTargetRepositoryEntriesForMutation `
+                    -ExistingEntry @() `
+                    -Target @($alpha))
+            $created.Count | Should -Be 1
+            $created[0].Target.Name | Should -BeExactly alpha
+            $created[0].Revision | Should -Be 1
+        }
+
         It 'treats a null optional field mismatch as an exact CAS mismatch' {
             $withFingerprint = New-RepositoryTestTarget
             $withoutFingerprint = $withFingerprint.PSObject.Copy()

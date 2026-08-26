@@ -45,13 +45,24 @@ and verify public behavior plus read-only SQLite state deltas. A Linux run prove
 a finite audited unsupported result for Windows process policy; positive policy
 proof belongs to the bounded live-Windows qualification.
 
-Coverage (minimum 90 percent for statements, branches, functions, and lines),
-critical SQLite integration, security/dependency/image scans, and the production
-build are release-only. `scripts/release/verify-candidate.sh <SHA>` claims an
-exact clean SHA atomically, runs the cmdlet verifier once, runs the heavy proof
-once, writes immutable component receipts and a terminal receipt, and forever
-refuses that SHA afterward. Never add retries, overwrite receipts, or make heavy
-proof alter the cmdlet verdict.
+Coverage (minimum 90 percent independently for statements, branches, functions,
+and lines; 92 percent engineering target), critical SQLite integration,
+security/dependency/image scans, and the production build are release-only.
+Coverage uses every shipped production source file and unit tests only. Its one
+bounded container command owns one PowerShell process and exactly two fixed
+passes: untouched-source native coverage followed by an ephemeral
+branch-instrumented pass. Never add retries, shards, worker fan-out, per-hit disk
+I/O, network fixtures, or integration/live results to the coverage numerator.
+
+`scripts/release/verify-candidate.sh <SHA>` claims an exact clean SHA atomically,
+builds the exact images once, runs the cmdlet verifier once, runs positive
+Windows qualification before coverage, and runs every independent release
+phase at most once. Each phase writes an immutable terminal receipt; later
+independent phases continue after an earlier failure, while genuine dependency
+failures are recorded as `not_run_due_to_<dependency>`. The read-only aggregate
+never invokes work. The claimed SHA is forever refused afterward. Never add
+automatic retries, overwrite receipts, or make coverage or another release
+phase alter or obscure the cmdlet or Windows verdict.
 
 A live Windows release qualification must use the packaged public cmdlets and
 the managed-host engine. Test harness setup may manage Docker, but qualification

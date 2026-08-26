@@ -15,7 +15,7 @@ candidate_sha="$5"
 port="${6:-22}"
 receipt_dir="$repo_root/.artifacts/qualification/windows/$candidate_sha"
 receipt="$receipt_dir/receipt.json"
-heavy="$repo_root/.artifacts/summary/verify-local.json"
+build_receipt="${HH_RELEASE_BUILD_RECEIPT:-$repo_root/.artifacts/summary/build.json}"
 
 [[ -t 0 && -t 1 ]] || { printf 'Windows qualification requires an interactive terminal.\n' >&2; exit 69; }
 [[ "$candidate_sha" =~ ^[a-f0-9]{40}$ ]] || exit 64
@@ -25,10 +25,12 @@ heavy="$repo_root/.artifacts/summary/verify-local.json"
 [[ "$(git -C "$repo_root" rev-parse HEAD)" == "$candidate_sha" ]] || exit 2
 [[ -z "$(git -C "$repo_root" status --porcelain=v1 --untracked-files=all)" ]] || exit 2
 [[ ! -e "$receipt" ]] || { printf 'Windows qualification receipt already exists; refusing rerun.\n' >&2; exit 73; }
-[[ -f "$heavy" ]] || { printf 'Heavy-proof receipt is missing.\n' >&2; exit 66; }
+[[ -f "$build_receipt" ]] || { printf 'Exact-SHA build receipt is missing.\n' >&2; exit 66; }
 
-image_id="$(jq -r --arg sha "$candidate_sha" 'select(.status=="passed" and .candidateSha==$sha) | .controllerImageId' "$heavy")"
-[[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { printf 'Heavy proof has no exact controller image.\n' >&2; exit 2; }
+image_id="$(jq -r --arg sha "$candidate_sha" '
+  select(.status=="passed" and .candidateSha==$sha) | .images.controller.id
+' "$build_receipt")"
+[[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]] || { printf 'Build receipt has no exact controller image.\n' >&2; exit 2; }
 [[ "$(docker image inspect --format '{{.Id}}' "$image_id")" == "$image_id" ]] || exit 2
 
 project="hosthunter-windows-${candidate_sha:0:12}-$$"

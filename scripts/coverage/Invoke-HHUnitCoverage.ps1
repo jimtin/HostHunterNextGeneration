@@ -1,276 +1,274 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)]
-    [string[]]$SourcePath,
-
-    [Parameter(Mandatory)]
-    [string[]]$TestPath,
-
-    [Parameter(Mandatory)]
-    [string]$BranchReportPath,
-
-    [Parameter(Mandatory)]
-    [string]$ArtifactRoot,
-
-    [string]$ExpectedMetricsPath,
-
-    [ValidateRange(0, 100)]
-    [double]$Minimum = 90,
-
+    [string]$SourceRoot = 'src/HostHunterNextGeneration',
+    [string]$TestPath = 'tests/unit',
+    [string]$ArtifactRoot = '.artifacts/unit',
+    [ValidateRange(0, 100)][double]$Minimum = 90,
     [string]$PesterVersion = '6.1.0'
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-
-function Test-HHPointInExtent {
-    param(
-        [Parameter(Mandatory)]$Point,
-        [Parameter(Mandatory)]$Extent
-    )
-
-    $afterStart = $Point.StartLine -gt $Extent.StartLineNumber -or
-        ($Point.StartLine -eq $Extent.StartLineNumber -and
-            $Point.StartColumn -ge $Extent.StartColumnNumber)
-    $beforeEnd = $Point.StartLine -lt $Extent.EndLineNumber -or
-        ($Point.StartLine -eq $Extent.EndLineNumber -and
-            $Point.StartColumn -lt $Extent.EndColumnNumber)
-    return $afterStart -and $beforeEnd
+$startedAt = [DateTime]::UtcNow
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
+function Resolve-HHPath([string]$Path) {
+    if ([IO.Path]::IsPathRooted($Path)) { return [IO.Path]::GetFullPath($Path) }
+    [IO.Path]::GetFullPath((Join-Path $repoRoot $Path))
 }
+$sourcePath = Resolve-HHPath $SourceRoot
+$testsPath = Resolve-HHPath $TestPath
+$artifactPath = Resolve-HHPath $ArtifactRoot
+$summaryPath = Join-Path $artifactPath 'coverage-summary.json'
+$temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) "hosthunter-coverage-$([Guid]::NewGuid().ToString('N'))"
+$originalTestSourceRoot = $env:HH_TEST_SOURCE_ROOT
+$originalCoverageHits = [AppDomain]::CurrentDomain.GetData('HostHunterCoverageHits')
 
-function Test-HHInsideClassMethod {
-    param([Parameter(Mandatory)]$FunctionAst)
-
-    $parent = $FunctionAst.Parent
-    while ($null -ne $parent) {
-        if ($parent -is [System.Management.Automation.Language.FunctionMemberAst]) {
-            return $true
-        }
-        $parent = $parent.Parent
+function Write-HHJsonAtomic {
+    param([Parameter(Mandatory)]$Value, [Parameter(Mandatory)][string]$Path, [int]$Depth = 12)
+    $directory = Split-Path -Parent $Path
+    [IO.Directory]::CreateDirectory($directory) | Out-Null
+    $temporary = "$Path.$([Guid]::NewGuid().ToString('N')).tmp"
+    [IO.File]::WriteAllText($temporary, ($Value | ConvertTo-Json -Depth $Depth), [Text.UTF8Encoding]::new($false))
+    [IO.File]::Move($temporary, $Path, $true)
+}
+function Test-HHPointInExtent($Point, $Extent) {
+    ($Point.StartLine -gt $Extent.StartLineNumber -or
+        ($Point.StartLine -eq $Extent.StartLineNumber -and $Point.StartColumn -ge $Extent.StartColumnNumber)) -and
+    ($Point.StartLine -lt $Extent.EndLineNumber -or
+        ($Point.StartLine -eq $Extent.EndLineNumber -and $Point.StartColumn -lt $Extent.EndColumnNumber))
+}
+function Test-HHInsideClassMethod($FunctionAst) {
+    for ($parent = $FunctionAst.Parent; $null -ne $parent; $parent = $parent.Parent) {
+        if ($parent -is [Management.Automation.Language.FunctionMemberAst]) { return $true }
     }
-    return $false
+    $false
 }
-
-$artifactPath = [System.IO.Path]::GetFullPath($ArtifactRoot)
-[System.IO.Directory]::CreateDirectory($artifactPath) | Out-Null
-
-$sourceFiles = @(
-    @(
-        foreach ($path in $SourcePath) {
-            $item = Get-Item -LiteralPath $path
-            if ($item.PSIsContainer) {
-                Get-ChildItem -LiteralPath $item.FullName -Recurse -File |
-                    Where-Object { $_.Extension -in @('.ps1', '.psm1') } |
-                    Select-Object -ExpandProperty FullName
-            }
-            else {
-                $item.FullName
-            }
-        }
-    ) | Sort-Object -Unique
-)
-
-if ($sourceFiles.Count -eq 0) {
-    throw 'No PowerShell source files were selected for unit coverage.'
+[IO.Directory]::CreateDirectory($artifactPath) | Out-Null
+foreach ($staleArtifact in @('coverage-summary.json', 'coverage.xml', 'unit-tests.xml')) {
+    $stalePath = Join-Path $artifactPath $staleArtifact
+    if (Test-Path -LiteralPath $stalePath) { Remove-Item -LiteralPath $stalePath -Force }
 }
-
-$resolvedTests = @(
-    foreach ($path in $TestPath) {
-        (Resolve-Path -LiteralPath $path).Path
+$sourceFiles = @(Get-ChildItem -LiteralPath $sourcePath -Recurse -File |
+        Where-Object Extension -in @('.ps1', '.psm1') | Sort-Object FullName)
+if ($sourceFiles.Count -eq 0) { throw 'No shipped PowerShell source files were selected for coverage.' }
+$testFiles = @(
+    if (Test-Path -LiteralPath $testsPath -PathType Leaf) {
+        Get-Item -LiteralPath $testsPath
+    }
+    else {
+        Get-ChildItem -LiteralPath $testsPath -Filter '*.Tests.ps1' -File | Sort-Object FullName
     }
 )
-if ($resolvedTests.Count -eq 0) {
-    throw 'No Pester test paths were selected for unit coverage.'
-}
+if ($testFiles.Count -eq 0) { throw 'No unit test files were selected for coverage.' }
 
-$functionInventory = [System.Collections.Generic.List[object]]::new()
-foreach ($sourceFile in $sourceFiles) {
-    $tokens = $null
-    $parseErrors = $null
-    $ast = [System.Management.Automation.Language.Parser]::ParseFile(
-        $sourceFile,
-        [ref]$tokens,
-        [ref]$parseErrors
-    )
-    if ($parseErrors.Count -gt 0) {
-        throw "Coverage source '$sourceFile' has parse errors: $($parseErrors[0].Message)"
-    }
-
-    $functions = @(
-        $ast.FindAll({
-                param($node)
-                $node -is [System.Management.Automation.Language.FunctionDefinitionAst]
-            }, $true) |
-            Where-Object { -not (Test-HHInsideClassMethod -FunctionAst $_) }
-        $ast.FindAll({
-                param($node)
-                $node -is [System.Management.Automation.Language.FunctionMemberAst]
-            }, $true)
-    )
-
-    foreach ($functionAst in $functions) {
-        $kind = if ($functionAst -is [System.Management.Automation.Language.FunctionMemberAst]) {
-            'class-method'
+$inventory = @($sourceFiles | ForEach-Object {
+        [pscustomobject][ordered]@{
+            path = [IO.Path]::GetRelativePath($repoRoot, $_.FullName).Replace([IO.Path]::DirectorySeparatorChar, '/')
+            sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
         }
-        else {
-            'function'
-        }
-        $functionInventory.Add([pscustomobject]@{
-                id = ('{0}:{1}:{2}:{3}' -f @(
-                        $sourceFile
-                        $functionAst.Extent.StartLineNumber
-                        $functionAst.Extent.StartColumnNumber
-                        $functionAst.Name
-                    ))
-                file = $sourceFile
-                name = $functionAst.Name
-                kind = $kind
-                extent = $functionAst.Extent
-                size = $functionAst.Extent.EndOffset - $functionAst.Extent.StartOffset
-                covered = $false
-                hasCoveragePoint = $false
-            })
-    }
-}
-
-Import-Module Pester -RequiredVersion $PesterVersion -Force
-$configuration = New-PesterConfiguration
-$configuration.Run.Path = $resolvedTests
-$configuration.Run.PassThru = $true
-$configuration.Run.Exit = $false
-$configuration.Filter.Tag = @('Unit')
-$configuration.Output.Verbosity = 'Detailed'
-$configuration.TestResult.Enabled = $true
-$configuration.TestResult.OutputFormat = 'JUnitXml'
-$configuration.TestResult.OutputPath = Join-Path $artifactPath 'unit-tests.xml'
-$configuration.CodeCoverage.Enabled = $true
-$configuration.CodeCoverage.Path = $sourceFiles
-$configuration.CodeCoverage.OutputFormat = 'JaCoCo'
-$configuration.CodeCoverage.OutputPath = Join-Path $artifactPath 'pester-coverage.xml'
-$configuration.CodeCoverage.CoveragePercentTarget = $Minimum
-
-$result = Invoke-Pester -Configuration $configuration
-if ($null -eq $result.CodeCoverage) {
-    throw 'Pester returned no code-coverage result.'
-}
-
-$coveragePoints = @($result.CodeCoverage.CommandsExecuted) +
-    @($result.CodeCoverage.CommandsMissed)
-if ($coveragePoints.Count -ne $result.CodeCoverage.CommandsAnalyzedCount) {
-    throw 'Pester coverage point counts are internally inconsistent.'
-}
-
-$normalizedSourceFiles = @($sourceFiles | ForEach-Object { [System.IO.Path]::GetFullPath($_) })
-$analyzedFiles = @(
-    $result.CodeCoverage.FilesAnalyzed |
-        ForEach-Object { [System.IO.Path]::GetFullPath([string]$_) } |
-        Sort-Object -Unique
-)
-$missingFiles = @($normalizedSourceFiles | Where-Object { $_ -notin $analyzedFiles })
-if ($missingFiles.Count -gt 0) {
-    throw "Pester omitted coverage source files: $($missingFiles -join ', ')"
-}
-
-foreach ($point in $coveragePoints) {
-    $pointFile = [System.IO.Path]::GetFullPath([string]$point.File)
-    $owners = @(
-        $functionInventory |
-            Where-Object {
-                $_.file -eq $pointFile -and
-                (Test-HHPointInExtent -Point $point -Extent $_.extent)
-            } |
-            Sort-Object size
-    )
-    if ($owners.Count -gt 0) {
-        $owner = $owners[0]
-        $owner.hasCoveragePoint = $true
-        if ($point.HitCount -gt 0) {
-            $owner.covered = $true
-        }
-    }
-}
-
-$functionsWithoutPoints = @($functionInventory | Where-Object { -not $_.hasCoveragePoint })
-if ($functionsWithoutPoints.Count -gt 0) {
-    $names = $functionsWithoutPoints | ForEach-Object { "$($_.file):$($_.name)" }
-    throw "Functions without measurable executable entry points are not allowed: $($names -join ', ')"
-}
-
-$lineGroups = @($coveragePoints | Group-Object {
-        '{0}:{1}' -f ([System.IO.Path]::GetFullPath([string]$_.File)), $_.StartLine
     })
-$coveredLines = @(
-    $lineGroups | Where-Object {
-        @($_.Group | Where-Object { $_.HitCount -le 0 }).Count -eq 0
-    }
-).Count
+$inventoryPayload = $inventory | ConvertTo-Json -Compress
+$sourceHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData(
+        [Text.Encoding]::UTF8.GetBytes($inventoryPayload))).ToLowerInvariant()
+$candidateSha = try { (& git -C $repoRoot rev-parse HEAD 2>$null).Trim() } catch { $null }
+$candidateTree = try { (& git -C $repoRoot rev-parse 'HEAD^{tree}' 2>$null).Trim() } catch { $null }
+$functions = [Collections.Generic.List[object]]::new()
 
-$branchReport = Get-Content -LiteralPath $BranchReportPath -Raw | ConvertFrom-Json
-if ($null -eq $branchReport.PSObject.Properties['totalOutcomes'] -or
-    $null -eq $branchReport.PSObject.Properties['coveredOutcomes']) {
-    throw 'The branch report is missing outcome totals.'
-}
-
-$metrics = [ordered]@{
-    statements = [ordered]@{
-        covered = [int]$result.CodeCoverage.CommandsExecutedCount
-        total = [int]$result.CodeCoverage.CommandsAnalyzedCount
-        definition = 'Pester executable command/statement locations'
-    }
-    branches = [ordered]@{
-        covered = [int]$branchReport.coveredOutcomes
-        total = [int]$branchReport.totalOutcomes
-        definition = 'instrumented runtime branch outcomes'
-    }
-    functions = [ordered]@{
-        covered = @($functionInventory | Where-Object covered).Count
-        total = $functionInventory.Count
-        definition = 'AST functions and class methods with a directly owned executed point'
-    }
-    lines = [ordered]@{
-        covered = $coveredLines
-        total = $lineGroups.Count
-        definition = 'executable source lines with every Pester point executed'
-    }
-}
-
-if (-not [string]::IsNullOrWhiteSpace($ExpectedMetricsPath)) {
-    $expectedMetrics = Get-Content -LiteralPath $ExpectedMetricsPath -Raw | ConvertFrom-Json
-    foreach ($metricName in @('statements', 'branches', 'functions', 'lines')) {
-        $expected = $expectedMetrics.PSObject.Properties[$metricName]
-        if ($null -eq $expected) {
-            throw "Expected metric '$metricName' is missing."
-        }
-        if ([int]$expected.Value.covered -ne [int]$metrics[$metricName].covered -or
-            [int]$expected.Value.total -ne [int]$metrics[$metricName].total) {
-            $driftMessage = 'Coverage-model drift for ''{0}'': expected {1}/{2}, got {3}/{4}.' -f @(
-                $metricName
-                $expected.Value.covered
-                $expected.Value.total
-                $metrics[$metricName].covered
-                $metrics[$metricName].total
-            )
-            throw $driftMessage
+try {
+    foreach ($sourceFile in $sourceFiles) {
+        $tokens = $null; $parseErrors = $null
+        $ast = [Management.Automation.Language.Parser]::ParseFile($sourceFile.FullName, [ref]$tokens, [ref]$parseErrors)
+        if ($parseErrors.Count -gt 0) { throw "Coverage source '$($sourceFile.FullName)' has parse errors." }
+        $nodes = @(
+            $ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] }, $true) |
+                Where-Object { -not (Test-HHInsideClassMethod $_) }
+            $ast.FindAll({ param($node) $node -is [Management.Automation.Language.FunctionMemberAst] }, $true)
+        )
+        foreach ($node in $nodes) {
+            $functions.Add([pscustomobject]@{
+                    file = $sourceFile.FullName; name = $node.Name; extent = $node.Extent
+                    size = $node.Extent.EndOffset - $node.Extent.StartOffset
+                    covered = $false; hasPoint = $false
+                })
         }
     }
+
+    Import-Module Pester -RequiredVersion $PesterVersion -Force
+    $nativeConfiguration = New-PesterConfiguration
+    $nativeConfiguration.Run.Path = @($testFiles.FullName)
+    $nativeConfiguration.Run.PassThru = $true
+    $nativeConfiguration.Run.Exit = $false
+    $nativeConfiguration.Filter.Tag = @('Unit')
+    $nativeConfiguration.Output.Verbosity = 'Normal'
+    $nativeConfiguration.TestResult.Enabled = $true
+    $nativeConfiguration.TestResult.OutputFormat = 'JUnitXml'
+    $nativeConfiguration.TestResult.OutputPath = Join-Path $artifactPath 'unit-tests.xml'
+    $nativeConfiguration.CodeCoverage.Enabled = $true
+    $nativeConfiguration.CodeCoverage.Path = @($sourceFiles.FullName)
+    $nativeConfiguration.CodeCoverage.OutputFormat = 'JaCoCo'
+    $nativeConfiguration.CodeCoverage.OutputPath = Join-Path $artifactPath 'coverage.xml'
+    $nativeConfiguration.CodeCoverage.CoveragePercentTarget = 0
+    try {
+        $env:HH_TEST_SOURCE_ROOT = $sourcePath
+        Remove-Module HostHunterNextGeneration -Force -ErrorAction Ignore
+        $nativeResult = Invoke-Pester -Configuration $nativeConfiguration
+    }
+    finally {
+        $env:HH_TEST_SOURCE_ROOT = $originalTestSourceRoot
+        Remove-Module HostHunterNextGeneration -Force -ErrorAction Ignore
+    }
+    if ($null -eq $nativeResult.CodeCoverage) { throw 'Pester returned no native coverage result.' }
+
+    $points = @($nativeResult.CodeCoverage.CommandsExecuted) + @($nativeResult.CodeCoverage.CommandsMissed)
+    if ($points.Count -ne $nativeResult.CodeCoverage.CommandsAnalyzedCount) {
+        throw 'Pester native coverage point counts are inconsistent.'
+    }
+    $analyzedFiles = @($nativeResult.CodeCoverage.FilesAnalyzed | ForEach-Object { [IO.Path]::GetFullPath([string]$_) })
+    $missingFiles = @($sourceFiles.FullName | Where-Object { [IO.Path]::GetFullPath($_) -notin $analyzedFiles })
+    if ($missingFiles.Count -gt 0) { throw "Pester omitted shipped source: $($missingFiles -join ', ')" }
+    foreach ($point in $points) {
+        $pointFile = [IO.Path]::GetFullPath([string]$point.File)
+        $owner = @($functions | Where-Object {
+                    $_.file -eq $pointFile -and (Test-HHPointInExtent $point $_.extent)
+                } | Sort-Object size | Select-Object -First 1)
+        if ($owner.Count -eq 1) {
+            $owner[0].hasPoint = $true
+            if ($point.HitCount -gt 0) { $owner[0].covered = $true }
+        }
+    }
+    $unmeasurable = @($functions | Where-Object { -not $_.hasPoint })
+    if ($unmeasurable.Count -gt 0) { throw "Functions without executable coverage points: $($unmeasurable.name -join ', ')" }
+
+    $instrumentedRoot = Join-Path $temporaryRoot 'source'
+    [IO.Directory]::CreateDirectory($instrumentedRoot) | Out-Null
+    $manifests = [Collections.Generic.List[object]]::new()
+    foreach ($file in Get-ChildItem -LiteralPath $sourcePath -Recurse -File) {
+        $relative = [IO.Path]::GetRelativePath($sourcePath, $file.FullName)
+        $destination = Join-Path $instrumentedRoot $relative
+        [IO.Directory]::CreateDirectory((Split-Path -Parent $destination)) | Out-Null
+        if ($file.Extension -in @('.ps1', '.psm1')) {
+            $manifestPath = "$destination.coverage.json"
+            & (Join-Path $PSScriptRoot 'Instrument-HHBranches.ps1') -Path $file.FullName `
+                -OutputPath $destination -ManifestPath $manifestPath
+            $manifests.Add((Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json))
+            Remove-Item -LiteralPath $manifestPath -Force
+        } else {
+            Copy-Item -LiteralPath $file.FullName -Destination $destination
+        }
+    }
+    $branches = @($manifests | ForEach-Object { @($_.branches) })
+    $allOutcomes = @($branches | ForEach-Object { @($_.outcomes) })
+    if ($allOutcomes.Count -eq 0) { throw 'Branch denominator is zero.' }
+    $hits = [Collections.Concurrent.ConcurrentDictionary[string, byte]]::new([StringComparer]::Ordinal)
+    [AppDomain]::CurrentDomain.SetData('HostHunterCoverageHits', $hits)
+    try {
+        $env:HH_TEST_SOURCE_ROOT = $instrumentedRoot
+        Remove-Module HostHunterNextGeneration -Force -ErrorAction Ignore
+        $branchConfiguration = New-PesterConfiguration
+        $branchConfiguration.Run.Path = @($testFiles.FullName)
+        $branchConfiguration.Run.PassThru = $true
+        $branchConfiguration.Run.Exit = $false
+        $branchConfiguration.Filter.Tag = @('Unit')
+        $branchConfiguration.Output.Verbosity = 'Normal'
+        $branchResult = Invoke-Pester -Configuration $branchConfiguration
+    } finally {
+        $env:HH_TEST_SOURCE_ROOT = $originalTestSourceRoot
+        [AppDomain]::CurrentDomain.SetData('HostHunterCoverageHits', $originalCoverageHits)
+        Remove-Module HostHunterNextGeneration -Force -ErrorAction Ignore
+    }
+
+    $outcomes = @(
+        foreach ($branch in $branches) {
+            foreach ($outcome in @($branch.outcomes)) {
+                [pscustomobject][ordered]@{
+                    branchId = $branch.id; kind = $branch.kind; source = $branch.source
+                    function = $branch.function; line = [int]$branch.line; column = [int]$branch.column
+                    outcomeId = $outcome.id; label = $outcome.label
+                    covered = $hits.ContainsKey([string]$outcome.id)
+                }
+            }
+        }
+    )
+    $lineGroups = @($points | Group-Object { '{0}:{1}' -f ([IO.Path]::GetFullPath([string]$_.File)), $_.StartLine })
+    $coveredLines = @($lineGroups | Where-Object { @($_.Group | Where-Object HitCount -le 0).Count -eq 0 }).Count
+    $rawMetrics = [ordered]@{
+        statements = [pscustomobject]@{
+            covered = $nativeResult.CodeCoverage.CommandsExecutedCount
+            total = $nativeResult.CodeCoverage.CommandsAnalyzedCount
+            definition = 'Pester executable command locations'
+        }
+        branches = [pscustomobject]@{
+            covered = @($outcomes | Where-Object covered).Count
+            total = $outcomes.Count
+            definition = 'instrumented runtime outcomes'
+        }
+        functions = [pscustomobject]@{
+            covered = @($functions | Where-Object covered).Count
+            total = $functions.Count
+            definition = 'AST functions with an owned executed point'
+        }
+        lines = [pscustomobject]@{
+            covered = $coveredLines
+            total = $lineGroups.Count
+            definition = 'executable lines with every command executed'
+        }
+    }
+    $metricEvaluation = & (Join-Path $PSScriptRoot 'Test-HHCoverageMetrics.ps1') `
+        -Metrics $rawMetrics -Minimum $Minimum
+    $metrics = $metricEvaluation.metrics
+    $testsPassed = $nativeResult.Result -eq 'Passed' -and $nativeResult.FailedCount -eq 0 -and
+        $branchResult.Result -eq 'Passed' -and $branchResult.FailedCount -eq 0
+    $thresholdsPassed = $metricEvaluation.passed
+    $status = if (-not $testsPassed) { 'test_failed' } elseif (-not $thresholdsPassed) { 'threshold_failed' } else { 'passed' }
+    $summary = [ordered]@{
+        schemaVersion = 2; status = $status; passed = $status -eq 'passed'; minimum = $Minimum
+        candidateSha = $candidateSha; candidateTree = $candidateTree
+        sourceHash = $sourceHash; sourceSha256 = $sourceHash
+        sourceInventory = $inventory; sourceFileCount = $inventory.Count
+        pesterVersion = $PesterVersion; collectorVersion = 1
+        invocationCount = 2
+        testCount = $nativeResult.TotalCount
+        tests = [ordered]@{
+            native = $nativeResult.TotalCount
+            branch = $branchResult.TotalCount
+            failed = $nativeResult.FailedCount + $branchResult.FailedCount
+        }
+        metrics = $metrics
+        uncovered = [ordered]@{
+            commands = @($nativeResult.CodeCoverage.CommandsMissed | ForEach-Object {
+                    [pscustomobject]@{ file = $_.File; line = $_.StartLine; column = $_.StartColumn; command = $_.Command }
+                })
+            branches = @($outcomes | Where-Object { -not $_.covered })
+            functions = @($functions | Where-Object { -not $_.covered } | ForEach-Object {
+                    [pscustomobject]@{ file = $_.file; name = $_.name; line = $_.extent.StartLineNumber }
+                })
+        }
+        durationMs = [math]::Round(([DateTime]::UtcNow - $startedAt).TotalMilliseconds)
+        durationSeconds = [math]::Round(([DateTime]::UtcNow - $startedAt).TotalSeconds, 3)
+    }
+    Write-HHJsonAtomic -Value $summary -Path $summaryPath
+    if ($status -ne 'passed') { throw "Coverage lane ended with status '$status'. See '$summaryPath'." }
+    [pscustomobject]@{ Status = 'passed'; Tests = $nativeResult.PassedCount; Metrics = $metrics; ArtifactRoot = $artifactPath }
 }
-
-$rawMetricsPath = Join-Path $artifactPath 'coverage-metrics.raw.json'
-$metrics | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $rawMetricsPath -Encoding utf8NoBOM
-$thresholdReport = & (Join-Path $PSScriptRoot 'Test-HHCoverageThresholds.ps1') `
-    -MetricsPath $rawMetricsPath `
-    -Minimum $Minimum `
-    -ReportPath (Join-Path $artifactPath 'coverage-summary.json') `
-    -JUnitPath (Join-Path $artifactPath 'coverage-thresholds.xml') `
-    -PassThru
-
-if ($result.Result -ne 'Passed' -or $result.FailedCount -gt 0) {
-    throw "Pester unit tests failed: $($result.FailedCount) failure(s)."
+catch {
+    if (-not (Test-Path -LiteralPath $summaryPath)) {
+        $failure = [ordered]@{
+            schemaVersion = 2; status = 'tooling_blocked'; passed = $false; minimum = $Minimum
+            candidateSha = $candidateSha; candidateTree = $candidateTree
+            sourceHash = $sourceHash; sourceSha256 = $sourceHash
+            sourceInventory = $inventory; sourceFileCount = $inventory.Count
+            pesterVersion = $PesterVersion; collectorVersion = 1
+            testCount = 0
+            error = $_.Exception.Message
+            durationMs = [math]::Round(([DateTime]::UtcNow - $startedAt).TotalMilliseconds)
+            durationSeconds = [math]::Round(([DateTime]::UtcNow - $startedAt).TotalSeconds, 3)
+        }
+        Write-HHJsonAtomic -Value $failure -Path $summaryPath
+    }
+    throw
 }
-
-[pscustomobject]@{
-    Status = 'passed'
-    Tests = $result.PassedCount
-    Metrics = $thresholdReport.metrics
-    ArtifactRoot = $artifactPath
+finally {
+    $env:HH_TEST_SOURCE_ROOT = $originalTestSourceRoot
+    [AppDomain]::CurrentDomain.SetData('HostHunterCoverageHits', $originalCoverageHits)
+    if (Test-Path -LiteralPath $temporaryRoot) { Remove-Item -LiteralPath $temporaryRoot -Recurse -Force }
 }

@@ -8,9 +8,9 @@ source_sha="$(git -C "${repo_root}" rev-parse HEAD)"
 readonly source_sha
 readonly short_sha="${source_sha:0:12}"
 readonly project="hosthunter-cmdlets-${short_sha}-$RANDOM"
-readonly controller_image="hosthunter-controller-cmdlets:${short_sha}"
-readonly verifier_image="hosthunter-verifier:${short_sha}"
-readonly ssh_image="hosthunter-ssh-fixture:${short_sha}"
+readonly controller_image="${HH_RELEASE_CONTROLLER_IMAGE:-hosthunter-controller-cmdlets:${short_sha}}"
+readonly verifier_image="${HH_RELEASE_VERIFIER_IMAGE:-hosthunter-verifier:${short_sha}}"
+readonly ssh_image="${HH_RELEASE_SSH_IMAGE:-hosthunter-ssh-fixture:${short_sha}}"
 readonly artifact_root="${repo_root}/.artifacts/cmdlets/${source_sha}"
 readonly receipt_path="${artifact_root}/cmdlets/receipt.json"
 
@@ -68,16 +68,23 @@ trap 'exit 143' TERM
 mkdir -p -- "${artifact_root}/cmdlets"
 rm -f -- "${receipt_path}"
 
-docker build --file "${repo_root}/Dockerfile.runtime" --target production \
-  --tag "${controller_image}" "${repo_root}"
-docker build --build-arg "HH_CONTROLLER_IMAGE=${controller_image}" \
-  --file "${repo_root}/Dockerfile.cmdlets" --tag "${verifier_image}" "${repo_root}"
-docker build --file "${repo_root}/tests/fixtures/ssh/Dockerfile" \
-  --tag "${ssh_image}" "${repo_root}/tests/fixtures/ssh"
+if [[ "${HH_RELEASE_IMAGES_PREBUILT:-0}" != 1 ]]; then
+  docker build --file "${repo_root}/Dockerfile.runtime" --target production \
+    --tag "${controller_image}" "${repo_root}"
+  docker build --build-arg "HH_CONTROLLER_IMAGE=${controller_image}" \
+    --file "${repo_root}/Dockerfile.cmdlets" --tag "${verifier_image}" "${repo_root}"
+  docker build --file "${repo_root}/tests/fixtures/ssh/Dockerfile" \
+    --tag "${ssh_image}" "${repo_root}/tests/fixtures/ssh"
+fi
 
 verifier_image_id="$(docker image inspect --format '{{.Id}}' "${verifier_image}")"
 readonly verifier_image_id
 [[ "${verifier_image_id}" =~ ^sha256:[a-f0-9]{64}$ ]]
+if [[ -n "${HH_RELEASE_VERIFIER_IMAGE_ID:-}" && \
+      "${verifier_image_id}" != "${HH_RELEASE_VERIFIER_IMAGE_ID}" ]]; then
+  printf 'Prebuilt verifier image does not match the exact-SHA build receipt.\n' >&2
+  exit 2
+fi
 
 set +e
 HH_CMDLET_PROJECT="${project}" \

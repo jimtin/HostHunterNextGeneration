@@ -401,6 +401,31 @@ Describe 'streaming audit artifact v2' -Tag Unit {
         finally { $stream.Dispose() }
     }
 
+    It 'accepts an authenticated empty compressed chunk and rejects non-string frame time' {
+        # Old uncovered outcomes: AuditArtifactV2.ps1 L194 while-not-entered,
+        # L613 catch-0, and L618 clause-0.
+        $compressed = Compress-HHAuditArtifactV2Chunk -Bytes ([byte[]]::new(0))
+        try {
+            $expanded = Expand-HHAuditArtifactV2Chunk `
+                -Bytes $compressed `
+                -ExpectedLength 0
+            $expanded.Length | Should -Be 0
+        }
+        finally { [Array]::Clear($compressed, 0, $compressed.Length) }
+
+        $numericTimestamp = [Text.Encoding]::UTF8.GetBytes(
+            '{"Sequence":0,"RemoteSequence":null,"ObservedAtUtc":1,' +
+            '"Phase":"Command","Stream":"Output","TypeName":"System.String",' +
+            '"SerializedByteCount":1,"IsTerminating":false,"SerializedValue":"x"}'
+        )
+        { ConvertFrom-HHAuditArtifactV2Frame -Bytes $numericTimestamp } |
+            Should -Throw -ErrorId 'AuditIntegrityFailed,*'
+
+        $invalidUtf8 = [byte[]](0xff, 0xfe, 0xfd)
+        { ConvertFrom-HHAuditArtifactV2Frame -Bytes $invalidUtf8 } |
+            Should -Throw -ErrorId 'AuditIntegrityFailed,*'
+    }
+
     It 'parses canonical timestamps independently of the controller culture' {
         $previousCulture = [Globalization.CultureInfo]::CurrentCulture
         try {

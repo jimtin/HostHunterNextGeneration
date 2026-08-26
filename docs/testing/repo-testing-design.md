@@ -27,23 +27,51 @@ host; it is not positive Windows capability proof.
 
 `scripts/release/verify-candidate.sh <SHA>` is laptop-gate owned. It atomically
 claims a clean committed SHA before work and refuses every subsequent attempt
-for that SHA. It records the cmdlet receipt independently, then runs
-`scripts/verify-local.sh` once for:
+for that SHA. It builds the exact production images once and records every
+component receipt independently. The release graph is:
 
-1. static/governance checks;
-2. at least 90 percent statement, branch, function, and line unit coverage;
-3. critical SQLite, recovery, SSH, and persistence integration;
-4. dependency, filesystem, secret, and image scans;
-5. the production controller build.
+1. exact-SHA preflight and claim;
+2. build the exact production images once;
+3. run the eleven-cmdlet verifier once;
+4. run positive live-Windows qualification against that exact image;
+5. run the bounded release-only coverage command;
+6. run critical SQLite, recovery, SSH, and persistence integration;
+7. run dependency, filesystem, secret, and image scans; and
+8. aggregate existing receipts without invoking work.
 
-Every terminal condition writes an immutable passed, failed, blocked, or aborted
-receipt. The aggregator reads receipts only. A heavy-proof failure cannot alter
-or hide the eleven-row cmdlet verdict.
+Every independent phase runs at most once even when another independent phase
+fails. A real dependency failure records `not_run_due_to_<dependency>` instead
+of a false test failure. Every terminal condition writes an immutable receipt,
+and the aggregator reads receipts only. Coverage, integration, or scan failures
+cannot alter or hide the eleven-row cmdlet or Windows verdict.
 
-Positive Windows support additionally requires one bounded live-Windows
-PowerShell 7/OpenSSH qualification against the exact controller image. It uses
-only public cmdlets/the engine, performs fixed cleanup and policy restoration,
-and never automatically retries.
+Positive Windows support requires one bounded live-Windows PowerShell 7/OpenSSH
+qualification immediately after the cmdlet verifier and before coverage. It
+uses only public cmdlets/the engine, performs fixed cleanup and policy
+restoration, and never automatically retries.
+
+## Release-only coverage contract
+
+Coverage runs in one container through one PowerShell process. It performs two
+fixed, sequential unit-test passes; these are collectors, not retries:
+
+1. Untouched production source under Pester native coverage measures statements,
+  executable lines, and AST-owned functions.
+2. An ephemeral instrumented copy runs the same unit suite and records genuine
+  branch outcomes in memory, flushing once when the run completes.
+
+Every shipped production source file is included. Integration, SSH fixtures,
+live Windows, and the eleven-cmdlet journey never contribute to the coverage
+numerator. Statements, branches, functions, and lines must each be at least 90
+percent, with 92 percent as the engineering target. Unsupported decision syntax,
+zero denominators, test failures, malformed results, and missing source files
+fail closed.
+
+The normal target is 180 seconds or less and the hard timeout is 300 seconds.
+There are no retries, shards, nested runners, worker processes, per-hit files,
+or network/database services. A single atomic summary always records all four
+metrics, their deficits, and every uncovered location so failure diagnosis never
+requires a second coverage run.
 
 ## Hooks
 

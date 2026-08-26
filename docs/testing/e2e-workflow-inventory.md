@@ -39,8 +39,8 @@ outcome and before/after database snapshot.
   dispatch fails with a stable unsupported error.
 - `-WhatIf`, broad parameter combinations, capacity stress, scans, coverage,
   builds and compatibility matrices are not separate user journeys. Focused
-  unit/integration tests cover material branches; release proof owns heavy
-  checks.
+  unit/integration tests cover material branches; the exact-SHA release gate
+  owns coverage, integration, build, and security checks.
 
 ## Receipt contract
 

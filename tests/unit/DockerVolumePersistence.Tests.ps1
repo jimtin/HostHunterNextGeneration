@@ -278,6 +278,41 @@ Describe 'Docker-volume persistence provider' -Tag Unit -Skip:(!$IsLinux) {
             } | Should -Throw -ErrorId 'DockerVolumeProviderMismatch*'
         }
 
+        It 'enforces the bound data root independently at every provider callback' {
+            $fixture = New-HHTestDockerProvider -Prefix 'callback-binding'
+            $correctContext = [pscustomobject]@{ DataRoot = $fixture.Roots.Data }
+            $otherData = Join-Path $TestDrive 'callback-binding-other-data'
+            [IO.Directory]::CreateDirectory($otherData) | Out-Null
+            [IO.File]::SetUnixFileMode(
+                $otherData,
+                [IO.UnixFileMode]::UserRead -bor [IO.UnixFileMode]::UserWrite -bor
+                    [IO.UnixFileMode]::UserExecute
+            )
+            $wrongContext = [pscustomobject]@{ DataRoot = $otherData }
+
+            # Old uncovered outcomes: DockerVolumePersistence.ps1 L858 clause-0,
+            # L874 clause-0, L882 clause-0, and L893 clause-0.
+            { & $fixture.Provider.CoreMasterKeyProvider $wrongContext $false } |
+                Should -Throw -ErrorId 'DockerVolumeProviderMismatch*'
+            $key = & $fixture.Provider.CoreMasterKeyProvider $correctContext $false
+            $artifact = ConvertTo-HHPersistenceAnchorArtifact `
+                -Anchor (New-HHTestCoreAnchor) -MasterKey $key
+            try {
+                (& $fixture.Provider.CoreAnchorReader $correctContext $key) |
+                    Should -BeNullOrEmpty
+                { & $fixture.Provider.CoreAnchorReader $wrongContext $key } |
+                    Should -Throw -ErrorId 'DockerVolumeProviderMismatch*'
+                { & $fixture.Provider.CoreAnchorWriter $wrongContext $null $artifact $key } |
+                    Should -Throw -ErrorId 'DockerVolumeProviderMismatch*'
+                Test-Path -LiteralPath $fixture.Provider.Paths.CoreAnchor |
+                    Should -BeFalse
+            }
+            finally {
+                [Array]::Clear($key, 0, $key.Length)
+                [Array]::Clear($artifact, 0, $artifact.Length)
+            }
+        }
+
         It 'selects DockerVolume only by its exact name and requires both absolute roots' {
             Get-HHSecretProviderSelection | Should -BeExactly 'PlatformNative'
             foreach ($invalid in @('dockerVolume', 'File', 'PlatformNative')) {

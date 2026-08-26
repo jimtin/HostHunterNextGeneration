@@ -3,6 +3,8 @@ BeforeAll {
     $script:qualificationPath = Join-Path `
         $script:repositoryRoot 'scripts/qualification/Test-HHWindowsCmdlets.ps1'
     $script:source = Get-Content -LiteralPath $script:qualificationPath -Raw
+    $script:wrapper = Get-Content -LiteralPath (Join-Path `
+        $script:repositoryRoot 'scripts/qualification/windows-cmdlets.sh') -Raw
 }
 
 Describe 'Live Windows cmdlet qualification contract' -Tag Unit {
@@ -36,5 +38,11 @@ Describe 'Live Windows cmdlet qualification contract' -Tag Unit {
     It 'uses the actual Remove-HHTarget parameter contract' {
         $script:source | Should -Not -Match 'Remove-HHTarget[^\r\n]+-Reason'
         $script:source | Should -Match 'Remove-HHTarget -Name \$targetName -Confirm:\$false'
+    }
+
+    It 'binds Windows proof to the exact build image and not the coverage verdict' {
+        $script:wrapper | Should -Match 'HH_RELEASE_BUILD_RECEIPT'
+        $script:wrapper | Should -Match '\.images\.controller\.id'
+        $script:wrapper | Should -Not -Match 'verify-local\.json|Heavy-proof receipt'
     }
 }

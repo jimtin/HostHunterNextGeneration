@@ -31,7 +31,7 @@ docker run --rm \
   --workdir /workspace \
   --env "HH_TEST_MODULE_PATH=$module_path" \
   --env HH_SQLITE_FAULT_ROOT=/fault \
-  hosthunter-next-generation-test:local \
+  "${HH_TEST_IMAGE:-hosthunter-next-generation-test:local}" \
   pwsh -NoLogo -NoProfile -NonInteractive -Command \
   '$result=Invoke-Pester -Path tests/integration/SqliteFaultCapacity.Tests.ps1 -PassThru
   if ($result.FailedCount -gt 0) { exit 1 }'

@@ -1,11 +1,30 @@
 name: hosthunter-next-generation-test
 
 services:
+  coverage:
+    image: ${HH_TEST_IMAGE:-hosthunter-next-generation-test:local}
+    working_dir: /workspace
+    read_only: true
+    network_mode: none
+    tmpfs:
+      - /tmp:mode=1777
+    volumes:
+      - .:/workspace:ro
+      - ./.artifacts:/artifacts
+    group_add:
+      - "${HH_HOST_GID:-1000}"
+    environment:
+      HOME: /tmp
+      HH_ARTIFACT_ROOT: /artifacts/release-proof
+    command:
+      - bash
+      - scripts/lanes/unit.sh
+
   test:
     build:
       context: .
       dockerfile: Dockerfile.test
-    image: hosthunter-next-generation-test:local
+    image: ${HH_TEST_IMAGE:-hosthunter-next-generation-test:local}
     working_dir: /workspace
     read_only: true
     tmpfs:
@@ -30,7 +49,7 @@ services:
     build:
       context: tests/fixtures/ssh
       dockerfile: Dockerfile
-    image: hosthunter-next-generation-ssh-fixture:local
+    image: ${HH_SSH_FIXTURE_IMAGE:-hosthunter-next-generation-ssh-fixture:local}
     # The disposable fixture must update /etc/shadow with its run-generated
     # password. It has no host bind mounts and is destroyed after each gate.
     tmpfs:

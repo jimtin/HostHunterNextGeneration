@@ -4,7 +4,7 @@
 | --- | --- | --- | --- | --- |
 | Cmdlet acceptance | Pester plus read-only SQLite assertions | production-derived verifier + SSH fixture | `./scripts/verify-cmdlets.sh` | `.artifacts/cmdlets/<sha>/cmdlets/receipt.json` |
 | Boundary guard | PowerShell AST inspection | test image | `scripts/static/Test-HHManagedHostBoundary.ps1` | terminal result |
-| Unit coverage | Pester/custom four-metric collector | test image | `scripts/lanes/unit.sh` | `.artifacts/release-proof/unit/` |
+| Release-only unit coverage | Pester native profiler + in-memory branch-outcome collector | one test container / one `pwsh` process | `scripts/lanes/unit.sh` | `.artifacts/release-proof/unit/{unit-tests.xml,coverage.xml,coverage-summary.json,coverage.log}` |
 | Critical integration | Pester + disposable SSH/SQLite | test image + SSH fixture | `scripts/lanes/integration.sh` | `.artifacts/release-proof/integration/` |
 | SQLite fault proof | Docker Compose fault workers | purpose-built containers | `scripts/lanes/sqlite-integration.sh` | integration logs/results |
 | Production build | Docker BuildKit | runtime image | `docker compose -f compose.runtime.yml build controller` | immutable image ID |
@@ -15,3 +15,11 @@
 Host orchestration may invoke Docker and aggregate receipts. Canonical validation
 runs inside containers. The cmdlet lane has one timeout owner, no worker fanout,
 no retries, and no coverage or scan work.
+
+The unit coverage command has one timeout owner and exactly two fixed sequential
+passes over the same unit suite: untouched source for native statement/line and
+AST-owned function coverage, then an ephemeral branch-instrumented copy. It has
+no network dependency, integration numerator, nested runner, worker fanout,
+shards, retries, or per-hit disk writes. All shipped production files are in
+scope; each of statements, branches, functions, and lines must be at least 90
+percent, with a 92 percent engineering target and a 300-second hard timeout.

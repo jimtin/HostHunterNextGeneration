@@ -10,8 +10,16 @@ exact-SHA release proof remains pending until the intended changes are committed
 - One private managed-host engine and a fail-closed AST boundary check.
 - One production Linux controller and one disposable acceptance SSH fixture.
 - One immutable, once-per-exact-SHA release state machine.
-- Heavy coverage, critical integration, scans, and production build isolated
-  from the cmdlet verdict and executed only by the release gate.
+- One planned release-only coverage command: one container, one PowerShell
+  process, and two fixed unit-only passes with independent 90 percent thresholds
+  for statements, branches, functions, and lines (92 percent engineering target).
+- Live Windows qualification precedes coverage. Coverage, critical integration,
+  scans, and production build remain independently receipted and cannot alter
+  the cmdlet or Windows verdict.
+
+The former coverage-worker/shard framework is being replaced rather than tuned.
+The replacement has no retries, nested runners, worker fan-out, per-hit disk
+writes, SSH/Windows/database fixture, or integration results in its numerator.
 
 ## Removed flow
 

@@ -552,6 +552,86 @@ VALUES(-1,@event,'Test',@at,NULL,@mutation,@projection,@related,@previous,@mac);
             } | Should -Throw -ErrorId 'PersistenceSchemaUnsupported*'
         }
 
+        It 'repairs only an unmutated legacy migration seal with matching authenticated state' {
+            # Old uncovered outcomes: SqlitePersistence.ps1 L493 clause-0,
+            # L499 clause-0, and L522 clause-0.
+            $connection = [pscustomobject]@{ DataSource = 'repair-fixture.db' }
+            $context = [pscustomobject]@{ MigrationPath = 'fixture.sql' }
+            $key = [byte[]]::new(32)
+            $schema = [pscustomobject]@{
+                SchemaVersion = 2
+                SchemaFingerprint = [byte[]]::new(32)
+            }
+
+            Mock Read-HHPersistenceAnchor { $null }
+            (Repair-HHSqliteMigrationSeal `
+                    -Connection $connection `
+                    -PersistenceContext $context `
+                    -MasterKey $key `
+                    -Schema $schema) | Should -Be $schema
+
+            Mock Read-HHPersistenceAnchor {
+                [pscustomobject]@{ ConfigurationGeneration = 0L }
+            }
+            (Repair-HHSqliteMigrationSeal `
+                    -Connection $connection `
+                    -PersistenceContext $context `
+                    -MasterKey $key `
+                    -Schema $schema) | Should -Be $schema
+
+            $legacyAnchor = [pscustomobject]@{ Artifact = [byte[]]::new(32) }
+            Mock Read-HHPersistenceAnchor { $legacyAnchor }
+            Mock Read-HHConfigurationRepositorySnapshot {
+                [pscustomobject]@{ Generation = 1L; EscalationMethod = $null }
+            }
+            {
+                Repair-HHSqliteMigrationSeal `
+                    -Connection $connection `
+                    -PersistenceContext $context `
+                    -MasterKey $key `
+                    -Schema $schema
+            } | Should -Throw -ErrorId 'AuditRecoveryRequired*'
+
+            Mock Read-HHConfigurationRepositorySnapshot {
+                [pscustomobject]@{ Generation = 0L; EscalationMethod = 'WindowsTokenPrivilege' }
+            }
+            {
+                Repair-HHSqliteMigrationSeal `
+                    -Connection $connection `
+                    -PersistenceContext $context `
+                    -MasterKey $key `
+                    -Schema $schema
+            } | Should -Throw -ErrorId 'AuditRecoveryRequired*'
+
+            Mock Read-HHConfigurationRepositorySnapshot {
+                [pscustomobject]@{ Generation = 0L; EscalationMethod = $null }
+            }
+            Mock Test-HHSqliteAuditChain {
+                [pscustomobject]@{ Sequence = 0L; LastMac = [byte[]]::new(32) }
+            }
+            Mock Read-HHTargetRepositorySnapshot {
+                [pscustomobject]@{
+                    Generation = 0L
+                    StateEvidence = [pscustomobject]@{ TargetStateMac = [byte[]]::new(32) }
+                }
+            }
+            Mock Invoke-HHSqliteQuery {
+                [pscustomobject]@{
+                    database_id = [byte[]]::new(16)
+                    ledger_id = [byte[]]::new(16)
+                }
+            }
+            Mock Get-HHExpectedSqliteSchemaFingerprint { [byte[]]::new(32) }
+            Mock Test-HHPersistenceAnchorState { [pscustomobject]@{ IsEqual = $false } }
+            {
+                Repair-HHSqliteMigrationSeal `
+                    -Connection $connection `
+                    -PersistenceContext $context `
+                    -MasterKey $key `
+                    -Schema $schema
+            } | Should -Throw -ErrorId 'AuditRecoveryRequired*'
+        }
+
         It 'rejects a missing singleton state after schema verification' {
             $root = Join-Path $TestDrive 'identity-tamper'
             $context = Get-HHPersistenceContext -DataRoot $root

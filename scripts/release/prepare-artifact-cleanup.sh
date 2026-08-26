@@ -26,7 +26,7 @@ while IFS= read -r -d '' receipt; do
   cp -p -- "$receipt" "$history_stage/$relative"
   printf '%s\t%s\t%s\t%s\n' "$sha256" "$bytes" "$relative" "$retained_relative" >> "$receipt_tsv"
 done < <(find "$artifact_root" -type f \( -name receipt.json -o \
-  -name verify-local.json -o -name coverage-summary.json -o \
+  -name verify-local.json -o -name build.json -o -name coverage-summary.json -o \
   -name bundle-index.json \) -not -path '*/cache/*' -not -path '*/retention/*' -print0)
 history_bytes="$(find "$history_stage" -type f -exec wc -c {} + | awk '{n += $1} END {print n + 0}')"
 if (( history_bytes > 20971520 )); then
@@ -76,7 +76,7 @@ if [[ -d "$artifact_root/release" ]]; then
       # deleting them would make an already-consumed exact SHA runnable again.
       while IFS= read -r -d '' payload; do
         case "$(basename -- "$payload")" in
-          claim.json|receipt.json|cmdlet-receipt.json|heavy-receipt.json|windows-receipt.json) ;;
+          claim.json|receipt.json|build-receipt.json|cmdlet-receipt.json|heavy-receipt.json|windows-receipt.json) ;;
           *) add_target "$payload" superseded \
             'non-receipt payload belongs to a terminal non-active release candidate' ;;
         esac

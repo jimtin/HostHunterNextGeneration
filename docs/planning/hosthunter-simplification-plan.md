@@ -2,7 +2,9 @@
 
 Status: CONFIRMED 2026-08-26
 
-Implementation status: Not started.
+Implementation status: Core simplification implemented; release coverage
+replacement authorized on 2026-08-26 and tracked in
+`release-coverage-simplification-plan.md`.
 
 Authoritative pre-cleanup location:
 `/Users/jameshinton/Developer/HostHunterNextGeneration-Simplification-Plan.md`
@@ -41,8 +43,8 @@ Reduce HostHunter to one clear product:
     emitted tests;
   - the production-runtime shard stopped before testing because of a readonly
     variable collision;
-  - coverage workers and combined receipt processing created additional false
-    failures and rerun pressure.
+  - coverage workers, branch shards, per-hit durable writes, and combined receipt
+    processing created additional false failures and rerun pressure.
 - Historical live-Windows evidence exists for exact SHA
   `38e295e63c8d2453df3eee0eb2655fae4d087d92`.
 - The current dirty tree and current HEAD are not accepted implementation
@@ -399,11 +401,21 @@ The ordinary user journey stays simple. Retain focused release-only proof for:
 | `ShouldProcess` | `-WhatIf` causes no database, audit, file, or network mutation |
 | Windows compensation | Exact policy and key cleanup in live receipt |
 
-The retained active unit suite must meet at least 90 percent for statements,
-branches, functions, and lines. Materially changed engine and persistence code
-targets 95 percent.
+The retained active unit suite must meet at least 90 percent independently for
+statements, branches, functions, and lines, with a 92 percent engineering target.
+Every shipped production source file is counted. Materially changed engine and
+persistence code targets 95 percent.
 
 Coverage never invokes the 11-cmdlet E2E journey.
+
+Coverage is one bounded container command owning one PowerShell process and two
+fixed sequential unit passes: untouched source for native statement/line and
+AST-owned function coverage, then an ephemeral instrumented copy for genuine
+branch outcomes. The branch collector holds outcome IDs in memory and writes
+once. Integration and live results cannot increase unit coverage. There are no
+retries, shards, nested runners, worker processes, per-hit files, SSH/Windows
+fixtures, or database service in the coverage command. Normal duration targets
+180 seconds or less and the hard timeout is 300 seconds.
 
 PowerShell CLI/service-journey coverage is the browser/E2E equivalent.
 Playwright and visual testing are not applicable.
@@ -439,16 +451,22 @@ Rules:
 | Stage | Work | Maximum |
 |---|---|---:|
 | Preflight | Detached checkout, Docker, credentials, disk, state checks | No test attempt consumed |
-| Package | Assemble exact package once | Bounded |
+| Build/package | Build the supported exact-SHA images and package once | 600s |
 | Cmdlets | Two-container 11-cmdlet journey | 180s |
-| Safety/coverage | Focused safety suite and four-metric coverage | 300s |
-| Production build | Build supported Linux images once | 600s |
+| Windows | One live Windows journey against the exact image | 900s |
+| Coverage | Unit-only two-pass four-metric coverage | 300s |
+| Critical integration | Focused SQLite, recovery, SSH and persistence proof | Bounded |
 | Security | Gitleaks, dependency, filesystem, package, SBOM/licence, image scans | 900s |
-| Windows | One live Windows journey | 900s |
 | Aggregator | Validate receipts and derive final verdict | 10s |
 
 Later failures never replace or hide the cmdlet verdict. A final report may say
 `cmdlets passed 11/11; release failed during image scanning`.
+
+Every independent phase runs once even after another independent phase fails.
+Only a genuine dependency may prevent a phase, recorded as
+`not_run_due_to_<dependency>`. Windows runs after cmdlets and before coverage so
+coverage can never obscure positive managed-host proof. The aggregator remains
+read-only and cannot schedule a diagnostic rerun.
 
 ### 10.2 Hooks
 
@@ -619,14 +637,16 @@ Every remaining reference must be classified as:
 
 Run once for the exact candidate SHA:
 
-1. Cmdlet journey.
-2. Safety and coverage.
-3. Production build.
-4. Security scans.
-5. Windows journey.
-6. Read-only aggregation.
+1. Preflight, claim, and build the exact images once.
+2. Cmdlet journey.
+3. Windows journey against the exact image.
+4. Unit-only two-pass coverage.
+5. Critical integration.
+6. Security scans.
+7. Read-only aggregation.
 
-No stage is repeated for the same SHA.
+No stage is repeated for the same SHA. Independent later stages still run after
+a failure; dependent stages use an explicit `not_run_due_to_<dependency>` status.
 
 ## 13. Security design
 
@@ -747,9 +767,12 @@ The user approved:
 - one shared managed-host engine;
 - internal Docker traffic excluded from that engine;
 - release-only coverage, scans, and production builds;
+- coverage across every shipped source file using one container, one PowerShell
+  process, two fixed unit passes, four independent 90 percent thresholds, and a
+  92 percent engineering target;
 - immutable once-per-SHA receipts;
 - starting from clean commit `b7e53b8`;
 - destructively discarding the 65-path dirty Git state;
 - saving this plan before cleanup.
 
-Implementation remains unauthorized until the user explicitly asks it to begin.
+Implementation was explicitly authorized by the user on 2026-08-26.

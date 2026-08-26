@@ -1,6 +1,0 @@
-{
-  "statements": { "covered": 104, "total": 106 },
-  "branches": { "covered": 54, "total": 54 },
-  "functions": { "covered": 7, "total": 7 },
-  "lines": { "covered": 88, "total": 90 }
-}

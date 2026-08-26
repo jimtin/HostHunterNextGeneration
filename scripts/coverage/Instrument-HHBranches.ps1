@@ -1,565 +1,175 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)]
-    [string]$Path,
-
-    [Parameter(Mandatory)]
-    [string]$OutputPath,
-
-    [Parameter(Mandatory)]
-    [string]$ManifestPath
+    [Parameter(Mandatory)][string]$Path,
+    [Parameter(Mandatory)][string]$OutputPath,
+    [Parameter(Mandatory)][string]$ManifestPath
 )
-
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $resolvedPath = (Resolve-Path -LiteralPath $Path).Path
-$source = [System.IO.File]::ReadAllText($resolvedPath)
+$source = [IO.File]::ReadAllText($resolvedPath)
 $sourceIdentity = (Get-FileHash -LiteralPath $resolvedPath -Algorithm SHA256).Hash.Substring(0, 12).ToLowerInvariant()
 $tokens = $null
 $parseErrors = $null
-$ast = [System.Management.Automation.Language.Parser]::ParseInput(
-    $source,
-    $resolvedPath,
-    [ref]$tokens,
-    [ref]$parseErrors
+$ast = [Management.Automation.Language.Parser]::ParseInput($source, $resolvedPath, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors.Count -gt 0) { throw "Cannot instrument '$resolvedPath': $($parseErrors[0].Message)" }
+
+$unsupportedTypes = @(
+    [Management.Automation.Language.DoWhileStatementAst],
+    [Management.Automation.Language.DoUntilStatementAst],
+    [Management.Automation.Language.TernaryExpressionAst],
+    [Management.Automation.Language.PipelineChainAst],
+    [Management.Automation.Language.TrapStatementAst]
 )
-
-if ($parseErrors.Count -gt 0) {
-    throw "Cannot instrument a file with parse errors: $($parseErrors[0].Message)"
-}
-
-$edits = [System.Collections.Generic.List[object]]::new()
-$branches = [System.Collections.Generic.List[object]]::new()
-$usedRanges = [System.Collections.Generic.List[object]]::new()
-
-function Get-HHIdentifier {
-    param(
-        [Parameter(Mandatory)]
-        [System.Management.Automation.Language.Ast]$Node,
-
-        [Parameter(Mandatory)]
-        [string]$Kind,
-
-        [int]$Index = 0
-    )
-
-    return '{0}-{1}-L{2}C{3}-{4}' -f $sourceIdentity, $Kind,
-        $Node.Extent.StartLineNumber, $Node.Extent.StartColumnNumber, $Index
-}
-
-function Get-HHContainingFunctionName {
-    param([Parameter(Mandatory)][System.Management.Automation.Language.Ast]$Node)
-
-    $parent = $Node.Parent
-    while ($null -ne $parent) {
-        if ($parent -is [System.Management.Automation.Language.FunctionDefinitionAst] -or
-            $parent -is [System.Management.Automation.Language.FunctionMemberAst]) {
-            return [string]$parent.Name
-        }
-        $parent = $parent.Parent
+foreach ($type in $unsupportedTypes) {
+    $unsupported = $ast.Find({ param($node) $node -is $type }, $true)
+    if ($null -ne $unsupported) {
+        throw "Unsupported coverage decision '$($type.Name)' at ${resolvedPath}:$($unsupported.Extent.StartLineNumber)."
     }
-    return '<script>'
 }
 
-function Get-HHBranchManifestEntry {
-    param(
-        [Parameter(Mandatory)][System.Management.Automation.Language.Ast]$Node,
-        [Parameter(Mandatory)][string]$Id,
-        [Parameter(Mandatory)][string]$Kind,
-        [Parameter(Mandatory)][string]$Strategy,
-        [Parameter(Mandatory)][object[]]$Outcomes,
-        [hashtable]$StrategyData = @{}
-    )
-
-    $entry = [ordered]@{
-        id = $Id
-        kind = $Kind
-        strategy = $Strategy
-        source = $resolvedPath
-        function = Get-HHContainingFunctionName -Node $Node
-        line = $Node.Extent.StartLineNumber
-        column = $Node.Extent.StartColumnNumber
-        outcomes = $Outcomes
-    }
-    foreach ($name in $StrategyData.Keys) {
-        $entry[$name] = $StrategyData[$name]
-    }
-    return [pscustomobject]$entry
-}
-
-function Register-HHEdit {
-    param(
-        [Parameter(Mandatory)]
-        [int]$Start,
-
-        [Parameter(Mandatory)]
-        [int]$Length,
-
-        [Parameter(Mandatory)]
-        [string]$Text,
-
-        [Parameter(Mandatory)]
-        [string]$Purpose
-    )
-
+$edits = [Collections.Generic.List[object]]::new()
+$branches = [Collections.Generic.List[object]]::new()
+function Add-HHEdit {
+    param([int]$Start, [int]$Length, [string]$Text)
     if ($Start -lt 0 -or $Length -lt 0 -or ($Start + $Length) -gt $source.Length) {
-        throw "Invalid instrumentation edit for $Purpose."
+        throw 'Invalid branch instrumentation edit.'
     }
-
-    if ($Length -gt 0) {
-        foreach ($range in $usedRanges) {
-            $end = $Start + $Length
-            $rangeEnd = $range.Start + $range.Length
-            if ($Start -lt $rangeEnd -and $range.Start -lt $end) {
-                throw "Overlapping branch expressions are not supported: $Purpose overlaps $($range.Purpose)."
-            }
-        }
-        $usedRanges.Add([pscustomobject]@{
-                Start = $Start
-                Length = $Length
-                Purpose = $Purpose
-            })
+    $edits.Add([pscustomobject]@{ Start = $Start; Length = $Length; Text = $Text })
+}
+function Get-HHBranchId {
+    param([Management.Automation.Language.Ast]$Node, [string]$Kind)
+    '{0}-{1}-L{2}C{3}' -f $sourceIdentity, $Kind, $Node.Extent.StartLineNumber, $Node.Extent.StartColumnNumber
+}
+function Get-HHFunctionName {
+    param([Management.Automation.Language.Ast]$Node)
+    for ($parent = $Node.Parent; $null -ne $parent; $parent = $parent.Parent) {
+        if ($parent -is [Management.Automation.Language.FunctionDefinitionAst] -or
+            $parent -is [Management.Automation.Language.FunctionMemberAst]) { return [string]$parent.Name }
     }
-
-    $edits.Add([pscustomobject]@{
-            Start = $Start
-            Length = $Length
-            Text = $Text
-            Purpose = $Purpose
+    '<script>'
+}
+function Add-HHProbeToBlock {
+    param([Management.Automation.Language.StatementBlockAst]$Block, [string]$OutcomeId)
+    Add-HHEdit -Start ($Block.Extent.StartOffset + 1) -Length 0 -Text "`nInvoke-HHBranchProbe -Id '$OutcomeId'`n"
+}
+function Add-HHBranch {
+    param([Management.Automation.Language.Ast]$Node, [string]$Id, [string]$Kind, [object[]]$Outcomes)
+    $branches.Add([pscustomobject][ordered]@{
+            id = $Id; kind = $Kind; source = $resolvedPath; function = Get-HHFunctionName $Node
+            line = $Node.Extent.StartLineNumber; column = $Node.Extent.StartColumnNumber; outcomes = $Outcomes
         })
 }
 
-function Register-HHBlockProbe {
-    param(
-        [Parameter(Mandatory)]
-        [System.Management.Automation.Language.StatementBlockAst]$Block,
-
-        [Parameter(Mandatory)]
-        [string]$OutcomeId
-    )
-
-    Register-HHEdit -Start ($Block.Extent.StartOffset + 1) -Length 0 `
-        -Text "`nInvoke-HHBranchProbe -Id '$OutcomeId'`n" `
-        -Purpose "block outcome $OutcomeId"
-}
-
-function Register-HHDirectBranch {
-    param(
-        [Parameter(Mandatory)]
-        [string]$Id,
-
-        [Parameter(Mandatory)]
-        [string]$Kind,
-
-        [Parameter(Mandatory)]
-        [object[]]$Outcomes,
-
-        [Parameter(Mandatory)]
-        [System.Management.Automation.Language.Ast]$Node
-    )
-
-    $branches.Add((Get-HHBranchManifestEntry -Node $Node -Id $Id -Kind $Kind `
-            -Strategy direct -Outcomes $Outcomes))
-}
-
-foreach ($ifAst in $ast.FindAll({
-            param($node)
-            $node -is [System.Management.Automation.Language.IfStatementAst]
-        }, $true)) {
-    $branchId = Get-HHIdentifier -Node $ifAst -Kind 'if'
-    $outcomes = [System.Collections.Generic.List[object]]::new()
-    $index = 0
-    foreach ($clause in $ifAst.Clauses) {
-        $outcomeId = "$branchId-clause-$index"
-        Register-HHBlockProbe -Block $clause.Item2 -OutcomeId $outcomeId
+foreach ($ifAst in $ast.FindAll({ param($node) $node -is [Management.Automation.Language.IfStatementAst] }, $true)) {
+    $id = Get-HHBranchId $ifAst if
+    $outcomes = [Collections.Generic.List[object]]::new()
+    for ($index = 0; $index -lt $ifAst.Clauses.Count; $index++) {
+        $outcomeId = "$id-clause-$index"
+        Add-HHProbeToBlock $ifAst.Clauses[$index].Item2 $outcomeId
         $outcomes.Add([pscustomobject]@{ id = $outcomeId; label = "clause-$index" })
-        $index++
     }
-    $elseId = "$branchId-else"
+    $elseId = "$id-else"
     if ($null -eq $ifAst.ElseClause) {
-        Register-HHEdit -Start $ifAst.Extent.EndOffset -Length 0 `
-            -Text " else { Invoke-HHBranchProbe -Id '$elseId' }" `
-            -Purpose "implicit else outcome $elseId"
+        Add-HHEdit $ifAst.Extent.EndOffset 0 " else { Invoke-HHBranchProbe -Id '$elseId' }"
         $outcomes.Add([pscustomobject]@{ id = $elseId; label = 'implicit-else' })
-    }
-    else {
-        Register-HHBlockProbe -Block $ifAst.ElseClause -OutcomeId $elseId
+    } else {
+        Add-HHProbeToBlock $ifAst.ElseClause $elseId
         $outcomes.Add([pscustomobject]@{ id = $elseId; label = 'else' })
     }
-    Register-HHDirectBranch -Id $branchId -Kind 'if' -Outcomes $outcomes.ToArray() -Node $ifAst
+    Add-HHBranch $ifAst $id if $outcomes.ToArray()
 }
 
-foreach ($switchAst in $ast.FindAll({
-            param($node)
-            $node -is [System.Management.Automation.Language.SwitchStatementAst]
-        }, $true)) {
-    $branchId = Get-HHIdentifier -Node $switchAst -Kind 'switch'
-    $outcomes = [System.Collections.Generic.List[object]]::new()
-    $index = 0
-    foreach ($clause in $switchAst.Clauses) {
-        $outcomeId = "$branchId-clause-$index"
-        Register-HHBlockProbe -Block $clause.Item2 -OutcomeId $outcomeId
+foreach ($switchAst in $ast.FindAll({ param($node) $node -is [Management.Automation.Language.SwitchStatementAst] }, $true)) {
+    $id = Get-HHBranchId $switchAst switch
+    $outcomes = [Collections.Generic.List[object]]::new()
+    for ($index = 0; $index -lt $switchAst.Clauses.Count; $index++) {
+        $outcomeId = "$id-clause-$index"
+        Add-HHProbeToBlock $switchAst.Clauses[$index].Item2 $outcomeId
         $outcomes.Add([pscustomobject]@{ id = $outcomeId; label = "clause-$index" })
-        $index++
     }
-    $defaultId = "$branchId-default"
+    $defaultId = "$id-default"
     if ($null -eq $switchAst.Default) {
-        Register-HHEdit -Start ($switchAst.Extent.EndOffset - 1) -Length 0 `
-            -Text "`ndefault { Invoke-HHBranchProbe -Id '$defaultId' }`n" `
-            -Purpose "implicit switch default $defaultId"
+        Add-HHEdit ($switchAst.Extent.EndOffset - 1) 0 "`ndefault { Invoke-HHBranchProbe -Id '$defaultId' }`n"
         $outcomes.Add([pscustomobject]@{ id = $defaultId; label = 'implicit-default' })
-    }
-    else {
-        Register-HHBlockProbe -Block $switchAst.Default -OutcomeId $defaultId
+    } else {
+        Add-HHProbeToBlock $switchAst.Default $defaultId
         $outcomes.Add([pscustomobject]@{ id = $defaultId; label = 'default' })
     }
-    Register-HHDirectBranch -Id $branchId -Kind 'switch' -Outcomes $outcomes.ToArray() -Node $switchAst
+    Add-HHBranch $switchAst $id switch $outcomes.ToArray()
 }
 
-$preTestLoopTypes = @(
-    [System.Management.Automation.Language.WhileStatementAst],
-    [System.Management.Automation.Language.ForStatementAst],
-    [System.Management.Automation.Language.ForEachStatementAst]
+$loopTypes = @(
+    [Management.Automation.Language.WhileStatementAst],
+    [Management.Automation.Language.ForStatementAst],
+    [Management.Automation.Language.ForEachStatementAst]
 )
-
-foreach ($loopType in $preTestLoopTypes) {
-    foreach ($loopAst in $ast.FindAll({
-                param($node)
-                $node.GetType() -eq $loopType
-            }, $true)) {
+foreach ($loopType in $loopTypes) {
+    foreach ($loopAst in $ast.FindAll({ param($node) $node.GetType() -eq $loopType }, $true)) {
         $kind = $loopAst.GetType().Name.Replace('StatementAst', '').ToLowerInvariant()
-        $branchId = Get-HHIdentifier -Node $loopAst -Kind $kind
-        $enteredId = "$branchId-entered"
-        $emptyId = "$branchId-empty"
-        $enteredVariable = '__hhBranchEntered_{0}' -f `
-            ($branchId -replace '[^A-Za-z0-9_]', '_')
-        Register-HHEdit -Start $loopAst.Extent.StartOffset -Length 0 `
-            -Text ('$' + $enteredVariable + ' = $false; ') `
-            -Purpose "$kind entry state $branchId"
-        Register-HHEdit -Start ($loopAst.Body.Extent.StartOffset + 1) -Length 0 `
-            -Text ("`nif (-not `$$enteredVariable) { `$$enteredVariable = `$true; " +
-                "Invoke-HHBranchProbe -Id '$enteredId' }`n") `
-            -Purpose "entered outcome $enteredId"
-        Register-HHEdit -Start $loopAst.Extent.EndOffset -Length 0 `
-            -Text ("; if (-not `$$enteredVariable) { Invoke-HHBranchProbe -Id '$emptyId' }") `
-            -Purpose "empty outcome $emptyId"
-        $branches.Add((Get-HHBranchManifestEntry -Node $loopAst -Id $branchId -Kind $kind `
-                -Strategy direct -Outcomes @(
-                [pscustomobject]@{ id = $enteredId; label = 'entered' },
-                [pscustomobject]@{ id = $emptyId; label = 'not-entered' }
-            )))
+        $id = Get-HHBranchId $loopAst $kind
+        $enteredId = "$id-entered"
+        $emptyId = "$id-not-entered"
+        $variable = '__hhCoverageEntered_{0}' -f ($id -replace '[^A-Za-z0-9_]', '_')
+        Add-HHEdit $loopAst.Extent.StartOffset 0 ('$' + $variable + ' = $false; ')
+        Add-HHEdit ($loopAst.Body.Extent.StartOffset + 1) 0 `
+            "`nif (-not `$$variable) { `$$variable = `$true; Invoke-HHBranchProbe -Id '$enteredId' }`n"
+        Add-HHEdit $loopAst.Extent.EndOffset 0 `
+            "; if (-not `$$variable) { Invoke-HHBranchProbe -Id '$emptyId' }"
+        Add-HHBranch $loopAst $id $kind @(
+            [pscustomobject]@{ id = $enteredId; label = 'entered' }
+            [pscustomobject]@{ id = $emptyId; label = 'not-entered' }
+        )
     }
 }
 
-$postTestLoopTypes = @(
-    [System.Management.Automation.Language.DoWhileStatementAst],
-    [System.Management.Automation.Language.DoUntilStatementAst]
-)
-
-foreach ($loopType in $postTestLoopTypes) {
-    foreach ($loopAst in $ast.FindAll({
-                param($node)
-                $node.GetType() -eq $loopType
-            }, $true)) {
-        $kind = $loopAst.GetType().Name.Replace('StatementAst', '').ToLowerInvariant()
-        $branchId = Get-HHIdentifier -Node $loopAst -Kind $kind
-        $bodyId = "$branchId-body"
-        $completedId = "$branchId-completed"
-        Register-HHBlockProbe -Block $loopAst.Body -OutcomeId $bodyId
-        Register-HHEdit -Start $loopAst.Extent.EndOffset -Length 0 `
-            -Text "; Invoke-HHBranchProbe -Id '$completedId'" `
-            -Purpose "$kind completion $branchId"
-        $branches.Add((Get-HHBranchManifestEntry -Node $loopAst -Id $branchId -Kind $kind `
-                -Strategy post-test-loop -Outcomes @(
-                [pscustomobject]@{ id = "$branchId-repeated"; label = 'condition-continued' },
-                [pscustomobject]@{ id = "$branchId-exited"; label = 'condition-exited' }
-            ) -StrategyData @{ bodyId = $bodyId; completedId = $completedId }))
-    }
-}
-
-foreach ($ternaryAst in $ast.FindAll({
-            param($node)
-            $node -is [System.Management.Automation.Language.TernaryExpressionAst]
-        }, $true)) {
-    $branchId = Get-HHIdentifier -Node $ternaryAst -Kind 'ternary'
-    $trueId = "$branchId-true"
-    $falseId = "$branchId-false"
-    foreach ($arm in @(
-            [pscustomobject]@{ Ast = $ternaryAst.IfTrue; Id = $trueId },
-            [pscustomobject]@{ Ast = $ternaryAst.IfFalse; Id = $falseId }
-        )) {
-        $replacement = "(& { Invoke-HHBranchProbe -Id '$($arm.Id)'; $($arm.Ast.Extent.Text) })"
-        Register-HHEdit -Start $arm.Ast.Extent.StartOffset -Length `
-            ($arm.Ast.Extent.EndOffset - $arm.Ast.Extent.StartOffset) `
-            -Text $replacement -Purpose "ternary arm $($arm.Id)"
-    }
-    Register-HHDirectBranch -Id $branchId -Kind 'ternary' -Outcomes @(
-        [pscustomobject]@{ id = $trueId; label = 'true' },
-        [pscustomobject]@{ id = $falseId; label = 'false' }
-    ) -Node $ternaryAst
-}
-
-foreach ($chainAst in $ast.FindAll({
-            param($node)
-            $node -is [System.Management.Automation.Language.PipelineChainAst] -and
-                $node.Parent -isnot [System.Management.Automation.Language.PipelineChainAst]
-        }, $true)) {
-    $branchId = Get-HHIdentifier -Node $chainAst -Kind 'pipeline-chain'
-    $evaluationId = "$branchId-evaluated"
-    $rhsId = "$branchId-rhs"
-    Register-HHEdit -Start $chainAst.Extent.StartOffset -Length 0 `
-        -Text "Invoke-HHBranchProbe -Id '$evaluationId'; " `
-        -Purpose "pipeline chain evaluation $branchId"
-    $rhs = $chainAst.RhsPipeline
-    $replacement = "& { Invoke-HHBranchProbe -Id '$rhsId'; $($rhs.Extent.Text) }"
-    Register-HHEdit -Start $rhs.Extent.StartOffset -Length `
-        ($rhs.Extent.EndOffset - $rhs.Extent.StartOffset) `
-        -Text $replacement -Purpose "pipeline chain rhs $branchId"
-    $branches.Add((Get-HHBranchManifestEntry -Node $chainAst -Id $branchId `
-            -Kind "pipeline-$($chainAst.Operator.ToString().ToLowerInvariant())" `
-            -Strategy evaluation-vs-rhs -Outcomes @(
-            [pscustomobject]@{ id = "$branchId-rhs-ran"; label = 'rhs-ran' },
-            [pscustomobject]@{ id = "$branchId-short-circuited"; label = 'short-circuited' }
-        ) -StrategyData @{ evaluationId = $evaluationId; rhsId = $rhsId }))
-}
-
-foreach ($tryAst in $ast.FindAll({
-            param($node)
-            $node -is [System.Management.Automation.Language.TryStatementAst]
-        }, $true)) {
-    $branchId = Get-HHIdentifier -Node $tryAst -Kind 'try'
-    $outcomes = [System.Collections.Generic.List[object]]::new()
-    $normalId = "$branchId-normal"
-    $stateSuffix = $branchId -replace '[^A-Za-z0-9_]', '_'
-    $escapedVariable = "__hhBranchEscaped_$stateSuffix"
-    $handledVariable = "__hhBranchHandled_$stateSuffix"
-    Register-HHEdit -Start $tryAst.Extent.StartOffset -Length 0 `
-        -Text ('try { $' + $escapedVariable + ' = $false; $' + $handledVariable +
-            ' = $false; ') `
-        -Purpose "try completion wrapper start $branchId"
-    Register-HHEdit -Start $tryAst.Extent.EndOffset -Length 0 `
-        -Text (' } catch { $' + $escapedVariable +
-            " = `$true; throw } finally { if (-not `$$escapedVariable -and -not `$$handledVariable) { " +
-            "Invoke-HHBranchProbe -Id '$normalId' } }") `
-        -Purpose "try completion wrapper end $branchId"
+foreach ($tryAst in $ast.FindAll({ param($node) $node -is [Management.Automation.Language.TryStatementAst] }, $true)) {
+    $id = Get-HHBranchId $tryAst try
+    $normalId = "$id-normal"
+    $stateSuffix = $id -replace '[^A-Za-z0-9_]', '_'
+    $escapedVariable = "__hhCoverageEscaped_$stateSuffix"
+    $handledVariable = "__hhCoverageHandled_$stateSuffix"
+    $outcomes = [Collections.Generic.List[object]]::new()
+    Add-HHEdit $tryAst.Extent.StartOffset 0 `
+        ('try { $' + $escapedVariable + ' = $false; $' + $handledVariable + ' = $false; ')
+    $completionProbe = "if (-not `$$escapedVariable -and -not `$$handledVariable) { " +
+        "Invoke-HHBranchProbe -Id '$normalId' }"
+    Add-HHEdit $tryAst.Extent.EndOffset 0 `
+        (' } catch { $' + $escapedVariable + " = `$true; throw } finally { $completionProbe }")
     $outcomes.Add([pscustomobject]@{ id = $normalId; label = 'normal' })
-
-    $index = 0
-    foreach ($catchClause in $tryAst.CatchClauses) {
-        $catchId = "$branchId-catch-$index"
-        Register-HHEdit -Start ($catchClause.Body.Extent.StartOffset + 1) -Length 0 `
-            -Text ("`n`$$handledVariable = `$true; Invoke-HHBranchProbe -Id '$catchId'`n") `
-            -Purpose "try catch outcome $catchId"
+    for ($index = 0; $index -lt $tryAst.CatchClauses.Count; $index++) {
+        $catchId = "$id-catch-$index"
+        Add-HHEdit ($tryAst.CatchClauses[$index].Body.Extent.StartOffset + 1) 0 `
+            "`n`$$handledVariable = `$true; Invoke-HHBranchProbe -Id '$catchId'`n"
         $outcomes.Add([pscustomobject]@{ id = $catchId; label = "catch-$index" })
-        $index++
     }
-    Register-HHDirectBranch -Id $branchId -Kind 'try-catch' `
-        -Outcomes $outcomes.ToArray() -Node $tryAst
-}
-
-foreach ($trapAst in $ast.FindAll({
-            param($node)
-            $node -is [System.Management.Automation.Language.TrapStatementAst]
-        }, $true)) {
-    $namedBlock = $trapAst.Parent
-    while ($null -ne $namedBlock -and
-        $namedBlock -isnot [System.Management.Automation.Language.NamedBlockAst]) {
-        $namedBlock = $namedBlock.Parent
-    }
-    if ($null -eq $namedBlock -or $namedBlock.Statements.Count -eq 0) {
-        throw "A trap requires an executable containing block for branch measurement at $($trapAst.Extent.StartLineNumber)."
-    }
-
-    $branchId = Get-HHIdentifier -Node $trapAst -Kind 'trap'
-    $evaluationId = "$branchId-evaluated"
-    $handlerId = "$branchId-handler"
-    Register-HHEdit -Start $namedBlock.Statements[0].Extent.StartOffset -Length 0 `
-        -Text "Invoke-HHBranchProbe -Id '$evaluationId'; " `
-        -Purpose "trap evaluation $branchId"
-    Register-HHBlockProbe -Block $trapAst.Body -OutcomeId $handlerId
-    $branches.Add((Get-HHBranchManifestEntry -Node $trapAst -Id $branchId -Kind trap `
-            -Strategy evaluation-vs-handler -Outcomes @(
-            [pscustomobject]@{ id = "$branchId-handled"; label = 'handler-ran' },
-            [pscustomobject]@{ id = "$branchId-not-handled"; label = 'handler-not-run' }
-        ) -StrategyData @{ evaluationId = $evaluationId; handlerId = $handlerId }))
+    Add-HHBranch $tryAst $id 'try-catch' $outcomes.ToArray()
 }
 
 $prelude = @'
-function Get-HHBranchProbeChecksum {
-    param([Parameter(Mandatory)][string]$Payload)
-
-    $bytes = [Text.Encoding]::UTF8.GetBytes($Payload)
-    return [Convert]::ToHexString(
-        [Security.Cryptography.SHA256]::HashData($bytes)
-    ).ToLowerInvariant()
-}
-
 function Invoke-HHBranchProbe {
     [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)][string]$Id,
-        [string]$CorrelationId
-    )
-
-    if ([string]::IsNullOrWhiteSpace($env:HH_BRANCH_LOG)) {
-        throw 'HH_BRANCH_LOG is required for instrumented coverage execution.'
-    }
-    if ([string]::IsNullOrWhiteSpace($env:HH_COVERAGE_CASE)) {
-        throw 'HH_COVERAGE_CASE is required for instrumented coverage execution.'
-    }
-    if ($env:HH_COVERAGE_CASE.Length -gt 256 -or $env:HH_COVERAGE_CASE -match "[`r`n`t]") {
-        throw 'HH_COVERAGE_CASE must be at most 256 characters and contain no control separators.'
-    }
-    if ($Id -notmatch '^[a-f0-9]{12}-[A-Za-z0-9-]+-L[0-9]+C[0-9]+-[0-9]+-[A-Za-z0-9-]+$') {
-        throw "Invalid branch event identifier '$Id'."
-    }
-    if (-not [string]::IsNullOrEmpty($CorrelationId) -and
-        $CorrelationId -notmatch '^[a-f0-9]{32}$') {
-        throw "Invalid branch correlation identifier '$CorrelationId'."
-    }
-
-    $basePath = [IO.Path]::GetFullPath($env:HH_BRANCH_LOG)
-    $shardRoot = "$basePath.shards"
-    [IO.Directory]::CreateDirectory($shardRoot) | Out-Null
-    $process = [Diagnostics.Process]::GetCurrentProcess()
-    $currentRunspace = [Management.Automation.Runspaces.Runspace]::DefaultRunspace
-    if ($null -eq $currentRunspace) {
-        throw 'The active runspace identity is unavailable for branch coverage.'
-    }
-    $runspaceId = $currentRunspace.InstanceId.ToString('N')
-    $shardId = '{0}-{1}-{2}' -f $PID, $process.StartTime.ToUniversalTime().Ticks, $runspaceId
-    $stateIdentity = Get-HHBranchProbeChecksum -Payload "$basePath|$shardId"
-    $budgetIdentity = Get-HHBranchProbeChecksum -Payload $basePath
-    $mutex = [Threading.Mutex]::new($false, "HostHunterBranchCoverage-$budgetIdentity")
-    $lockTaken = $false
-    try {
-        $lockTaken = $mutex.WaitOne([TimeSpan]::FromSeconds(30))
-        if (-not $lockTaken) {
-            throw "Timed out acquiring the branch shard lock for '$shardId'."
-        }
-
-        if ($null -eq (Get-Variable -Name HHBranchProbeState -Scope Global -ErrorAction Ignore)) {
-            $global:HHBranchProbeState = @{}
-        }
-        $shardPath = [IO.Path]::Combine($shardRoot, "$shardId.compact.json")
-        $markerPath = [IO.Path]::Combine($shardRoot, "$shardId.expected.json")
-        if (-not $global:HHBranchProbeState.ContainsKey($stateIdentity)) {
-            if ([IO.File]::Exists($shardPath) -or [IO.File]::Exists($markerPath)) {
-                throw "Branch shard '$shardId' cannot resume without its in-memory state."
-            }
-            $markerContent = [ordered]@{
-                schemaVersion = 3
-                shardId = $shardId
-                processId = $PID
-                processStartUtcTicks = $process.StartTime.ToUniversalTime().Ticks
-                runspaceId = $runspaceId
-            }
-            $markerPayload = $markerContent | ConvertTo-Json -Compress
-            $marker = [ordered]@{
-                schemaVersion = $markerContent.schemaVersion
-                shardId = $markerContent.shardId
-                processId = $markerContent.processId
-                processStartUtcTicks = $markerContent.processStartUtcTicks
-                runspaceId = $markerContent.runspaceId
-                checksum = Get-HHBranchProbeChecksum -Payload $markerPayload
-            }
-            [IO.File]::WriteAllText($markerPath, ($marker | ConvertTo-Json -Compress),
-                [Text.UTF8Encoding]::new($false))
-            $global:HHBranchProbeState[$stateIdentity] = [pscustomobject]@{
-                EventCount = [long]0
-                Hits = @{}
-            }
-        }
-
-        $state = $global:HHBranchProbeState[$stateIdentity]
-        $caseId = [string]$env:HH_COVERAGE_CASE
-        $hitKey = "$caseId`t$Id"
-        $currentCount = if ($state.Hits.ContainsKey($hitKey)) {
-            [int]$state.Hits[$hitKey]
-        } else { 0 }
-        if ($currentCount -ge 2) { return }
-        $state.Hits[$hitKey] = $currentCount + 1
-        $state.EventCount = [long]$state.EventCount + 1
-        $hits = @(
-            foreach ($key in @($state.Hits.Keys | Sort-Object)) {
-                $parts = $key -split "`t", 2
-                [ordered]@{
-                    caseId = $parts[0]
-                    eventId = $parts[1]
-                    count = [int]$state.Hits[$key]
-                }
-            }
-        )
-        $content = [ordered]@{
-            schemaVersion = 3
-            shardId = $shardId
-            processId = $PID
-            processStartUtcTicks = $process.StartTime.ToUniversalTime().Ticks
-            runspaceId = $runspaceId
-            eventCount = [long]$state.EventCount
-            hits = $hits
-        }
-        $payload = $content | ConvertTo-Json -Depth 5 -Compress
-        $record = [ordered]@{
-            schemaVersion = $content.schemaVersion
-            shardId = $content.shardId
-            processId = $content.processId
-            processStartUtcTicks = $content.processStartUtcTicks
-            runspaceId = $content.runspaceId
-            eventCount = $content.eventCount
-            hits = $content.hits
-            checksum = Get-HHBranchProbeChecksum -Payload $payload
-        }
-        $temporaryPath = "$shardPath.$([Guid]::NewGuid().ToString('N')).tmp"
-        [IO.File]::WriteAllText(
-            $temporaryPath,
-            ($record | ConvertTo-Json -Depth 5 -Compress),
-            [Text.UTF8Encoding]::new($false)
-        )
-        $existingLength = if ([IO.File]::Exists($shardPath)) {
-            ([IO.FileInfo]$shardPath).Length
-        } else { 0L }
-        $workingBytes = ([long](@(
-            [IO.Directory]::EnumerateFiles($shardRoot) |
-                Where-Object { $_ -cne $temporaryPath } |
-                ForEach-Object { ([IO.FileInfo]$_).Length }
-        ) | Measure-Object -Sum).Sum) - $existingLength + ([IO.FileInfo]$temporaryPath).Length
-        if ($workingBytes -gt 20MB) {
-            [IO.File]::Delete($temporaryPath)
-            throw "ArtifactBudgetExceeded: coverage working data is $workingBytes bytes; limit is 20971520 bytes."
-        }
-        [IO.File]::Move($temporaryPath, $shardPath, $true)
-    }
-    finally {
-        if ($lockTaken) {
-            $mutex.ReleaseMutex()
-        }
-        $mutex.Dispose()
-    }
+    param([Parameter(Mandatory)][string]$Id)
+    $hits = [AppDomain]::CurrentDomain.GetData('HostHunterCoverageHits')
+    if ($null -eq $hits) { throw 'The in-memory HostHunter coverage collector is not initialized.' }
+    $null = $hits.TryAdd($Id, 0)
 }
 
 '@
-
 $instrumented = $source
 foreach ($edit in $edits | Sort-Object Start -Descending) {
     $instrumented = $instrumented.Remove($edit.Start, $edit.Length).Insert($edit.Start, $edit.Text)
 }
 $instrumented = $prelude + $instrumented
-
-$outputDirectory = Split-Path -Parent $OutputPath
-$manifestDirectory = Split-Path -Parent $ManifestPath
-foreach ($directory in @($outputDirectory, $manifestDirectory) | Where-Object { $_ }) {
-    [System.IO.Directory]::CreateDirectory($directory) | Out-Null
+foreach ($directory in @((Split-Path -Parent $OutputPath), (Split-Path -Parent $ManifestPath)) | Where-Object { $_ }) {
+    [IO.Directory]::CreateDirectory($directory) | Out-Null
 }
-[System.IO.File]::WriteAllText($OutputPath, $instrumented, [System.Text.UTF8Encoding]::new($false))
-
+[IO.File]::WriteAllText($OutputPath, $instrumented, [Text.UTF8Encoding]::new($false))
 $manifest = [ordered]@{
-    schemaVersion = 2
-    source = $resolvedPath
+    schemaVersion = 3; source = $resolvedPath
     sourceSha256 = (Get-FileHash -LiteralPath $resolvedPath -Algorithm SHA256).Hash.ToLowerInvariant()
-    branchCount = $branches.Count
-    outcomeCount = @($branches | ForEach-Object { @($_.outcomes) }).Count
+    branchCount = $branches.Count; outcomeCount = @($branches | ForEach-Object outcomes).Count
     branches = $branches.ToArray()
 }
-$manifest | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $ManifestPath -Encoding utf8NoBOM
+$manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $ManifestPath -Encoding utf8NoBOM

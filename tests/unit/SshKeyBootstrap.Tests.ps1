@@ -992,6 +992,74 @@ Describe 'SSH Ed25519 key bootstrap' -Tag Unit {
         $result.ValidatedAtUtc | Should -BeNullOrEmpty
     }
 
+    It 'accepts no unproven observed mismatch context as target identity evidence' {
+        function Get-HHObservedMismatchFixture {
+            param(
+                [string] $Marker = 'HostHunter.PowerShellIdentity.v1',
+                [string] $Version = '7.6.5',
+                [string] $Edition = 'Core',
+                [string] $Mode = 'Direct',
+                [string] $ProcessPath = '/opt/microsoft/powershell/7/pwsh',
+                [string] $ValidatedAtUtc = '2026-08-23T01:02:03Z',
+                [string] $Fingerprint = $script:hostFingerprint
+            )
+
+            $failure = New-HHSshClassifiedException `
+                -FailureKind RuntimeMismatch `
+                -Message 'observed runtime mismatch fixture'
+            $failure.Data['HHObservedIdentity'] = [pscustomobject][ordered]@{
+                Marker = $Marker
+                PSEdition = $Edition
+                PowerShellVersion = $Version
+                ProcessPath = $ProcessPath
+                UserName = 'operator'
+                MachineName = 'bootstrap-node'
+            }
+            $failure.Data['HHObservedRemotePowerShellVersion'] = $Version
+            $failure.Data['HHObservedRemotePSEdition'] = $Edition
+            $failure.Data['HHObservedExecutionMode'] = $Mode
+            $failure.Data['HHObservedValidatedAtUtc'] = $ValidatedAtUtc
+            $failure.Data['HHObservedHostKeyFingerprint'] = $Fingerprint
+            return $failure
+        }
+
+        $transportFailure = New-HHSshClassifiedException `
+            -FailureKind TransportFailure `
+            -Message 'not a runtime mismatch'
+        (Get-HHSshBootstrapObservedMismatchContext `
+                -ErrorObject $transportFailure `
+                -RequestedPowerShellRuntime PowerShell7 `
+                -ExpectedHostKeyFingerprint $script:hostFingerprint) |
+            Should -BeNullOrEmpty
+
+        $invalidContexts = @(
+            @{ Marker = 'wrong' },
+            @{ Version = 'not-a-version' },
+            @{ Edition = 'Desktop' },
+            @{ Mode = 'Compatibility' },
+            @{ ProcessPath = '/usr/bin/powershell' },
+            @{ ValidatedAtUtc = 'not-a-date' },
+            @{ Fingerprint = 'SHA256:wrong' }
+        )
+        foreach ($case in $invalidContexts) {
+            $failure = Get-HHObservedMismatchFixture @case
+            (Get-HHSshBootstrapObservedMismatchContext `
+                    -ErrorObject $failure `
+                    -RequestedPowerShellRuntime PowerShell7 `
+                    -ExpectedHostKeyFingerprint $script:hostFingerprint) |
+                Should -BeNullOrEmpty
+        }
+
+        # Even internally consistent PowerShell 7 evidence cannot prove a mismatch
+        # with the requested PowerShell 7 runtime, so it must remain unusable.
+        $requestedRuntime = Get-HHObservedMismatchFixture
+        (Get-HHSshBootstrapObservedMismatchContext `
+                -ErrorObject $requestedRuntime `
+                -RequestedPowerShellRuntime PowerShell7 `
+                -ExpectedHostKeyFingerprint $script:hostFingerprint) |
+            Should -BeNullOrEmpty
+    }
+
     It 'publishes a PublicKey profile only after a separate key-only identity proof' {
         $script:sessionPlans = [Collections.Generic.List[object]]::new()
         $script:removedSessions = [Collections.Generic.List[object]]::new()
