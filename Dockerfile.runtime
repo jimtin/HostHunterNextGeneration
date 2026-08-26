@@ -98,10 +98,17 @@ RUN pwsh -NoLogo -NoProfile -NonInteractive -File /build/scripts/Test-HHModulePa
     && cp --archive "${module_root}/." /runtime-module/
 
 FROM runtime-base AS controller
-ENV HOME=/tmp HH_RUNTIME_MODULE_PATH=/opt/hosthunter/module/HostHunterNextGeneration.psd1
+ARG HH_SOURCE_FINGERPRINT=unknown
+ENV HOME=/tmp \
+    HH_RUNTIME_MODULE_PATH=/opt/hosthunter/module/HostHunterNextGeneration.psd1 \
+    HH_SOURCE_FINGERPRINT=${HH_SOURCE_FINGERPRINT}
+LABEL com.hosthunter.source-fingerprint=${HH_SOURCE_FINGERPRINT}
 COPY --from=package-builder --chown=0:0 /runtime-module /opt/hosthunter/module
 COPY --chmod=0755 scripts/runtime/controller-entrypoint.sh /usr/local/bin/hosthunter-controller
 COPY --chmod=0555 scripts/runtime/Invoke-HHCmdlet.ps1 /opt/hosthunter/runtime/Invoke-HHCmdlet.ps1
+COPY --chmod=0555 scripts/runtime/Get-HHClientCommandMetadata.ps1 /opt/hosthunter/runtime/Get-HHClientCommandMetadata.ps1
+COPY --chmod=0555 scripts/runtime/Invoke-HHClientProtocol.ps1 /opt/hosthunter/runtime/Invoke-HHClientProtocol.ps1
+COPY --chmod=0555 scripts/runtime/client-askpass.sh /opt/hosthunter/runtime/client-askpass.sh
 USER 10001:10001
 WORKDIR /var/lib/hosthunter-data
 ENTRYPOINT ["/usr/local/bin/hosthunter-controller"]

@@ -32,6 +32,9 @@ Set-HHEscalationPreference
 Get-HHEscalationPreference
 ```
 
+`Get-HHTargets` is an alias for `Get-HHTarget`. When no matching targets are
+saved, either name displays `No currently set` and returns no pipeline objects.
+
 Five cmdlets contact managed hosts: `Set-HHTarget`, `Test-HHTarget`,
 `Invoke-HHCommand`, `Enable-HHSshKeyAuthentication`, and
 `Set-HHWindowsProcessAuditPolicy`. They all delegate once to the same private
@@ -43,20 +46,45 @@ handling. The other six cmdlets operate only on local authenticated state.
 originating request and result; it cannot constrain network activity performed
 by that user-supplied command after it begins on the managed host.
 
-## Runtime
+## Use HostHunter from macOS PowerShell
 
-Initialize and start the single production controller:
+Install the current-user client once from the repository:
 
-```sh
-./scripts/runtime/init.sh
-./scripts/runtime/hosthunter.sh start
-./scripts/runtime/hosthunter.sh doctor
+```powershell
+pwsh -NoProfile -File ./scripts/client/Install-HHClient.ps1
 ```
 
-Invoke one of the official cmdlets through the constrained dispatcher:
+Open PowerShell normally. The profile import launches Docker Desktop once when
+its engine is stopped, starts the controller when needed, reuses an unchanged
+controller, and synchronizes the eleven exported commands from the packaged
+module:
+
+```powershell
+Set-HHTarget -Name server01 -HostName 192.0.2.10 -UserName analyst
+Test-HHTarget -Name server01
+Invoke-HHCommand -Target server01 -Command 'Get-Process'
+Get-HHAuditRecord -TargetName server01
+```
+
+These are normal PowerShell functions: parameter discovery, pipelines, objects,
+warnings, errors, verbose/debug/information messages, and progress cross one
+generic versioned bridge. New exported cmdlets synchronize automatically; the
+macOS client contains no per-cmdlet business logic. Passwords are prompted with
+`Read-Host -AsSecureString` and travel only through the command's standard-input
+session and an in-memory controller-local broker. They are never command-line
+arguments, environment values, persistent files, or logs.
+
+HostHunter never pulls Git changes automatically. When build-relevant checked-out
+source changes, the next import rebuilds the controller once.
+
+## Runtime administration
+
+The native client owns normal startup. The lower-level runtime commands remain
+available for diagnosis and explicit state management:
 
 ```sh
-./scripts/runtime/hosthunter.sh invoke Get-HHTarget
+./scripts/runtime/hosthunter.sh doctor
+./scripts/runtime/hosthunter.sh stop
 ```
 
 Runtime state remains separated across five trust-domain volumes: data, secrets,

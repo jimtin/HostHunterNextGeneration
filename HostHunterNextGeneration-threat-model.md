@@ -4,6 +4,8 @@
 
 - High: a transport bypass could suppress audit; the AST boundary guard is the most valuable control.
 - High: repeating uncertain SSH mutations could duplicate commands, keys, or policy changes.
+- High: forged proxy metadata or credential-protocol frames could execute local
+  client code or disclose a password.
 - High: rollback of SQLite, anchors, secrets, or evidence could falsify history.
 - High: candidate-owned coverage code could omit source or forge a passing
   percentage unless the standalone gate independently validates the receipt.
@@ -36,6 +38,8 @@ consequence; unknown means not determined.
 | Managed-host engine | Closed five-operation coordinator | Invoke-HHManagedHostOperation | ManagedHostOperation.ps1 | confirmed |
 | SSH adapter | Trust, PS7 identity, streams, cleanup | engine-only calls | SshTransport.ps1; SshTrust.ps1 | confirmed |
 | Persistence | Authenticated SQLite, anchors, encrypted output, recovery | local cmdlets and engine | audit, anchor, migrations | confirmed |
+| macOS client | Native generated proxies and framed Docker bridge | profile import; eleven proxy functions | HostHunter.Client | confirmed |
+| credential broker | Command-scoped SSH askpass handoff | redirected stdin and controller loopback | client protocol; askpass helper | confirmed |
 
 ### Build and test
 
@@ -53,6 +57,7 @@ consequence; unknown means not determined.
 | Boundary | From → To | Protections observed (auth, validation, rate limits) | Gaps | Evidence |
 | --- | --- | --- | --- | --- |
 | B1 | operator → dispatcher/public cmdlet | exact allowlist; validation | remote command remains powerful | runtime dispatcher; AP-5 |
+| B0 | macOS PowerShell → Docker controller | source fingerprint; closed actions; bounded NDJSON/CLIXML; non-executable proxy declarations | local Docker administrator remains trusted | client module/protocol; AP-12, AP-13 |
 | B2 | public cmdlet → engine | closed operations; AST guard; one delegation | guard must stay mandatory | engine/guard; AP-1 |
 | B3 | engine → SSH adapter → host | intent/arm; fingerprint; PS7 identity; bounds | host controls content/timing | transport/audit; AP-2, AP-4, AP-6 |
 | B4 | controller → five state roots | separate mounts; authentication; encryption | Docker/root trusted | compose.runtime.yml; AP-3 |
@@ -73,6 +78,7 @@ consequence; unknown means not determined.
 | Policy/authorized keys | managed hosts | partial mutation can persist privilege |
 | Release verdicts | .artifacts/release/SHA | determines ship eligibility |
 | Coverage denominator and receipt | exact tree and heavy receipt | prevents omitted code or stale proof from authorizing release |
+| Interactive password | SecureString and command-scoped broker memory | grants initial managed-host access |
 
 ## 6. Attacker Profile
 
@@ -105,6 +111,8 @@ Non-capabilities:
 | AP-9 | forge a coverage pass | candidate collector → B8 → release verdict | integrity / detection-evasion | medium | high | high | external gate recomputes inventory/hash and enforces all four metrics | coverage receipt validator |
 | AP-10 | ship instrumented runtime code | ephemeral branch rewrite → B8 → production image | integrity / execution | low | high | medium | separate untouched build; production image probe-token rejection | build-candidate.sh |
 | AP-11 | exhaust or loop the gate | branch hit → B8 → local compute/storage | availability | low | medium | low | in-memory hit set; two fixed invocations; 300-second bound; no retries | coverage runner; verify-local.sh |
+| AP-12 | execute injected local proxy code | forged metadata → B0 → macOS session | execution | low | high | medium | exact image fingerprint; unique names; declaration AST allows parameter metadata only; size caps | client metadata synchronization |
+| AP-13 | disclose or replay a password | malicious frame/process → B0 → credential | credential access | medium | high | high | local secure prompt; one request; stdin; random broker token; loopback only; no args/env/files/logs; buffer clearing | client protocol qualification |
 
 AP-1 through AP-6 are medium likelihood because realistic untrusted inputs must
 also defeat an evidenced control. AP-7 is low because exclusive writes directly
@@ -130,6 +138,8 @@ stake.
 | AP-9 | Keep exact-tree inventory/hash and four-metric validation outside the candidate repository | standalone laptop gate | preventative |
 | AP-10 | Reject branch-probe tokens in the production image before qualification | exact-SHA build phase | preventative |
 | AP-11 | Keep one process, two fixed invocations, terminal timeout receipt, and zero retries | coverage/release runner | preventative/detective |
+| AP-12 | Keep metadata schema/fingerprint/AST/duplicate checks and static no-transport client guard | native client | preventative |
+| AP-13 | Keep one-prompt protocol, frame bounds, token-bound loopback, memory clearing, and fixture leakage assertions | native client/credential broker | preventative/detective |
 | AP-2, AP-6, AP-8 | Repeat the green live-Windows journey against the packaged exact-SHA image | Windows release qualification | detective |
 
 ## 9. Assumptions and Open Questions
@@ -142,6 +152,9 @@ stake.
   and preserves four independent 90-percent thresholds.
 - user-confirmed: independent release phases run once, Windows precedes
   coverage, and no failed exact SHA is retried.
+- user-confirmed: macOS PowerShell auto-starts Docker, synchronizes exports, and
+  uses one generic native bridge; checked-out source changes rebuild once but
+  never trigger an automatic Git pull.
 - unvalidated: Docker administrators and the gate operator are trusted.
 - unvalidated: minimum Windows and PowerShell versions remain to be fixed.
 - terminal exact-SHA evidence: candidate `652157af4a3ab21702b9895d3efffb3f946b8e5f`

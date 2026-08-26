@@ -6,6 +6,8 @@ services:
       context: .
       dockerfile: Dockerfile.runtime
       target: production
+      args:
+        HH_SOURCE_FINGERPRINT: ${HH_SOURCE_FINGERPRINT:-unknown}
     image: ${HH_RUNTIME_CONTROLLER_IMAGE:?HH_RUNTIME_CONTROLLER_IMAGE is required}
     user: "10001:10001"
     read_only: true
@@ -26,6 +28,7 @@ services:
       HH_ANCHOR_ROOT: /var/lib/hosthunter-anchors
       HH_SSH_ROOT: /var/lib/hosthunter-data/keys
       HH_EVIDENCE_ROOT: /var/lib/hosthunter-evidence
+      HH_SOURCE_FINGERPRINT: ${HH_SOURCE_FINGERPRINT:-unknown}
     volumes:
       - type: volume
         source: data

@@ -15,6 +15,8 @@ foreach ($file in $publicFiles) {
     . $file.FullName
 }
 
+Set-Alias -Name Get-HHTargets -Value Get-HHTarget -Scope Script
+
 Export-ModuleMember -Function @(
     'Set-HHTarget'
     'Get-HHTarget'
@@ -27,4 +29,4 @@ Export-ModuleMember -Function @(
     'Set-HHWindowsProcessAuditPolicy'
     'Set-HHEscalationPreference'
     'Get-HHEscalationPreference'
-)
+) -Alias @('Get-HHTargets')

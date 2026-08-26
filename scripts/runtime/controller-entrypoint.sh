@@ -6,6 +6,9 @@ set -Eeuo pipefail
 readonly expected_provider='DockerVolume'
 readonly expected_exports=11
 readonly dispatcher='/opt/hosthunter/runtime/Invoke-HHCmdlet.ps1'
+readonly client_metadata='/opt/hosthunter/runtime/Get-HHClientCommandMetadata.ps1'
+readonly client_protocol='/opt/hosthunter/runtime/Invoke-HHClientProtocol.ps1'
+readonly client_askpass='/opt/hosthunter/runtime/client-askpass.sh'
 
 : "${HH_DATA_ROOT:?HH_DATA_ROOT is required}"
 : "${HH_SECRET_ROOT:?HH_SECRET_ROOT is required}"
@@ -41,7 +44,8 @@ done
 for writable_root in "${roots[@]}"; do
   [[ -w "$writable_root" ]] || fail "The runtime identity cannot write $writable_root."
 done
-[[ -f "${HH_RUNTIME_MODULE_PATH:-}" && -f "$dispatcher" ]] ||
+[[ -f "${HH_RUNTIME_MODULE_PATH:-}" && -f "$dispatcher" && \
+  -f "$client_metadata" && -f "$client_protocol" && -x "$client_askpass" ]] ||
   fail 'The packaged module or constrained dispatcher is missing.'
 
 module_count="$(pwsh -NoLogo -NoProfile -NonInteractive -Command '
@@ -74,7 +78,17 @@ case "${1:-serve}" in
     exec pwsh -NoLogo -NoProfile -NonInteractive -File "$dispatcher" \
       -CommandName "$1" -ParametersJson "${2:-{}}"
     ;;
+  describe)
+    shift
+    [[ "$#" -eq 0 ]] || fail 'describe accepts no arguments.'
+    exec pwsh -NoLogo -NoProfile -NonInteractive -File "$client_metadata"
+    ;;
+  invoke-native)
+    shift
+    [[ "$#" -eq 0 ]] || fail 'invoke-native accepts no arguments.'
+    exec pwsh -NoLogo -NoProfile -NonInteractive -File "$client_protocol"
+    ;;
   *)
-    fail 'Only serve, doctor, and invoke are permitted.'
+    fail 'Only serve, doctor, invoke, describe, and invoke-native are permitted.'
     ;;
 esac

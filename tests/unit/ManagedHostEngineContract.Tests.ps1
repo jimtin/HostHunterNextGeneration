@@ -39,7 +39,7 @@ Describe 'managed-host engine contract' -Tag Unit {
     }
 
     It 'keeps the engine private and exports exactly eleven cmdlets' {
-        $exported = @(Get-Command -Module HostHunterNextGeneration |
+        $exported = @(Get-Command -Module HostHunterNextGeneration -CommandType Function |
                 Select-Object -ExpandProperty Name | Sort-Object)
         $exported | Should -Be @(
             'Enable-HHSshKeyAuthentication',
@@ -54,6 +54,8 @@ Describe 'managed-host engine contract' -Tag Unit {
             'Set-HHWindowsProcessAuditPolicy',
             'Test-HHTarget'
         )
+        (Get-Command Get-HHTargets -Module HostHunterNextGeneration `
+                -CommandType Alias).Definition | Should -BeExactly Get-HHTarget
         Get-Command Invoke-HHManagedHostOperation -ErrorAction SilentlyContinue |
             Should -BeNullOrEmpty
     }

@@ -189,13 +189,17 @@ Describe 'HostHunter SQLite public cmdlets' -Tag Unit {
             @(Get-HHTarget -Name alpha).Name | Should -Be alpha
             @(Get-HHTarget).Name | Should -Be alpha
             [IO.Directory]::Delete($script:testRoot, $true)
-            @(Get-HHTarget).Count | Should -Be 0
+            $information = @()
+            @(Get-HHTarget -InformationVariable information).Count | Should -Be 0
+            [string]$information[-1] | Should -BeExactly 'No currently set'
         }
 
         It 'returns no state for a mounted empty data root without opening persistence' {
             [IO.File]::Delete($script:runtime.DatabasePath)
             [IO.Directory]::Exists($script:runtime.DataRoot) | Should -BeTrue
-            @(Get-HHTarget).Count | Should -Be 0
+            $information = @()
+            @(Get-HHTargets -InformationVariable information).Count | Should -Be 0
+            [string]$information[-1] | Should -BeExactly 'No currently set'
             [IO.File]::Exists($script:runtime.DatabasePath) | Should -BeFalse
             Should -Not -Invoke Open-HHAuthenticatedPersistence
         }

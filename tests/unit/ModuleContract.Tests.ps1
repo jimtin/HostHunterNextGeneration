@@ -27,5 +27,8 @@ Describe 'HostHunter module contract' -Tag Unit {
             'Set-HHWindowsProcessAuditPolicy'
             'Test-HHTarget'
         )
+        $alias = Get-Command Get-HHTargets -Module HostHunterNextGeneration `
+            -CommandType Alias
+        $alias.Definition | Should -BeExactly Get-HHTarget
     }
 }

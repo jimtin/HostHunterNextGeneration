@@ -2,10 +2,10 @@
 
 set -Eeuo pipefail
 
-runtime_script_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-readonly runtime_script_root
+hosthunter_script_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+readonly hosthunter_script_root
 # shellcheck source=scripts/runtime/lib.sh
-source "$runtime_script_root/lib.sh"
+source "$hosthunter_script_root/lib.sh"
 
 usage() {
   printf '%s\n' \

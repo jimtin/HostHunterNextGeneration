@@ -282,8 +282,11 @@ try {
         'The verifier requires a fresh data volume; the separate SSH-key mount is allowed.'
 
     Invoke-HHCmdletStep 1 'Get-HHTarget' 'empty read without state creation' {
-        $targets = @(Get-HHTarget)
+        $information = @()
+        $targets = @(Get-HHTargets -InformationVariable information)
         Assert-HHCondition ($targets.Count -eq 0) 'Expected an empty target set.'
+        Assert-HHCondition ([string]$information[-1] -ceq 'No currently set') `
+            'The empty target message differs.'
         Assert-HHCondition (-not [IO.File]::Exists($databasePath)) 'Read created the database.'
         @{ count = $targets.Count }
     }

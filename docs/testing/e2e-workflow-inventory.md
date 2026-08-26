@@ -12,9 +12,15 @@ Direct SQL connections are read-only (`PRAGMA query_only=ON`). Product cmdlets
 perform every write. Each step records duration, public result, expected
 outcome and before/after database snapshot.
 
+The native macOS client adds one user-facing entry path without adding product
+behavior: profile import starts/reuses the container, generated proxies mirror
+the packaged exports, and every invocation crosses one framed standard-input
+bridge. The native-client SSH qualification calls all eleven unique cmdlets,
+including persistence/audit readback and the password-to-key transition.
+
 | Step | User action | Role/state | Expected public behavior | Required database evidence | Status |
 | ---: | --- | --- | --- | --- | --- |
-| 1 | `Get-HHTarget` | operator; empty store | returns no targets without creating state | no DB or row/generation delta | pending |
+| 1 | `Get-HHTarget` / `Get-HHTargets` alias | operator; empty store | displays `No currently set`, returns no targets and creates no state | no DB or row/generation delta | pending |
 | 2 | `Set-HHTarget` | operator; password SSH fixture | validates identity and persists one PS7/SSH profile | DB created; profile=1; target generation/mutation +1; successful validation audit | pending |
 | 3 | `Test-HHTarget` | operator; saved profile | real identity probe succeeds without profile mutation | one audited invocation/outcome; target generation unchanged | pending |
 | 4 | `Invoke-HHCommand` | operator; saved profile | exact remote value and streams return once | batch/invocation/operation/event/outcome/output/audit deltas; authenticated artifact | pending |
@@ -41,6 +47,12 @@ outcome and before/after database snapshot.
   builds and compatibility matrices are not separate user journeys. Focused
   unit/integration tests cover material branches; the exact-SHA release gate
   owns coverage, integration, build, and security checks.
+- The macOS client may execute Docker only. It contains no SSH, HTTP, TCP, audit,
+  persistence, or cmdlet-specific implementation. Generated declarations are
+  validated as parameter metadata before loading.
+- Secure prompts originate locally. Password bytes use redirected stdin and a
+  token-bound controller-loopback broker, are cached only for one command's
+  fixed SSH phases, and are cleared/discarded afterward.
 
 ## Receipt contract
 

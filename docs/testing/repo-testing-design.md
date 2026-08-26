@@ -10,6 +10,12 @@ OpenSSH through the single private managed-host engine. Authenticated SQLite,
 encrypted evidence, anchors, tamper/rollback detection, and recovery are part of
 the product and remain tested.
 
+The supported operator entrypoint on macOS is the current-user
+`HostHunter.Client` module. Its profile import automatically starts or reuses
+the exact-fingerprint controller and generates native proxy functions from the
+packaged export metadata. The client has one generic Docker bridge and no
+managed-host transport or cmdlet-specific behavior.
+
 ## Development verdict
 
 `./scripts/verify-cmdlets.sh` is the only development acceptance command. It
@@ -72,6 +78,10 @@ There are no retries, shards, nested runners, worker processes, per-hit files,
 or network/database services. A single atomic summary always records all four
 metrics, their deficits, and every uncovered location so failure diagnosis never
 requires a second coverage run.
+
+"Every shipped production source file" includes both the authoritative module
+and `client/HostHunter.Client`; the collector accepts the client as an explicit
+additional source root and instruments it only in its ephemeral second pass.
 
 ## Hooks
 

@@ -74,6 +74,8 @@ Describe 'release coverage collector contract' -Tag Unit {
         ([regex]::Matches($runner, '(?m)^\s*\$\w+Result = Invoke-Pester\b')).Count | Should -Be 2
         ([regex]::Matches($runner, "Filter\.Tag = @\('Unit'\)")).Count | Should -Be 2
         $runner | Should -Not -Match 'Get-Command\s+pwsh|Start-Process|System\.Diagnostics\.Process|Tag\s*=.*Integration'
+        $runner | Should -Match "AdditionalSourceRoot = @\('client/HostHunter\.Client'\)"
+        $runner | Should -Match 'HH_TEST_CLIENT_SOURCE_ROOT'
     }
 
     It 'fails each of the four independent thresholds without conflating metrics' {

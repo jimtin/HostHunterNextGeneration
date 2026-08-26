@@ -7,7 +7,11 @@ function Get-HHTarget {
     param([string[]]$Name)
 
     $runtime = Get-HHRuntimeContext
-    if (-not [IO.File]::Exists($runtime.DatabasePath)) { return }
+    if (-not [IO.File]::Exists($runtime.DatabasePath)) {
+        Write-Information 'No currently set' -InformationAction Continue
+        return
+    }
+    $targets = @()
     try {
         $context = Open-HHAuthenticatedPersistence -PersistenceContext $runtime
         try {
@@ -17,7 +21,7 @@ function Get-HHTarget {
                 ExpectedAnchor = $context.Anchor
             }
             if ($PSBoundParameters.ContainsKey('Name')) { $parameters.Name = $Name }
-            (Read-HHTargetRepositorySnapshot @parameters).Targets
+            $targets = @((Read-HHTargetRepositorySnapshot @parameters).Targets)
         }
         finally { Close-HHAuthenticatedPersistence -Context $context }
     }
@@ -32,8 +36,13 @@ function Get-HHTarget {
                 -MigrationPath $runtime.MigrationPath
             $parameters = @{ Connection = $connection }
             if ($PSBoundParameters.ContainsKey('Name')) { $parameters.Name = $Name }
-            (Read-HHTargetRepositoryDisplaySnapshot @parameters).Targets
+            $targets = @((Read-HHTargetRepositoryDisplaySnapshot @parameters).Targets)
         }
         finally { $connection.Dispose() }
     }
+    if ($targets.Count -eq 0) {
+        Write-Information 'No currently set' -InformationAction Continue
+        return
+    }
+    $targets
 }

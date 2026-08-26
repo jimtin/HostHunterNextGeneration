@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$SourceRoot = 'src/HostHunterNextGeneration',
+    [string[]]$AdditionalSourceRoot = @('client/HostHunter.Client'),
     [string]$TestPath = 'tests/unit',
     [string]$ArtifactRoot = '.artifacts/unit',
     [ValidateRange(0, 100)][double]$Minimum = 90,
@@ -16,11 +17,13 @@ function Resolve-HHPath([string]$Path) {
     [IO.Path]::GetFullPath((Join-Path $repoRoot $Path))
 }
 $sourcePath = Resolve-HHPath $SourceRoot
+$additionalSourcePaths = @($AdditionalSourceRoot | ForEach-Object { Resolve-HHPath $_ })
 $testsPath = Resolve-HHPath $TestPath
 $artifactPath = Resolve-HHPath $ArtifactRoot
 $summaryPath = Join-Path $artifactPath 'coverage-summary.json'
 $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) "hosthunter-coverage-$([Guid]::NewGuid().ToString('N'))"
 $originalTestSourceRoot = $env:HH_TEST_SOURCE_ROOT
+$originalClientSourceRoot = $env:HH_TEST_CLIENT_SOURCE_ROOT
 $originalCoverageHits = [AppDomain]::CurrentDomain.GetData('HostHunterCoverageHits')
 
 function Write-HHJsonAtomic {
@@ -48,8 +51,11 @@ foreach ($staleArtifact in @('coverage-summary.json', 'coverage.xml', 'unit-test
     $stalePath = Join-Path $artifactPath $staleArtifact
     if (Test-Path -LiteralPath $stalePath) { Remove-Item -LiteralPath $stalePath -Force }
 }
-$sourceFiles = @(Get-ChildItem -LiteralPath $sourcePath -Recurse -File |
-        Where-Object Extension -in @('.ps1', '.psm1') | Sort-Object FullName)
+$sourceRoots = @($sourcePath) + $additionalSourcePaths
+$sourceFiles = @($sourceRoots | ForEach-Object {
+        Get-ChildItem -LiteralPath $_ -Recurse -File |
+            Where-Object Extension -in @('.ps1', '.psm1')
+    } | Sort-Object FullName -Unique)
 if ($sourceFiles.Count -eq 0) { throw 'No shipped PowerShell source files were selected for coverage.' }
 $testFiles = @(
     if (Test-Path -LiteralPath $testsPath -PathType Leaf) {
@@ -114,11 +120,13 @@ try {
     $nativeConfiguration.CodeCoverage.CoveragePercentTarget = 0
     try {
         $env:HH_TEST_SOURCE_ROOT = $sourcePath
+        $env:HH_TEST_CLIENT_SOURCE_ROOT = $additionalSourcePaths[0]
         Remove-Module HostHunterNextGeneration -Force -ErrorAction Ignore
         $nativeResult = Invoke-Pester -Configuration $nativeConfiguration
     }
     finally {
         $env:HH_TEST_SOURCE_ROOT = $originalTestSourceRoot
+        $env:HH_TEST_CLIENT_SOURCE_ROOT = $originalClientSourceRoot
         Remove-Module HostHunterNextGeneration -Force -ErrorAction Ignore
     }
     if ($null -eq $nativeResult.CodeCoverage) { throw 'Pester returned no native coverage result.' }
@@ -146,18 +154,26 @@ try {
     $instrumentedRoot = Join-Path $temporaryRoot 'source'
     [IO.Directory]::CreateDirectory($instrumentedRoot) | Out-Null
     $manifests = [Collections.Generic.List[object]]::new()
-    foreach ($file in Get-ChildItem -LiteralPath $sourcePath -Recurse -File) {
-        $relative = [IO.Path]::GetRelativePath($sourcePath, $file.FullName)
-        $destination = Join-Path $instrumentedRoot $relative
-        [IO.Directory]::CreateDirectory((Split-Path -Parent $destination)) | Out-Null
-        if ($file.Extension -in @('.ps1', '.psm1')) {
-            $manifestPath = "$destination.coverage.json"
-            & (Join-Path $PSScriptRoot 'Instrument-HHBranches.ps1') -Path $file.FullName `
-                -OutputPath $destination -ManifestPath $manifestPath
-            $manifests.Add((Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json))
-            Remove-Item -LiteralPath $manifestPath -Force
-        } else {
-            Copy-Item -LiteralPath $file.FullName -Destination $destination
+    $instrumentedRoots = [Collections.Generic.List[string]]::new()
+    for ($rootIndex = 0; $rootIndex -lt $sourceRoots.Count; $rootIndex++) {
+        $root = $sourceRoots[$rootIndex]
+        $destinationRoot = if ($rootIndex -eq 0) {
+            $instrumentedRoot
+        } else { Join-Path $temporaryRoot "additional-$rootIndex" }
+        $instrumentedRoots.Add($destinationRoot)
+        foreach ($file in Get-ChildItem -LiteralPath $root -Recurse -File) {
+            $relative = [IO.Path]::GetRelativePath($root, $file.FullName)
+            $destination = Join-Path $destinationRoot $relative
+            [IO.Directory]::CreateDirectory((Split-Path -Parent $destination)) | Out-Null
+            if ($file.Extension -in @('.ps1', '.psm1')) {
+                $manifestPath = "$destination.coverage.json"
+                & (Join-Path $PSScriptRoot 'Instrument-HHBranches.ps1') -Path $file.FullName `
+                    -OutputPath $destination -ManifestPath $manifestPath
+                $manifests.Add((Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json))
+                Remove-Item -LiteralPath $manifestPath -Force
+            } else {
+                Copy-Item -LiteralPath $file.FullName -Destination $destination
+            }
         }
     }
     $branches = @($manifests | ForEach-Object { @($_.branches) })
@@ -167,6 +183,7 @@ try {
     [AppDomain]::CurrentDomain.SetData('HostHunterCoverageHits', $hits)
     try {
         $env:HH_TEST_SOURCE_ROOT = $instrumentedRoot
+        $env:HH_TEST_CLIENT_SOURCE_ROOT = $instrumentedRoots[1]
         Remove-Module HostHunterNextGeneration -Force -ErrorAction Ignore
         $branchConfiguration = New-PesterConfiguration
         $branchConfiguration.Run.Path = @($testFiles.FullName)
@@ -177,6 +194,7 @@ try {
         $branchResult = Invoke-Pester -Configuration $branchConfiguration
     } finally {
         $env:HH_TEST_SOURCE_ROOT = $originalTestSourceRoot
+        $env:HH_TEST_CLIENT_SOURCE_ROOT = $originalClientSourceRoot
         [AppDomain]::CurrentDomain.SetData('HostHunterCoverageHits', $originalCoverageHits)
         Remove-Module HostHunterNextGeneration -Force -ErrorAction Ignore
     }
@@ -273,6 +291,7 @@ catch {
 }
 finally {
     $env:HH_TEST_SOURCE_ROOT = $originalTestSourceRoot
+    $env:HH_TEST_CLIENT_SOURCE_ROOT = $originalClientSourceRoot
     [AppDomain]::CurrentDomain.SetData('HostHunterCoverageHits', $originalCoverageHits)
     if (Test-Path -LiteralPath $temporaryRoot) { Remove-Item -LiteralPath $temporaryRoot -Recurse -Force }
 }

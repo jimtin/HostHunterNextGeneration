@@ -4,6 +4,8 @@
 | --- | --- | --- | --- | --- |
 | Cmdlet acceptance | Pester plus read-only SQLite assertions | production-derived verifier + SSH fixture | `./scripts/verify-cmdlets.sh` | `.artifacts/cmdlets/<sha>/cmdlets/receipt.json` |
 | Boundary guard | PowerShell AST inspection | test image | `scripts/static/Test-HHManagedHostBoundary.ps1` | terminal result |
+| Native client contract | Pester protocol/proxy/install tests | test image | focused `NativeClient*.Tests.ps1` | `.artifacts/native-client-*.xml` |
+| Native macOS qualification | installed/source client + production controller + disposable SSH fixture | macOS orchestration; product execution remains containerized | `scripts/client/Test-HHNativeClientSsh.ps1` | terminal 11-command summary |
 | Release-only unit coverage | Pester native profiler + in-memory branch-outcome collector | one test container / one `pwsh` process | `scripts/lanes/unit.sh` | `.artifacts/release-proof/unit/{unit-tests.xml,coverage.xml,coverage-summary.json,coverage.log}` |
 | Critical integration | Pester + disposable SSH/SQLite | test image + SSH fixture | `scripts/lanes/integration.sh` | `.artifacts/release-proof/integration/` |
 | SQLite fault proof | Docker Compose fault workers | purpose-built containers | `scripts/lanes/sqlite-integration.sh` | integration logs/results |
@@ -15,6 +17,10 @@
 Host orchestration may invoke Docker and aggregate receipts. Canonical validation
 runs inside containers. The cmdlet lane has one timeout owner, no worker fanout,
 no retries, and no coverage or scan work.
+
+The native macOS qualification is a platform-bound user-entry check, not a
+coverage numerator. It retrieves fixture credentials only into test-process
+memory and never prints or persists them.
 
 The unit coverage command has one timeout owner and exactly two fixed sequential
 passes over the same unit suite: untouched source for native statement/line and

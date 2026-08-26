@@ -23,7 +23,7 @@
     )
     CmdletsToExport = @()
     VariablesToExport = @()
-    AliasesToExport = @()
+    AliasesToExport = @('Get-HHTargets')
     PrivateData = @{
         PSData = @{
             Tags = @('PowerShell', 'Remoting', 'SSH', 'Audit', 'Docker', 'SQLite')
