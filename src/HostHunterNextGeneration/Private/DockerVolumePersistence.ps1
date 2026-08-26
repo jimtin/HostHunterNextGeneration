@@ -6,7 +6,6 @@ $script:HHDockerVolumeEnvelopeHeaderLength = 80
 $script:HHDockerVolumeEnvelopeAuthenticatorLength = 32
 $script:HHDockerVolumeKeyLength = 32
 $script:HHDockerVolumeCoreAnchorLengths = @(196, 236)
-$script:HHDockerVolumeForensicsAnchorLength = 240
 $script:HHDockerVolumeLockTimeoutMilliseconds = 10000
 
 function New-HHDockerVolumeProviderErrorRecord {
@@ -164,7 +163,7 @@ function Initialize-HHDockerVolumeDomainDirectory {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$Root,
-        [Parameter(Mandatory)][ValidateSet('core', 'forensics')][string]$Domain
+        [Parameter(Mandatory)][ValidateSet('core')][string]$Domain
     )
 
     Assert-HHDockerVolumeDirectory -Path $Root
@@ -386,7 +385,7 @@ function New-HHDockerVolumeEnvelope {
     [OutputType([byte[]])]
     param(
         [Parameter(Mandatory)][ValidateSet('Key', 'Anchor')][string]$Kind,
-        [Parameter(Mandatory)][ValidateSet('core', 'forensics')][string]$Domain,
+        [Parameter(Mandatory)][ValidateSet('core')][string]$Domain,
         [Parameter(Mandatory)][string]$DataRoot,
         [Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Payload,
         [AllowNull()][byte[]]$MacKey
@@ -458,7 +457,7 @@ function ConvertFrom-HHDockerVolumeEnvelope {
     [OutputType([byte[]])]
     param(
         [Parameter(Mandatory)][ValidateSet('Key', 'Anchor')][string]$Kind,
-        [Parameter(Mandatory)][ValidateSet('core', 'forensics')][string]$Domain,
+        [Parameter(Mandatory)][ValidateSet('core')][string]$Domain,
         [Parameter(Mandatory)][string]$DataRoot,
         [Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Envelope,
         [Parameter(Mandatory)][int[]]$AllowedPayloadLength,
@@ -570,7 +569,7 @@ function Get-HHDockerVolumeDomainKey {
     [OutputType([byte[]])]
     param(
         [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][ValidateSet('core', 'forensics')][string]$Domain,
+        [Parameter(Mandatory)][ValidateSet('core')][string]$Domain,
         [Parameter(Mandatory)][string]$DataRoot,
         [switch]$RequireExisting
     )
@@ -701,15 +700,12 @@ function Read-HHDockerVolumeAnchorPayload {
     [OutputType([byte[]])]
     param(
         [Parameter(Mandatory)][string]$Path,
-        [Parameter(Mandatory)][ValidateSet('core', 'forensics')][string]$Domain,
+        [Parameter(Mandatory)][ValidateSet('core')][string]$Domain,
         [Parameter(Mandatory)][string]$DataRoot,
         [Parameter(Mandatory)][byte[]]$MacKey
     )
 
-    $allowed = if ($Domain -eq 'core') {
-        [int[]]$script:HHDockerVolumeCoreAnchorLengths
-    }
-    else { [int[]]@($script:HHDockerVolumeForensicsAnchorLength) }
+    $allowed = [int[]]$script:HHDockerVolumeCoreAnchorLengths
     $minimum = $script:HHDockerVolumeEnvelopeHeaderLength +
         ($allowed | Measure-Object -Minimum).Minimum + 32
     $maximum = $script:HHDockerVolumeEnvelopeHeaderLength +
@@ -735,17 +731,14 @@ function Write-HHDockerVolumeAnchorPayload {
     param(
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][string]$LockPath,
-        [Parameter(Mandatory)][ValidateSet('core', 'forensics')][string]$Domain,
+        [Parameter(Mandatory)][ValidateSet('core')][string]$Domain,
         [Parameter(Mandatory)][string]$DataRoot,
         [AllowNull()][byte[]]$ExpectedPayload,
         [Parameter(Mandatory)][byte[]]$NewPayload,
         [Parameter(Mandatory)][byte[]]$MacKey
     )
 
-    $allowed = if ($Domain -eq 'core') {
-        [int[]]$script:HHDockerVolumeCoreAnchorLengths
-    }
-    else { [int[]]@($script:HHDockerVolumeForensicsAnchorLength) }
+    $allowed = [int[]]$script:HHDockerVolumeCoreAnchorLengths
     if ($NewPayload.Length -notin $allowed -or
         ($null -ne $ExpectedPayload -and $ExpectedPayload.Length -notin $allowed)) {
         Stop-HHDockerVolumeProviderOperation `
@@ -842,20 +835,13 @@ function New-HHDockerVolumePersistenceProvider {
     Assert-HHDockerVolumeDirectory -Path $canonicalAnchorRoot
     $coreSecretRoot = Initialize-HHDockerVolumeDomainDirectory `
         -Root $canonicalSecretRoot -Domain core
-    $forensicsSecretRoot = Initialize-HHDockerVolumeDomainDirectory `
-        -Root $canonicalSecretRoot -Domain forensics
     $coreAnchorRoot = Initialize-HHDockerVolumeDomainDirectory `
         -Root $canonicalAnchorRoot -Domain core
-    $forensicsAnchorRoot = Initialize-HHDockerVolumeDomainDirectory `
-        -Root $canonicalAnchorRoot -Domain forensics
 
     $paths = [pscustomobject][ordered]@{
         CoreKey = Join-Path $coreSecretRoot 'master.key'
         CoreAnchor = Join-Path $coreAnchorRoot 'anchor.bin'
         CoreAnchorLock = Join-Path $coreAnchorRoot 'anchor.lock'
-        ForensicsKey = Join-Path $forensicsSecretRoot 'master.key'
-        ForensicsAnchor = Join-Path $forensicsAnchorRoot 'anchor.bin'
-        ForensicsAnchorLock = Join-Path $forensicsAnchorRoot 'anchor.lock'
     }
     $providerModule = $ExecutionContext.SessionState.Module
     if ($null -eq $providerModule) {
@@ -917,88 +903,6 @@ function New-HHDockerVolumePersistenceProvider {
         } $canonicalDataRoot $paths $PersistenceContext $ExpectedArtifact `
             $NewArtifact $MasterKey
     }.GetNewClosure()
-    $forensicsKeyProvider = {
-        & $providerModule {
-            param($BoundDataRoot, $ProviderPaths)
-            $mustExist = [IO.File]::Exists((Join-Path $BoundDataRoot 'forensics.db')) -or
-                (Test-HHDockerVolumePrivateFile -Path $ProviderPaths.ForensicsAnchor)
-            $key = Get-HHDockerVolumeDomainKey -Path $ProviderPaths.ForensicsKey `
-                -Domain forensics -DataRoot $BoundDataRoot -RequireExisting:$mustExist
-            [pscustomobject]@{
-                Service = 'HostHunterNextGeneration.Forensics.v1'
-                Account = 'ledger-key'
-                KeyBytes = $key
-            }
-        } $canonicalDataRoot $paths
-    }.GetNewClosure()
-    $forensicsAnchorReader = {
-        param($PersistenceContext)
-        & $providerModule {
-            param($BoundDataRoot, $ProviderPaths, $Context)
-            if ([IO.Path]::GetFullPath([string]$Context.DataRoot) -cne $BoundDataRoot) {
-                Stop-HHDockerVolumeProviderOperation `
-                    -ErrorId DockerVolumeProviderMismatch `
-                    -Message 'The DockerVolume provider was invoked for a different data root.' `
-                    -Category SecurityError
-            }
-            if (-not (Test-HHDockerVolumePrivateFile `
-                        -Path $ProviderPaths.ForensicsAnchor)) {
-                return $null
-            }
-            $key = Get-HHDockerVolumeDomainKey -Path $ProviderPaths.ForensicsKey `
-                -Domain forensics -DataRoot $BoundDataRoot `
-                -RequireExisting
-            try {
-                $payload = Read-HHDockerVolumeAnchorPayload `
-                    -Path $ProviderPaths.ForensicsAnchor -Domain forensics `
-                    -DataRoot $BoundDataRoot -MacKey $key
-                if ($null -eq $payload) { return $null }
-                try { ConvertFrom-HHForensicsAnchorArtifact -Artifact $payload }
-                finally { [Array]::Clear($payload, 0, $payload.Length) }
-            }
-            finally { [Array]::Clear($key, 0, $key.Length) }
-        } $canonicalDataRoot $paths $PersistenceContext
-    }.GetNewClosure()
-    $forensicsAnchorWriter = {
-        param($ExpectedAnchor, $NewAnchor, $PersistenceContext)
-        & $providerModule {
-            param($BoundDataRoot, $ProviderPaths, $Expected, $New, $Context)
-            if ([IO.Path]::GetFullPath([string]$Context.DataRoot) -cne $BoundDataRoot) {
-                Stop-HHDockerVolumeProviderOperation `
-                    -ErrorId DockerVolumeProviderMismatch `
-                    -Message 'The DockerVolume provider was invoked for a different data root.' `
-                    -Category SecurityError
-            }
-            $mustExist = [IO.File]::Exists((Join-Path $BoundDataRoot 'forensics.db')) -or
-                (Test-HHDockerVolumePrivateFile -Path $ProviderPaths.ForensicsAnchor)
-            $key = Get-HHDockerVolumeDomainKey -Path $ProviderPaths.ForensicsKey `
-                -Domain forensics -DataRoot $BoundDataRoot `
-                -RequireExisting:$mustExist
-            $newArtifact = $null
-            $expectedArtifact = $null
-            try {
-                $newArtifact = ConvertTo-HHForensicsAnchorArtifact -Anchor $New
-                if ($null -ne $Expected) {
-                    $expectedArtifact = ConvertTo-HHForensicsAnchorArtifact -Anchor $Expected
-                }
-                Write-HHDockerVolumeAnchorPayload `
-                    -Path $ProviderPaths.ForensicsAnchor `
-                    -LockPath $ProviderPaths.ForensicsAnchorLock -Domain forensics `
-                    -DataRoot $BoundDataRoot -ExpectedPayload $expectedArtifact `
-                    -NewPayload $newArtifact -MacKey $key
-            }
-            finally {
-                [Array]::Clear($key, 0, $key.Length)
-                if ($null -ne $newArtifact) {
-                    [Array]::Clear($newArtifact, 0, $newArtifact.Length)
-                }
-                if ($null -ne $expectedArtifact) {
-                    [Array]::Clear($expectedArtifact, 0, $expectedArtifact.Length)
-                }
-            }
-        } $canonicalDataRoot $paths $ExpectedAnchor $NewAnchor $PersistenceContext
-    }.GetNewClosure()
-
     return [pscustomobject][ordered]@{
         ProviderId = $script:HHDockerVolumeProviderId
         ProviderVersion = $script:HHDockerVolumeProviderVersion
@@ -1009,9 +913,6 @@ function New-HHDockerVolumePersistenceProvider {
         CoreMasterKeyProvider = $coreKeyProvider
         CoreAnchorReader = $coreAnchorReader
         CoreAnchorWriter = $coreAnchorWriter
-        ForensicsKeyProvider = $forensicsKeyProvider
-        ForensicsAnchorReader = $forensicsAnchorReader
-        ForensicsAnchorWriter = $forensicsAnchorWriter
     }
 }
 

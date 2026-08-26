@@ -337,15 +337,6 @@ function Read-HHPersistenceAnchor {
             -DataRoot $PersistenceContext.DataRoot
         return & $provider.CoreAnchorReader $PersistenceContext $MasterKey
     }
-    if ($IsMacOS) {
-        $item = Read-HHMacOSPersistenceAnchorItem -DataRoot $PersistenceContext.DataRoot
-        if (-not $item.Found) {
-            return $null
-        }
-        return ConvertFrom-HHPersistenceAnchorArtifact `
-            -Artifact ([byte[]]$item.Artifact) `
-            -MasterKey $MasterKey
-    }
     return Read-HHFilePersistenceAnchor -Path $PersistenceContext.AnchorPath -MasterKey $MasterKey
 }
 
@@ -369,20 +360,6 @@ function Write-HHPersistenceAnchor {
             -DataRoot $PersistenceContext.DataRoot
         & $provider.CoreAnchorWriter $PersistenceContext $ExpectedArtifact `
             $newArtifact $MasterKey
-        return
-    }
-    if ($IsMacOS) {
-        if ($null -eq $ExpectedArtifact) {
-            New-HHMacOSPersistenceAnchorItem `
-                -DataRoot $PersistenceContext.DataRoot `
-                -Artifact $newArtifact
-        }
-        else {
-            Update-HHMacOSPersistenceAnchorItem `
-                -DataRoot $PersistenceContext.DataRoot `
-                -ExpectedArtifact $ExpectedArtifact `
-                -NewArtifact $newArtifact
-        }
         return
     }
     Write-HHFilePersistenceAnchor `

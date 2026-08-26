@@ -338,8 +338,12 @@ function Test-HHAuditFlagMapsEqual {
 
     if ($Left.Count -ne $Right.Count) { return $false }
     foreach ($key in $Left.Keys) {
-        if (-not $Right.Contains($key) -or
-            [uint32]$Left[$key] -ne [uint32]$Right[$key]) {
+        if (-not $Right.Contains($key)) { return $false }
+        $leftValue = [uint32]$Left[$key]
+        $rightValue = [uint32]$Right[$key]
+        $leftEffective = $leftValue -band ($script:HHAuditSuccess -bor $script:HHAuditFailure)
+        $rightEffective = $rightValue -band ($script:HHAuditSuccess -bor $script:HHAuditFailure)
+        if ($leftEffective -ne $rightEffective) {
             return $false
         }
     }

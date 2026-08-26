@@ -1,101 +1,17 @@
-# Tooling Matrix
+# Tooling matrix
 
-## Status
+| Layer | Tool | Container | Command | Artifact |
+| --- | --- | --- | --- | --- |
+| Cmdlet acceptance | Pester plus read-only SQLite assertions | production-derived verifier + SSH fixture | `./scripts/verify-cmdlets.sh` | `.artifacts/cmdlets/<sha>/cmdlets/receipt.json` |
+| Boundary guard | PowerShell AST inspection | test image | `scripts/static/Test-HHManagedHostBoundary.ps1` | terminal result |
+| Unit coverage | Pester/custom four-metric collector | test image | `scripts/lanes/unit.sh` | `.artifacts/release-proof/unit/` |
+| Critical integration | Pester + disposable SSH/SQLite | test image + SSH fixture | `scripts/lanes/integration.sh` | `.artifacts/release-proof/integration/` |
+| SQLite fault proof | Docker Compose fault workers | purpose-built containers | `scripts/lanes/sqlite-integration.sh` | integration logs/results |
+| Production build | Docker BuildKit | runtime image | `docker compose -f compose.runtime.yml build controller` | immutable image ID |
+| Secrets | gitleaks wrapper | security container | `scripts/security/scan-secrets.sh` | security receipt |
+| Dependencies/files/images | OSV/Trivy wrappers | security containers | `scripts/lanes/security.sh <images...>` | `.artifacts/security/` |
+| Exact-SHA state | Python immutable receipt state machine | host orchestration only | `scripts/release/verify-candidate.sh <sha>` | `.artifacts/release/<sha>/` |
 
-**ADOPTED DOCKER TOOLCHAIN; EXACT-CANDIDATE AND LIVE WINDOWS EXECUTION PENDING
-2026-08-26**
-
-All pre-migration foundation rows are active and container-proven. The confirmed
-SQLite amendment rows are implemented unless explicitly marked pending below.
-Direct PowerShell 7 and negative runtime paths remain
-canonical-container evidence; positive Windows PowerShell 5.1 and mixed-runtime
-evidence require a separate live Windows exact-candidate lane.
-
-| Tool | Purpose | Layer | Container/service | Exact local command | Version checked 2026-08-23 | Update policy | Status | Exception/equivalent |
-|---|---|---|---|---|---|---|---|---|
-| Production Docker runtime | Canonical execution of all eleven public cmdlets and private ECS Process Start pipeline | Runtime/E2E/release | Non-root controller plus networkless parser | `./scripts/runtime/verify.sh` | repo-owned, checked 2026-08-26 | Every release | focused contract green; exact-image execution pending | Six external labelled volumes; no Docker socket or host credential-store requirement |
-| Docker-volume persistence provider | Unattended core/Forensics keys and monotonic anchors | Persistence/runtime | Controller only | exercised by `./scripts/runtime/verify.sh` | repo-owned, checked 2026-08-26 | With persistence changes | focused unit/integration green | Docker administrator is trusted; coordinated whole-set rollback is an accepted residual |
-| PowerShell | Test/runtime shell | All PowerShell lanes | Checksum-built test image | `docker compose -f compose.test.yml run --rm test pwsh -NoProfile ...` | 7.6.5 | Monthly; full gate | active | Official archives verified by SHA-256 |
-| PowerShell compatibility floors | Minimum supported and SSH-security controller proof | Package/integration | Checksum-built 7.4.19 and 7.6.5 images plus floor units | `./scripts/qualification/Test-HHControllerMatrix.ps1 -PowerShellVersion 7.4.19`; canonical spaced-root SSH integration runs on 7.4.19 and 7.6.5 | 7.4.19, 7.5.10, 7.6.5, checked 2026-08-25 | Monthly; full gate | active | 7.5.10 floor is a deterministic version-contract case; older patch levels in all three servicing lines are rejected before SSH |
-| OpenSSH client | Native SSH transport and safe managed known-hosts expansion | Integration/native qualification | Controller host plus real SSH fixture | spaced-data-root SSH integration and exact Windows controller qualification | 8.4 minimum capability, checked 2026-08-25 | With controller/runtime changes | active | Functional environment-expansion preflight; no raw space-containing path in SSH options |
-| .NET SDK | Locked NuGet restore only | Build/dependencies | Digest-pinned build stage | `./scripts/dependencies/restore-sqlite.sh` | 10.0.400, checked 2026-08-24 | On dependency change; full gate | active | Build-time only; SDK is not shipped with the module |
-| Microsoft.Data.Sqlite.Core | Managed SQLite provider | Product persistence/build | Locked build-only SDK restore and packaged RID assets | `./scripts/dependencies/restore-sqlite.sh` | 10.0.11, checked 2026-08-24 | On dependency change; full gate | active | PowerShell calls provider directly; the durability helper is separate and first-party |
-| SQLitePCLRaw.bundle_e_sqlite3 | Managed/native provider bundle | Product persistence/build | Locked build-only SDK restore and packaged RID assets | `./scripts/dependencies/restore-sqlite.sh` | 3.0.5, checked 2026-08-24 | On dependency change; full gate | active | `Batteries_V2.Init()` once; native library adjacent |
-| SQLite | Embedded database engine package published by SourceGear | Product persistence/integration | Packaged per-RID native asset | `./scripts/dependencies/restore-sqlite.sh` | 3.53.4, checked 2026-08-24 | On dependency change; full gate | active | Exact NuGet package ID is `SQLite`; runtime version asserted in package integration |
-| SQLite schema/integrity runner | `0001_initial_sqlite`, PRAGMAs, schema/checksum and chain validation | Unit/integration | Test image plus real per-run database | `./scripts/lanes/sqlite-integration.sh` | repo-owned | With every schema change | active | Existing unmatched DB fails; no v1 restore/import |
-| SQLite fault/concurrency harness | WAL, operation/writer locks, busy/full/capacity, crash, anchor and artifact boundaries | Integration | Isolated Compose/fresh-process/bounded-volume harness | `./scripts/lanes/sqlite-integration.sh` | repo-owned | With persistence changes | active | Nine-scenario redacted receipt; no remote retry |
-| Persistence changed-scope coverage | 95% target for repo-owned persistence logic plus 90% repository hard gate | Unit coverage | Custom test image | `./scripts/lanes/unit.sh` | repo-owned | Every persistence slice | active | Focused receipts accompany the authoritative product gate |
-| Release-package scanner | Exact package inventory, SBOM, hashes, licences and vulnerabilities | Security/build | Immutable scanner images | `./scripts/security/scan-release-package.sh <package>` | repo-owned | Every candidate | active | Scans ignored `.artifacts` package explicitly |
-| macOS Keychain database-head proof | Optional native atomic update/anti-rollback compatibility qualification | Native compatibility | Host-orchestrated fresh workers on macOS | `./scripts/qualification/macos-anchor.sh <sha> <package>` | repo-owned | When the optional native provider changes | implemented | Not required for canonical Docker releases |
-| Windows controller qualification | Provider/RID/ACL/reparse, PS7/5.1/mixed, process audit, protected-key transition, password recovery, and exact cleanup | Native/live release | Exact Docker controller image to available Windows x64 target | `./scripts/qualification/windows-docker.sh <sha> <package> <host> <user> <fingerprint>` | repo-owned | Every exact release candidate | focused contract green; candidate execution pending | Same package and controller-image hashes as exact-SHA gate; endpoint password and key passphrase remain interactive and never enter arguments, environment, files, logs, or receipts |
-| Clean-checkout candidate runner | Full exact-SHA package/container proof | Release | Temporary clean worktree plus Compose | `./scripts/release/verify-candidate.sh <sha>` | repo-owned | Every candidate | implemented; candidate execution pending | Emits `.artifacts/release/<sha>/`; any edit invalidates receipt |
-| Pester | Unit, integration, JUnit, command hits | Unit/integration | Custom test image | `scripts/lanes/unit.sh` | 6.1.0 | Monthly; full gate | active | AST/runtime gate supplies independent metrics |
-| PSScriptAnalyzer | PowerShell static analysis | Static | Custom test image | `scripts/lanes/static.sh` | 1.25.0 | Monthly; full gate | active | |
-| Coverage collector/gate | Statements/branches/functions/lines | Unit coverage | Custom test image | `scripts/lanes/unit.sh` | repo-owned | Change with golden fixtures | active | Runtime branch events plus Pester/AST metrics |
-| editorconfig-checker | EditorConfig conformance | Static | Patched-source build in test image | `scripts/lanes/static.sh` | 3.11.1, Go 1.26.6, x/mod 0.40.0 | Monthly; full gate | active | Rebuilt because upstream binary image had fixed high/critical findings |
-| ShellCheck | Shell wrapper lint | Static | Pinned ShellCheck image | `scripts/lanes/static.sh` | 0.11.0 | Monthly; full gate | active | Runs on every checked-in shell file |
-| markdownlint-cli2 | Markdown lint | Static | Pinned test image | `scripts/lanes/static.sh` | 0.23.2 | Monthly; full gate | active | |
-| yamllint | Compose/YAML lint | Static | Pinned test image | `scripts/lanes/static.sh` | 1.38.0 | Monthly; full gate | active | |
-| hadolint | Dockerfile lint | Static | `hadolint/hadolint` | `scripts/lanes/static.sh` | 2.15.1 | Monthly; full gate | active | |
-| actionlint | GitHub workflow lint | Static | none | none | not applicable | Revisit if workflows appear | not-applicable | GitHub Actions are prohibited for test reruns and no workflows are planned |
-| gitleaks | Repo-only secret scan | Security | Immutable scanner image | `./scripts/security/scan-secrets.sh` | 8.30.1 | Monthly; full gate | active | Wrapper resolves and read-only mounts only repo root |
-| OSV-Scanner | Dependency/SBOM vulnerability scan | Security | Immutable scanner image | `./scripts/security/scan-dependencies.sh` | 2.5.1 | Monthly; full gate | active | PowerShell module pin audit supplements ecosystem gaps |
-| Trivy filesystem | Vulnerability/configuration scan | Security | `ghcr.io/aquasecurity/trivy` | `./scripts/security/scan-filesystem.sh` | 0.74.0 | Monthly; full gate | active | Post-incident immutable digest |
-| Trivy image | Built-image scan | Security/build | `ghcr.io/aquasecurity/trivy` | `./scripts/security/scan-images.sh` | 0.74.0 | Monthly; full gate | active | Scans test, SSH fixture, production controller, and parser images |
-| PowerShell module pin audit | Exact module inventory and drift | Security | Custom test image | `pwsh -File scripts/security/Test-ModulePins.ps1` | repo-owned | On dependency change | active | No stack-native PowerShell audit provides complete advisory coverage |
-| Docker Compose | Local service orchestration | Integration/E2E | Host orchestrates; work runs in services | `./scripts/compose-run.sh ...` | Compose v2 contract | Host maintenance; design-compatible | active | Host orchestration only, never canonical test execution |
-| Test-ModuleManifest | Manifest/build validation | Build | Custom test image | `scripts/lanes/build.sh` | PowerShell 7.6.5 | With PowerShell pin | active | Verifies eleven exports, RID assets, versions, schema CRUD, and isolated package import |
-| Black-box pwsh journeys | All public CLI actions | E2E equivalent | Custom test client plus SSH service | `HH_TEST_MODULE_PATH=<package> scripts/lanes/e2e.sh` | PowerShell 7.6.5 | With feature changes | active | 18 package-backed SQLite journeys; Playwright not applicable |
-
-## Authoritative commands
-
-- Full local proof: `./scripts/verify-local.sh`
-- Production runtime journey: `./scripts/runtime/verify.sh`
-- Fast pre-commit: `./scripts/precommit.sh`
-- Slim gate-owned pre-push: `./scripts/prepush.sh`
-- Hook install: `./scripts/hooks-install.sh`
-- Hook verification: `./scripts/hooks-verify.sh`
-- Locked SQLite restore: `./scripts/dependencies/restore-sqlite.sh`
-- Product four-metric proof: `./scripts/lanes/unit.sh`
-- Persistence fault/concurrency proof: `./scripts/lanes/sqlite-integration.sh`
-- Exact package scan: `./scripts/security/scan-release-package.sh <package>`
-- Exact clean-checkout candidate: `./scripts/release/verify-candidate.sh <sha>`
-
-All commands in this section are implemented. Current focused Docker runtime
-evidence includes 9/9 contract and 7/7 lifecycle cases; current product evidence
-includes 23/23 package-backed CLI journeys, nine SQLite fault scenarios, and all
-four coverage metrics above 90%. Exact-commit production-image execution and
-positive live Windows 5.1 remain release qualifications, not focused-test claims.
-
-## Runtime qualification routing
-
-- Canonical container lanes prove schema migration, direct PowerShell 7,
-  negative `RuntimeUnavailable`, deferred WinRM, compatibility seams, audit
-  attribution, and deterministic mixed-fan-out behavior.
-- A separate live Windows lane proves positive Desktop 5.1 identity, ordered
-  compatibility streams, mixed PowerShell 7/5.1 execution, and the authorized
-  password-to-Ed25519 transition against the exact candidate archive and hash.
-- Live qualification is never a substitute for the canonical container gate,
-  and mock success never becomes a WinRM support claim.
-
-## Version sources checked 2026-08-23; persistence/runtime sources checked 2026-08-24
-
-- [PowerShell releases](https://github.com/PowerShell/PowerShell/releases/latest)
-- [.NET 10 downloads](https://dotnet.microsoft.com/en-us/download/dotnet/10.0)
-- [Pester on PowerShell Gallery](https://www.powershellgallery.com/packages/Pester)
-- [PSScriptAnalyzer on PowerShell Gallery](https://www.powershellgallery.com/packages/PSScriptAnalyzer)
-- [editorconfig-checker releases](https://github.com/editorconfig-checker/editorconfig-checker/releases/latest)
-- [ShellCheck releases](https://github.com/koalaman/shellcheck/releases)
-- [markdownlint-cli2 on npm](https://www.npmjs.com/package/markdownlint-cli2)
-- [yamllint on PyPI](https://pypi.org/project/yamllint/)
-- [hadolint releases](https://github.com/hadolint/hadolint/releases)
-- [gitleaks releases](https://github.com/gitleaks/gitleaks/releases)
-- [OSV-Scanner releases](https://github.com/google/osv-scanner/releases/latest)
-- [Trivy container versions](https://github.com/aquasecurity/trivy/pkgs/container/trivy/versions)
-- [Trivy 2026 supply-chain advisory](https://github.com/aquasecurity/trivy/security/advisories/GHSA-69fq-xp46-6x23)
-- [Microsoft.Data.Sqlite.Core 10.0.11](https://www.nuget.org/packages/Microsoft.Data.Sqlite.Core/10.0.11)
-- [SQLitePCLRaw.bundle_e_sqlite3 3.0.5](https://www.nuget.org/packages/SQLitePCLRaw.bundle_e_sqlite3/3.0.5)
-- [SQLite native package 3.53.4](https://www.nuget.org/packages/SQLite/3.53.4)
-
-Because Trivy had a 2026 registry compromise, its tool image must be pinned to a
-verified immutable post-incident digest. A mutable tag is expressly insufficient.
+Host orchestration may invoke Docker and aggregate receipts. Canonical validation
+runs inside containers. The cmdlet lane has one timeout owner, no worker fanout,
+no retries, and no coverage or scan work.

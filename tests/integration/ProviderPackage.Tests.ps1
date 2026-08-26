@@ -13,12 +13,10 @@ Describe 'Packaged SQLite provider' -Tag Integration {
         }
     }
 
-    It 'contains exactly four managed and one native asset per supported RID' {
+    It 'contains exactly four managed and one native asset per Linux container RID' {
         $nativeByRid = [ordered]@{
             'linux-arm64' = 'libe_sqlite3.so'
             'linux-x64'   = 'libe_sqlite3.so'
-            'osx-arm64'   = 'libe_sqlite3.dylib'
-            'win-x64'     = 'e_sqlite3.dll'
         }
         $managed = @(
             'Microsoft.Data.Sqlite.dll'
@@ -62,23 +60,6 @@ Describe 'Packaged SQLite provider' -Tag Integration {
         $receipt.durabilityHelper.sha256 | Should -BeExactly (
             (Get-FileHash -LiteralPath $helperPath -Algorithm SHA256).Hash.ToLowerInvariant()
         )
-    }
-
-    It 'contains the exact pinned evtx_dump parser inventory and licenses' {
-        $metadataPath = Join-Path `
-            $script:packageRoot 'dependencies/evtx_dump/evtx-dump-assets.json'
-        $metadata = Get-Content -LiteralPath $metadataPath -Raw |
-            ConvertFrom-Json -Depth 10
-        foreach ($rid in @('linux-arm64', 'linux-x64', 'osx-arm64', 'osx-x64')) {
-            $parserPath = Join-Path $script:packageRoot "tools/evtx_dump/$rid/evtx_dump"
-            $parserPath | Should -Exist
-            (Get-FileHash -LiteralPath $parserPath -Algorithm SHA256).Hash.ToLowerInvariant() |
-                Should -BeExactly ([string]$metadata.assets.$rid.sha256)
-        }
-        Join-Path $script:packageRoot 'dependencies/evtx_dump/LICENSE-APACHE' |
-            Should -Exist
-        Join-Path $script:packageRoot 'dependencies/evtx_dump/LICENSE-MIT' |
-            Should -Exist
     }
 
     It 'keeps import and help provider-lazy' {

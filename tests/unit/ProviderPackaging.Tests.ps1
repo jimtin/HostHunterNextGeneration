@@ -10,17 +10,15 @@ Describe 'SQLite provider packaging contract' -Tag Unit {
             $script:repoRoot 'eng/durability/HostHunter.Persistence.Durability.csproj'
         $script:durabilityLockPath = Join-Path `
             $script:repoRoot 'eng/durability/packages.lock.json'
-        $script:evtxMetadataPath = Join-Path `
-            $script:repoRoot 'eng/forensics/evtx-dump-assets.json'
         $script:moduleManifestPath = Join-Path `
             $script:repoRoot 'src/HostHunterNextGeneration/HostHunterNextGeneration.psd1'
     }
 
-    It 'pins the net8 provider graph and four supported RIDs' {
+    It 'pins the net8 provider graph and two Linux container RIDs' {
         [xml]$project = Get-Content -LiteralPath $script:projectPath -Raw
         $project.Project.PropertyGroup.TargetFramework | Should -BeExactly 'net8.0'
         @($project.Project.PropertyGroup.RuntimeIdentifiers -split ';' | Sort-Object) |
-            Should -Be @('linux-arm64', 'linux-x64', 'osx-arm64', 'win-x64')
+            Should -Be @('linux-arm64', 'linux-x64')
 
         $directPackages = @{}
         foreach ($reference in $project.Project.ItemGroup.PackageReference) {
@@ -53,8 +51,6 @@ Describe 'SQLite provider packaging contract' -Tag Unit {
             'net8.0'
             'net8.0/linux-arm64'
             'net8.0/linux-x64'
-            'net8.0/osx-arm64'
-            'net8.0/win-x64'
         )
     }
 
@@ -87,27 +83,6 @@ Describe 'SQLite provider packaging contract' -Tag Unit {
             ConvertFrom-Json -Depth 10
         @($lock.dependencies.PSObject.Properties.Name) | Should -Be @('net8.0')
         @($lock.dependencies.'net8.0'.PSObject.Properties).Count | Should -Be 0
-    }
-
-    It 'pins the exact evtx_dump 0.12.2 assets and distributable licenses' {
-        $metadata = Get-Content -LiteralPath $script:evtxMetadataPath -Raw |
-            ConvertFrom-Json -Depth 10
-        $metadata.name | Should -BeExactly 'evtx_dump'
-        $metadata.version | Should -BeExactly '0.12.2'
-        $metadata.licenseExpression | Should -BeExactly 'MIT OR Apache-2.0'
-        @($metadata.assets.PSObject.Properties.Name | Sort-Object) | Should -Be @(
-            'linux-arm64'
-            'linux-x64'
-            'osx-arm64'
-            'osx-x64'
-        )
-        foreach ($asset in $metadata.assets.PSObject.Properties.Value) {
-            $asset.sha256 | Should -Match '^[a-f0-9]{64}$'
-        }
-        Join-Path $script:repoRoot 'eng/forensics/licenses/LICENSE-APACHE' |
-            Should -Exist
-        Join-Path $script:repoRoot 'eng/forensics/licenses/LICENSE-MIT' |
-            Should -Exist
     }
 
     It 'declares the exact 0.3.0-preview1 package identity' {

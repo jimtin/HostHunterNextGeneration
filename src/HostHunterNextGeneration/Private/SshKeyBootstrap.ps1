@@ -163,6 +163,8 @@ function New-HHSshKeyBootstrapRemoteOperationsManifest {
         [object] $KeyMaterial
     )
 
+    $null = $Plan
+
     $identityScriptText = (Get-HHSshIdentityProbeScriptBlock).ToString()
     $operations = [Collections.Generic.List[object]]::new()
     $operations.Add((Get-HHRemoteOperationManifestEntry `
@@ -170,13 +172,6 @@ function New-HHSshKeyBootstrapRemoteOperationsManifest {
                 -PowerShellRuntime PowerShell7 `
                 -ScriptText $identityScriptText `
                 -ArgumentList @()))
-    if ($Plan.Target.PowerShellRuntime -ceq 'WindowsPowerShell51') {
-        $operations.Add((Get-HHRemoteOperationManifestEntry `
-                    -Phase RuntimeIdentity `
-                    -PowerShellRuntime WindowsPowerShell51 `
-                    -ScriptText $identityScriptText `
-                    -ArgumentList @()))
-    }
     $operations.Add((Get-HHRemoteOperationManifestEntry `
                 -Phase BootstrapInstall `
                 -PowerShellRuntime PowerShell7 `
@@ -187,13 +182,6 @@ function New-HHSshKeyBootstrapRemoteOperationsManifest {
                 -PowerShellRuntime PowerShell7 `
                 -ScriptText $identityScriptText `
                 -ArgumentList @()))
-    if ($Plan.Target.PowerShellRuntime -ceq 'WindowsPowerShell51') {
-        $operations.Add((Get-HHRemoteOperationManifestEntry `
-                    -Phase BootstrapKeyOnlyRuntimeIdentity `
-                    -PowerShellRuntime WindowsPowerShell51 `
-                    -ScriptText $identityScriptText `
-                    -ArgumentList @()))
-    }
     $operations.Add((Get-HHRemoteOperationManifestEntry `
                 -Phase BootstrapReconcile `
                 -PowerShellRuntime PowerShell7 `
@@ -880,12 +868,14 @@ function Get-HHSshBootstrapObservedMismatchContext {
         [object] $ErrorObject,
 
         [Parameter(Mandatory)]
-        [ValidateSet('PowerShell7', 'WindowsPowerShell51')]
+        [ValidateSet('PowerShell7')]
         [string] $RequestedPowerShellRuntime,
 
         [Parameter(Mandatory)]
         [string] $ExpectedHostKeyFingerprint
     )
+
+    $null = $RequestedPowerShellRuntime
 
     if ((Get-HHSshFailureKind -ErrorObject $ErrorObject) -cne 'RuntimeMismatch') {
         return $null
@@ -922,8 +912,8 @@ function Get-HHSshBootstrapObservedMismatchContext {
 
     if ($null -eq $identity -or
         [string]::IsNullOrWhiteSpace($remotePowerShellVersion) -or
-        $remotePSEdition -cnotin @('Core', 'Desktop') -or
-        $executionMode -cnotin @('Direct', 'WindowsPowerShellCompatibility') -or
+        $remotePSEdition -cne 'Core' -or
+        $executionMode -cne 'Direct' -or
         [string]::IsNullOrWhiteSpace($validatedAtUtc) -or
         $hostKeyFingerprint -cne $ExpectedHostKeyFingerprint -or
         $hostKeyFingerprint -cnotmatch '^SHA256:[A-Za-z0-9+/]{43}$') {
@@ -960,22 +950,13 @@ function Get-HHSshBootstrapObservedMismatchContext {
     }
     $processLeaf = @($identityValues.ProcessPath -split '[\\/]')[-1]
     $processName = [IO.Path]::GetFileNameWithoutExtension($processLeaf)
-    $expectedProcessName = if ($remotePSEdition -ceq 'Core') { 'pwsh' } else { 'powershell' }
-    if ($processName -cne $expectedProcessName) {
+    if ($processName -cne 'pwsh') {
         return $null
     }
 
-    $isRequestedRuntime = if ($RequestedPowerShellRuntime -ceq 'PowerShell7') {
-        $remotePSEdition -ceq 'Core' -and
-            $version.Major -ge 7 -and
-            $executionMode -ceq 'Direct'
-    }
-    else {
-        $remotePSEdition -ceq 'Desktop' -and
-            $version.Major -eq 5 -and
-            $version.Minor -eq 1 -and
-            $executionMode -ceq 'WindowsPowerShellCompatibility'
-    }
+    $isRequestedRuntime = $remotePSEdition -ceq 'Core' -and
+        $version.Major -ge 7 -and
+        $executionMode -ceq 'Direct'
     if ($isRequestedRuntime) {
         return $null
     }
@@ -1050,8 +1031,6 @@ function Invoke-HHSshKeyBootstrap {
         [scriptblock] $SessionFactory,
 
         [scriptblock] $RemoteInvoker,
-
-        [scriptblock] $BridgeInvoker,
 
         [scriptblock] $SessionRemover,
 
@@ -1187,13 +1166,12 @@ function Invoke-HHSshKeyBootstrap {
         [long] $remainingBytes = $MaxOutputBytes - $outputBytes
         try {
             if ($null -ne $OperationArmer) {
-                & $OperationArmer @('OuterIdentity', 'RuntimeIdentity')
+                & $OperationArmer @('OuterIdentity')
             }
             $passwordContext = Open-HHSshValidatedSession `
                 -Plan $plan.PasswordTransportPlan `
                 -SessionFactory $SessionFactory `
                 -RemoteInvoker $RemoteInvoker `
-                -BridgeInvoker $BridgeInvoker `
                 -SessionRemover $SessionRemover `
                 -Clock $Clock `
                 -MaxOutputBytes $remainingBytes
@@ -1247,7 +1225,6 @@ function Invoke-HHSshKeyBootstrap {
                     -ArgumentList @($keyMaterial.ExactLine, $keyMaterial.Marker) `
                     -Phase BootstrapInstall `
                     -MaxOutputBytes $remainingBytes `
-                    -PowerShellRuntime PowerShell7 `
                     -RemoteInvoker $RemoteInvoker `
                     -Clock $Clock)
             $addedBytes = Add-HHSshBootstrapEvidence `
@@ -1314,7 +1291,6 @@ function Invoke-HHSshKeyBootstrap {
                             -ArgumentList @($keyMaterial.ExactLine) `
                             -Phase BootstrapReconcile `
                             -MaxOutputBytes $remainingBytes `
-                            -PowerShellRuntime PowerShell7 `
                             -RemoteInvoker $RemoteInvoker `
                             -Clock $Clock)
                     $addedBytes = Add-HHSshBootstrapEvidence `
@@ -1391,16 +1367,12 @@ function Invoke-HHSshKeyBootstrap {
         }
         try {
             if ($null -ne $OperationArmer) {
-                & $OperationArmer @(
-                    'BootstrapKeyOnlyOuterIdentity',
-                    'BootstrapKeyOnlyRuntimeIdentity'
-                )
+                & $OperationArmer @('BootstrapKeyOnlyOuterIdentity')
             }
             $publicKeyContext = Open-HHSshValidatedSession `
                 -Plan $publicKeyPlan `
                 -SessionFactory $SessionFactory `
                 -RemoteInvoker $RemoteInvoker `
-                -BridgeInvoker $BridgeInvoker `
                 -SessionRemover $SessionRemover `
                 -Clock $Clock `
                 -MaxOutputBytes $remainingBytes
@@ -1567,7 +1539,6 @@ function Invoke-HHSshKeyBootstrap {
                             -ArgumentList @($keyMaterial.ExactLine) `
                             -Phase BootstrapRollback `
                             -MaxOutputBytes $remainingBytes `
-                            -PowerShellRuntime PowerShell7 `
                             -RemoteInvoker $RemoteInvoker `
                             -Clock $Clock)
                     $addedBytes = Add-HHSshBootstrapEvidence `

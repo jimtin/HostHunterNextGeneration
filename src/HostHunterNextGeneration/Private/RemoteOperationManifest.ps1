@@ -7,19 +7,17 @@ function Get-HHRemoteOperationManifestEntry {
         [ValidateSet(
             'HostTrustDiscovery',
             'OuterIdentity',
-            'RuntimeIdentity',
             'Command',
             'BootstrapInstall',
             'BootstrapReconcile',
             'BootstrapKeyOnlyOuterIdentity',
-            'BootstrapKeyOnlyRuntimeIdentity',
             'BootstrapRollback',
             'ProcessAuditPolicyMutation'
         )]
         [string] $Phase,
 
         [Parameter(Mandatory)]
-        [ValidateSet('PowerShell7', 'WindowsPowerShell51')]
+        [ValidateSet('PowerShell7')]
         [string] $PowerShellRuntime,
 
         [Parameter(Mandatory)]
@@ -59,14 +57,12 @@ function Get-HHSshIdentityRemoteOperationManifest {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [ValidateSet('PowerShell7', 'WindowsPowerShell51')]
+        [ValidateSet('PowerShell7')]
         [string] $PowerShellRuntime,
 
         [ValidateSet(
             'OuterIdentity',
-            'RuntimeIdentity',
-            'BootstrapKeyOnlyOuterIdentity',
-            'BootstrapKeyOnlyRuntimeIdentity'
+            'BootstrapKeyOnlyOuterIdentity'
         )]
         [string] $Phase = 'OuterIdentity'
     )
@@ -93,7 +89,7 @@ function Get-HHTargetValidationRemoteOperationManifest {
     $runtimeProperty = $Target.PSObject.Properties['PowerShellRuntime']
     if ($null -eq $runtimeProperty -or
         [string]::IsNullOrWhiteSpace([string] $runtimeProperty.Value) -or
-        [string] $runtimeProperty.Value -cnotin @('PowerShell7', 'WindowsPowerShell51')) {
+        [string] $runtimeProperty.Value -cne 'PowerShell7') {
         throw [ArgumentException]::new(
             'A remote-operation manifest requires an explicit supported PowerShell runtime.'
         )
@@ -114,11 +110,6 @@ function Get-HHTargetValidationRemoteOperationManifest {
     $operations.Add((Get-HHSshIdentityRemoteOperationManifest `
                 -PowerShellRuntime PowerShell7 `
                 -Phase OuterIdentity))
-    if ($requestedRuntime -ceq 'WindowsPowerShell51') {
-        $operations.Add((Get-HHSshIdentityRemoteOperationManifest `
-                    -PowerShellRuntime WindowsPowerShell51 `
-                    -Phase RuntimeIdentity))
-    }
     return @($operations)
 }
 

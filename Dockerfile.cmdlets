@@ -1,0 +1,16 @@
+# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+
+ARG HH_CONTROLLER_IMAGE
+FROM ${HH_CONTROLLER_IMAGE}
+
+USER 0:0
+
+COPY --chmod=0555 tests/e2e/TargetAndCommandJourneys.Tests.ps1 \
+    /opt/hosthunter-cmdlet-tests/TargetAndCommandJourneys.Tests.ps1
+COPY --chmod=0555 tests/fixtures/ssh/fixture-askpass.sh \
+    /opt/hosthunter-cmdlet-tests/fixture-askpass.sh
+
+USER 10001:10001
+
+ENTRYPOINT ["pwsh", "-NoLogo", "-NoProfile", "-NonInteractive", "-File"]
+CMD ["/opt/hosthunter-cmdlet-tests/TargetAndCommandJourneys.Tests.ps1"]

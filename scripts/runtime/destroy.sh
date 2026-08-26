@@ -22,7 +22,7 @@ usage() {
 
 runtime_require_docker
 runtime_require_complete_volume_set
-runtime_compose --profile acceptance down --remove-orphans
+runtime_compose down --remove-orphans
 
 # Validate ownership and attachment for every target before deletion begins.
 runtime_validate_all_volumes

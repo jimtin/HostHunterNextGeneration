@@ -43,10 +43,8 @@ function Resolve-HHSqliteControllerRid {
     }
 
     $rid = switch -CaseSensitive ("$os|$architectureName") {
-        'macOS|Arm64' { 'osx-arm64'; break }
         'Linux|Arm64' { 'linux-arm64'; break }
         'Linux|X64' { 'linux-x64'; break }
-        'Windows|X64' { 'win-x64'; break }
         default { $null }
     }
     if ($null -eq $rid) {
@@ -100,15 +98,9 @@ function Get-HHSqliteProviderAssetName {
     [OutputType([string[]])]
     param([Parameter(Mandatory)][string]$ControllerRid)
 
-    $nativeName = if ($ControllerRid -ceq 'win-x64') {
-        'e_sqlite3.dll'
-    }
-    elseif ($ControllerRid -ceq 'osx-arm64') {
-        'libe_sqlite3.dylib'
-    }
-    else {
-        'libe_sqlite3.so'
-    }
+    $null = $ControllerRid
+
+    $nativeName = 'libe_sqlite3.so'
     @(
         'SQLitePCLRaw.core.dll'
         'SQLitePCLRaw.provider.e_sqlite3.dll'

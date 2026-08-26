@@ -27,20 +27,24 @@ function ConvertTo-HHProposedTarget {
             throw "Proposed targets cannot contain '$forbiddenProperty'."
         }
     }
-    $required = @('Name', 'Transport', 'HostName', 'Port', 'UserName', 'Authentication')
+    $required = @('Name', 'HostName', 'Port', 'UserName', 'Authentication')
     foreach ($propertyName in $required) {
         if ($null -eq $InputObject.PSObject.Properties[$propertyName]) {
             throw "Proposed target is missing '$propertyName'."
         }
     }
-    if ([string] $InputObject.Transport -ieq 'WinRM') {
-        throw 'WinRM target creation is deferred until controlled Windows lab qualification is complete.'
+    if ($null -ne $InputObject.PSObject.Properties['Transport'] -and
+        [string]$InputObject.Transport -ine 'SSH') {
+        throw 'Only SSH target creation is supported.'
     }
     $powerShellRuntime = if ($null -eq $InputObject.PSObject.Properties['PowerShellRuntime']) {
         'PowerShell7'
     }
     else {
         [string] $InputObject.PowerShellRuntime
+    }
+    if ($powerShellRuntime -ine 'PowerShell7') {
+        throw 'Only PowerShell7 target creation is supported.'
     }
     $fingerprint = if ($null -eq $InputObject.PSObject.Properties['HostKeyFingerprint']) {
         $null
@@ -56,7 +60,7 @@ function ConvertTo-HHProposedTarget {
     }
     New-HHTargetRecord `
         -Name ([string]$InputObject.Name) `
-        -Transport ([string]$InputObject.Transport) `
+        -Transport SSH `
         -HostName ([string]$InputObject.HostName) `
         -Port ([int]$InputObject.Port) `
         -UserName ([string]$InputObject.UserName) `
@@ -66,9 +70,7 @@ function ConvertTo-HHProposedTarget {
         -KeyPath $keyPath `
         -IsActive $true `
         -LastValidatedAtUtc ([DateTimeOffset]::UtcNow) `
-        -LastValidatedPowerShellVersion $(
-            if ($powerShellRuntime -ieq 'WindowsPowerShell51') { '5.1' } else { '7.0.0' }
-        )
+        -LastValidatedPowerShellVersion '7.0.0'
 }
 
 function Confirm-HHObservedRuntimeField {

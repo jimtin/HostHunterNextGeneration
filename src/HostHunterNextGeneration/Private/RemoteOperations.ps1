@@ -7,9 +7,7 @@ function Invoke-HHTargetProbe {
         [Parameter(Mandatory)]$RuntimeContext,
         [scriptblock]$SshSessionFactory,
         [scriptblock]$SshRemoteInvoker,
-        [scriptblock]$SshBridgeInvoker,
-        [scriptblock]$SshSessionRemover,
-        [bool]$IsWindowsController = $IsWindows
+        [scriptblock]$SshSessionRemover
     )
 
     switch ([string]$Target.Transport) {
@@ -19,13 +17,7 @@ function Invoke-HHTargetProbe {
                 -KnownHostsPath $RuntimeContext.KnownHostsPath `
                 -SessionFactory $SshSessionFactory `
                 -RemoteInvoker $SshRemoteInvoker `
-                -BridgeInvoker $SshBridgeInvoker `
                 -SessionRemover $SshSessionRemover
-        }
-        'WinRM' {
-            return Test-HHWinRmPowerShellEndpoint `
-                -Target $Target `
-                -IsWindowsController $IsWindowsController
         }
         default {
             throw "Unsupported target transport '$($Target.Transport)'."

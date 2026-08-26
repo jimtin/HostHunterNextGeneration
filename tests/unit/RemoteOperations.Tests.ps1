@@ -7,7 +7,6 @@ BeforeAll {
     }
     . (Join-Path $sourceRoot 'Private/TargetModel.ps1')
     . (Join-Path $sourceRoot 'Private/SshTransport.ps1')
-    . (Join-Path $sourceRoot 'Private/WinRmTransport.ps1')
     . (Join-Path $sourceRoot 'Private/RemoteOperations.ps1')
 }
 
@@ -44,68 +43,6 @@ Describe 'remote operation dispatch' -Tag Unit {
             } `
             -SshSessionRemover { param($session) $null = $session }
         $result.Succeeded | Should -BeTrue
-    }
-
-    It 'dispatches a Windows PowerShell 5.1 probe through the explicit bridge seam' {
-        $target = New-HHTargetRecord -Name compat -Transport SSH `
-            -HostName example.test -Port 22 -UserName operator -Authentication Password `
-            -PowerShellRuntime WindowsPowerShell51 `
-            -HostKeyFingerprint $script:fingerprint -KeyPath $null -IsActive $true `
-            -LastValidatedAtUtc ([DateTimeOffset]::UtcNow) `
-            -LastValidatedPowerShellVersion '5.1.26100.1'
-        $result = Invoke-HHTargetProbe -Target $target -RuntimeContext $script:runtime `
-            -SshSessionFactory { [pscustomobject]@{ InstanceId = [Guid]::NewGuid() } } `
-            -SshRemoteInvoker {
-                [pscustomobject]@{
-                    Marker = 'HostHunter.PowerShellIdentity.v1'
-                    PSEdition = 'Core'
-                    PowerShellVersion = '7.6.5'
-                    ProcessPath = '/usr/bin/pwsh'
-                    UserName = 'operator'
-                    MachineName = 'fixture'
-                }
-            } `
-            -SshBridgeInvoker {
-                [pscustomobject]@{
-                    Marker = 'HostHunter.StreamEnvelope.v1'
-                    Kind = 'Stream'
-                    Sequence = 0
-                    Stream = 'Output'
-                    TypeName = 'System.Management.Automation.PSCustomObject'
-                    IsTerminating = $false
-                    Value = [pscustomobject]@{
-                        Marker = 'HostHunter.PowerShellIdentity.v1'
-                        PSEdition = 'Desktop'
-                        PowerShellVersion = '5.1.26100.1'
-                        ProcessPath = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe'
-                        UserName = 'operator'
-                        MachineName = 'fixture'
-                    }
-                }
-                [pscustomobject]@{
-                    Marker = 'HostHunter.StreamEnvelope.v1'
-                    Kind = 'Completion'
-                    Sequence = 1
-                    Terminated = $false
-                    DispatchState = 'Completed'
-                    OutcomeStatus = 'Succeeded'
-                    FailureKind = $null
-                }
-            } `
-            -SshSessionRemover {}
-
-        $result.Succeeded | Should -BeTrue
-        $result.RemotePSEdition | Should -BeExactly 'Desktop'
-        $result.RemotePowerShellVersion | Should -BeExactly '5.1.26100.1'
-        $result.ExecutionMode | Should -BeExactly 'WindowsPowerShellCompatibility'
-    }
-
-    It 'rejects WinRM even on a Windows controller while qualification is deferred' {
-        $winTarget = [pscustomobject]@{ Transport = 'WinRM'; Name = 'win' }
-        {
-            Invoke-HHTargetProbe -Target $winTarget -RuntimeContext $script:runtime `
-                -IsWindowsController $true
-        } | Should -Throw '*qualification is blocked*'
     }
 
     It 'rejects unsupported transports and failed validation results' {

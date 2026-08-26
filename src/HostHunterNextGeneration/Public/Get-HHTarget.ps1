@@ -7,7 +7,7 @@ function Get-HHTarget {
     param([string[]]$Name)
 
     $runtime = Get-HHRuntimeContext
-    if (-not [IO.Directory]::Exists($runtime.DataRoot)) { return }
+    if (-not [IO.File]::Exists($runtime.DatabasePath)) { return }
     try {
         $context = Open-HHAuthenticatedPersistence -PersistenceContext $runtime
         try {

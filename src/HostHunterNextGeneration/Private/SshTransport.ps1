@@ -110,7 +110,7 @@ function Get-HHSshRequestedPowerShellRuntime {
         )
     }
     $runtime = [string] $runtimeProperty.Value
-    if ($runtime -cnotin @('PowerShell7', 'WindowsPowerShell51')) {
+    if ($runtime -cne 'PowerShell7') {
         throw [ArgumentException]::new("Unsupported PowerShell runtime '$runtime'.")
     }
     return $runtime
@@ -665,450 +665,10 @@ function Get-HHSshDirectEnvelopeScriptBlock {
     }
 }
 
-function Get-HHWindowsPowerShellCompatibilityEnvelopeScriptBlock {
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
-        'PSUseDeclaredVarsMoreThanAssignments',
-        'dispatchState',
-        Justification = 'The remote wrapper updates this value in a streaming closure and emits it afterward.'
-    )]
+function Get-HHSshRemoteEnvelopeScriptBlock {
     [CmdletBinding()]
     param()
 
-    return {
-        param(
-            [Parameter(Mandatory)]
-            [string] $CommandText,
-
-            [Parameter(Mandatory)]
-            [string] $SerializedCommandArguments,
-
-            [bool] $IsWindowsTarget = $IsWindows,
-
-            [scriptblock] $CompatibilitySessionFactory,
-
-            [scriptblock] $CompatibilityInvoker,
-
-            [scriptblock] $CompatibilitySessionRemover,
-
-            [ValidateRange(1, 60000)]
-            [int] $CompatibilityCleanupTimeoutMilliseconds = 5000
-        )
-
-        $compatibilitySession = $null
-        $completionEnvelope = $null
-        $failureKind = $null
-        $failureMessage = $null
-        $dispatchState = 'NotDispatched'
-        $outcomeStatus = 'Failed'
-        $nextSequence = 0
-        $observedIdentity = $null
-
-        if ($PSVersionTable.PSEdition -cne 'Core' -or $PSVersionTable.PSVersion.Major -lt 7) {
-            $failureKind = 'RuntimeMismatch'
-            $failureMessage = 'The outer SSH endpoint is not PowerShell 7 Core.'
-        }
-        elseif (-not $IsWindowsTarget) {
-            $failureKind = 'RuntimeUnavailable'
-            $failureMessage = 'Windows PowerShell compatibility is unavailable on this target platform.'
-        }
-
-        try {
-            if ($null -eq $failureKind) {
-            try {
-                $compatibilitySession = if ($null -ne $CompatibilitySessionFactory) {
-                    & $CompatibilitySessionFactory *>&1
-                }
-                else {
-                    New-PSSession `
-                        -UseWindowsPowerShell `
-                        -ErrorAction Stop `
-                        3>$null `
-                        4>$null `
-                        5>$null `
-                        6>$null
-                }
-                if ($null -eq $compatibilitySession) {
-                    throw 'The compatibility session factory returned no session.'
-                }
-                $identityProbe = {
-                    [pscustomobject][ordered]@{
-                        Marker = 'HostHunter.PowerShellIdentity.v1'
-                        PSEdition = $PSVersionTable.PSEdition
-                        PowerShellVersion = $PSVersionTable.PSVersion.ToString()
-                        # Process.MainModule and Get-Process.Path can serialize as empty
-                        # through the nested SSH -> PS7 -> Windows PowerShell remoting path.
-                        # Argument zero is the actual host executable and survives that
-                        # compatibility boundary on Windows PowerShell 5.1.
-                        ProcessPath = [string] [Environment]::GetCommandLineArgs()[0]
-                        UserName = [Environment]::UserName
-                        MachineName = [Environment]::MachineName
-                    }
-                }
-                $identityCandidates = @(
-                    if ($null -ne $CompatibilityInvoker) {
-                        & $CompatibilityInvoker `
-                            $compatibilitySession `
-                            $identityProbe `
-                            @() `
-                            'Identity' `
-                            *>&1
-                    }
-                    else {
-                        Invoke-Command `
-                            -Session $compatibilitySession `
-                            -ScriptBlock $identityProbe `
-                            -ErrorAction Stop `
-                            *>&1
-                    }
-                )
-                $identityCandidates = @(
-                    $identityCandidates |
-                        Where-Object {
-                            $null -ne $_ -and
-                            $null -ne $_.PSObject.Properties['Marker'] -and
-                            $_.Marker -ceq 'HostHunter.PowerShellIdentity.v1'
-                        }
-                )
-                $identityVersion = $null
-                $identityProcessLeaf = if ($identityCandidates.Count -eq 1) {
-                    @([string] $identityCandidates[0].ProcessPath -split '[\\/]')[-1]
-                }
-                else {
-                    $null
-                }
-                $identityProcessName = if ([string]::IsNullOrWhiteSpace($identityProcessLeaf)) {
-                    $null
-                }
-                else {
-                    [IO.Path]::GetFileNameWithoutExtension($identityProcessLeaf)
-                }
-                $identityVersionIsValid = $identityCandidates.Count -eq 1 -and
-                    [version]::TryParse(
-                        [string] $identityCandidates[0].PowerShellVersion,
-                        [ref] $identityVersion
-                    )
-                $identityIsComplete = $identityCandidates.Count -eq 1 -and
-                    $identityVersionIsValid -and
-                    -not [string]::IsNullOrWhiteSpace([string] $identityCandidates[0].PSEdition) -and
-                    -not [string]::IsNullOrWhiteSpace($identityProcessName) -and
-                    -not [string]::IsNullOrWhiteSpace([string] $identityCandidates[0].UserName) -and
-                    -not [string]::IsNullOrWhiteSpace([string] $identityCandidates[0].MachineName)
-                $identityIsSelfConsistent = $identityIsComplete -and (
-                    ($identityCandidates[0].PSEdition -ceq 'Core' -and
-                        $identityProcessName -ceq 'pwsh') -or
-                    ($identityCandidates[0].PSEdition -ceq 'Desktop' -and
-                        $identityProcessName -ceq 'powershell')
-                )
-                if (-not $identityIsSelfConsistent) {
-                    $failureKind = 'TransportFailure'
-                    $failureMessage = 'The compatibility identity response was malformed or internally inconsistent.'
-                }
-                elseif ($identityCandidates[0].PSEdition -cne 'Desktop' -or
-                    $identityVersion.Major -ne 5 -or
-                    $identityVersion.Minor -ne 1) {
-                    $observedIdentity = $identityCandidates[0]
-                    $failureKind = 'RuntimeMismatch'
-                    $failureMessage = 'The compatibility session did not report Windows PowerShell 5.1 Desktop.'
-                }
-            }
-            catch {
-                $failureKind = 'RuntimeUnavailable'
-                $failureMessage = 'Windows PowerShell compatibility could not be opened.'
-                }
-            }
-
-            if ($null -eq $failureKind) {
-                try {
-                    $innerEnvelope = {
-                        param(
-                            [Parameter(Mandatory)]
-                            [string] $InnerCommandText,
-
-                            [Parameter(Mandatory)]
-                            [string] $InnerSerializedCommandArguments
-                        )
-
-                        $innerSequence = 0
-                        $innerTerminated = $false
-                        $successOutputMarker = 'HostHunter.SuccessOutput.v1'
-                        try {
-                            $innerCommand = [scriptblock]::Create($InnerCommandText)
-                            $innerArguments = [Management.Automation.PSSerializer]::Deserialize(
-                                $InnerSerializedCommandArguments
-                            )
-                            & {
-                                & $innerCommand @innerArguments |
-                                    ForEach-Object {
-                                        $successValue = $_
-                                        [pscustomobject][ordered]@{
-                                            Marker = $successOutputMarker
-                                            TypeName = if ($null -eq $successValue) {
-                                                'null'
-                                            }
-                                            else {
-                                                $successValue.GetType().FullName
-                                            }
-                                            Value = $successValue
-                                        }
-                                    }
-                            } *>&1 | ForEach-Object {
-                                $mergedValue = $_
-                                $isSuccessOutput = $null -ne $mergedValue -and
-                                    $null -ne $mergedValue.PSObject.Properties['Marker'] -and
-                                    $mergedValue.Marker -ceq $successOutputMarker
-                                if ($isSuccessOutput) {
-                                    $innerValue = $mergedValue.Value
-                                    $innerStream = 'Output'
-                                    $innerTypeName = [string] $mergedValue.TypeName
-                                }
-                                else {
-                                    $innerValue = $mergedValue
-                                    $innerStream = switch ($innerValue) {
-                                        { $_ -is [Management.Automation.ErrorRecord] } { 'Error' }
-                                        { $_ -is [Management.Automation.WarningRecord] } { 'Warning' }
-                                        { $_ -is [Management.Automation.VerboseRecord] } { 'Verbose' }
-                                        { $_ -is [Management.Automation.DebugRecord] } { 'Debug' }
-                                        { $_ -is [Management.Automation.InformationRecord] } { 'Information' }
-                                        default { 'Output' }
-                                    }
-                                    $innerTypeName = if ($null -eq $innerValue) {
-                                        'null'
-                                    }
-                                    else {
-                                        $innerValue.GetType().FullName
-                                    }
-                                }
-                                [pscustomobject][ordered]@{
-                                    Marker = 'HostHunter.StreamEnvelope.v1'
-                                    Kind = 'Stream'
-                                    Sequence = $innerSequence
-                                    Stream = $innerStream
-                                    TypeName = $innerTypeName
-                                    IsTerminating = $false
-                                    Value = $innerValue
-                                }
-                                $innerSequence++
-                            }
-                        }
-                        catch {
-                            $innerTerminated = $true
-                            [pscustomobject][ordered]@{
-                                Marker = 'HostHunter.StreamEnvelope.v1'
-                                Kind = 'Stream'
-                                Sequence = $innerSequence
-                                Stream = 'Error'
-                                TypeName = $_.GetType().FullName
-                                IsTerminating = $true
-                                Value = $_
-                            }
-                            $innerSequence++
-                        }
-                        [pscustomobject][ordered]@{
-                            Marker = 'HostHunter.StreamEnvelope.v1'
-                            Kind = 'Completion'
-                            Sequence = $innerSequence
-                            Terminated = $innerTerminated
-                            FailureKind = if ($innerTerminated) { 'RemoteCommandFailure' } else { $null }
-                            DispatchState = 'Completed'
-                            OutcomeStatus = if ($innerTerminated) { 'Failed' } else { 'Succeeded' }
-                        }
-                    }
-
-                    $dispatchState = 'DispatchUncertain'
-                    $processInnerResult = {
-                        $innerResult = $_
-                        if ($null -eq $innerResult -or
-                            $null -eq $innerResult.PSObject.Properties['Marker'] -or
-                            $innerResult.Marker -cne 'HostHunter.StreamEnvelope.v1' -or
-                            $null -eq $innerResult.PSObject.Properties['Kind'] -or
-                            $innerResult.Kind -cnotin @('Stream', 'Completion') -or
-                            $null -eq $innerResult.PSObject.Properties['Sequence'] -or
-                            [int] $innerResult.Sequence -ne $nextSequence) {
-                            throw 'The Windows PowerShell compatibility stream returned an invalid envelope.'
-                        }
-                        if ($innerResult.Kind -ceq 'Completion') {
-                            if ($null -ne $completionEnvelope) {
-                                throw 'The Windows PowerShell compatibility stream returned duplicate completion.'
-                            }
-                            foreach ($propertyName in @(
-                                    'Terminated',
-                                    'FailureKind',
-                                    'DispatchState',
-                                    'OutcomeStatus'
-                                )) {
-                                if ($null -eq $innerResult.PSObject.Properties[$propertyName]) {
-                                    throw 'The Windows PowerShell compatibility completion is incomplete.'
-                                }
-                            }
-                            $innerTerminated = $innerResult.Terminated -is [bool] -and
-                                [bool] $innerResult.Terminated
-                            $innerSucceeded = $innerResult.Terminated -is [bool] -and
-                                -not [bool] $innerResult.Terminated -and
-                                [string]::IsNullOrWhiteSpace([string] $innerResult.FailureKind) -and
-                                $innerResult.DispatchState -ceq 'Completed' -and
-                                $innerResult.OutcomeStatus -ceq 'Succeeded'
-                            $innerFailed = $innerTerminated -and
-                                $innerResult.FailureKind -ceq 'RemoteCommandFailure' -and
-                                $innerResult.DispatchState -ceq 'Completed' -and
-                                $innerResult.OutcomeStatus -ceq 'Failed'
-                            if (-not $innerSucceeded -and -not $innerFailed) {
-                                throw 'The Windows PowerShell compatibility completion is inconsistent.'
-                            }
-                            $completionEnvelope = $innerResult
-                        }
-                        else {
-                            if ($null -ne $completionEnvelope) {
-                                throw 'The Windows PowerShell compatibility stream returned data after completion.'
-                            }
-                            foreach ($propertyName in @('Stream', 'TypeName', 'IsTerminating', 'Value')) {
-                                if ($null -eq $innerResult.PSObject.Properties[$propertyName]) {
-                                    throw 'The Windows PowerShell compatibility stream envelope is incomplete.'
-                                }
-                            }
-                            if ($innerResult.Stream -cnotin @(
-                                    'Output', 'Error', 'Warning', 'Verbose', 'Debug', 'Information'
-                                ) -or $innerResult.IsTerminating -isnot [bool]) {
-                                throw 'The Windows PowerShell compatibility stream envelope is invalid.'
-                            }
-                            $dispatchState = 'Dispatched'
-                            $innerResult
-                            $nextSequence++
-                        }
-                    }
-                    if ($null -ne $CompatibilityInvoker) {
-                        & $CompatibilityInvoker `
-                            $compatibilitySession `
-                            $innerEnvelope `
-                            @($CommandText, $SerializedCommandArguments) `
-                            'Command' `
-                            *>&1 | ForEach-Object -Process $processInnerResult
-                    }
-                    else {
-                        Invoke-Command `
-                            -Session $compatibilitySession `
-                            -ScriptBlock $innerEnvelope `
-                            -ArgumentList @($CommandText, $SerializedCommandArguments) `
-                            -ErrorAction Stop `
-                            *>&1 | ForEach-Object -Process $processInnerResult
-                    }
-                    if ($null -eq $completionEnvelope) {
-                        throw 'The Windows PowerShell compatibility stream did not return completion.'
-                    }
-                    $dispatchState = [string] $completionEnvelope.DispatchState
-                    $outcomeStatus = [string] $completionEnvelope.OutcomeStatus
-                }
-                catch {
-                    $failureKind = 'TransportFailure'
-                    $failureMessage = 'Windows PowerShell compatibility execution did not complete conclusively.'
-                    $outcomeStatus = 'Unknown'
-                }
-            }
-        }
-        finally {
-            if ($null -ne $compatibilitySession) {
-                try {
-                    if ($null -ne $CompatibilitySessionRemover) {
-                        $cleanupResults = @(& $CompatibilitySessionRemover `
-                                $compatibilitySession `
-                                $CompatibilityCleanupTimeoutMilliseconds `
-                                *>&1)
-                        if (@($cleanupResults | Where-Object { $_ -is [bool] -and -not $_ }).Count -gt 0) {
-                            throw [TimeoutException]::new(
-                                'The compatibility session cleanup exceeded its deadline.'
-                            )
-                        }
-                    }
-                    else {
-                        $compatibilityRunspace = $compatibilitySession.Runspace
-                        if ($null -eq $compatibilityRunspace) {
-                            throw 'The compatibility session has no runspace to close.'
-                        }
-                        $compatibilityRunspace.CloseAsync()
-                        $cleanupStopwatch = [Diagnostics.Stopwatch]::StartNew()
-                        while ($compatibilityRunspace.RunspaceStateInfo.State -cnotin @(
-                                'Closed', 'Broken'
-                            )) {
-                            if ($cleanupStopwatch.ElapsedMilliseconds -ge
-                                $CompatibilityCleanupTimeoutMilliseconds) {
-                                throw [TimeoutException]::new(
-                                    'The compatibility session cleanup exceeded its deadline.'
-                                )
-                            }
-                            Start-Sleep -Milliseconds 25
-                        }
-                        Remove-PSSession -Session $compatibilitySession `
-                            -Confirm:$false -ErrorAction Stop *>&1 |
-                            Out-Null
-                    }
-                }
-                catch {
-                    $failureKind = 'TransportFailure'
-                    $failureMessage = 'Windows PowerShell compatibility session cleanup failed.'
-                    $outcomeStatus = if ($dispatchState -cin @('NotDispatched', 'Completed')) {
-                        'Failed'
-                    }
-                    else {
-                        'Unknown'
-                    }
-                }
-            }
-        }
-
-        if ($null -ne $failureKind) {
-            [pscustomobject][ordered]@{
-                Marker = 'HostHunter.StreamEnvelope.v1'
-                Kind = 'Stream'
-                Sequence = $nextSequence
-                Stream = 'Error'
-                TypeName = 'HostHunter.RuntimeFailure'
-                IsTerminating = $true
-                Value = [pscustomobject][ordered]@{
-                    Message = $failureMessage
-                    FailureKind = $failureKind
-                    ObservedIdentity = $observedIdentity
-                }
-                DispatchState = $dispatchState
-            }
-            $nextSequence++
-            [pscustomobject][ordered]@{
-                Marker = 'HostHunter.StreamEnvelope.v1'
-                Kind = 'Completion'
-                Sequence = $nextSequence
-                Terminated = $true
-                FailureKind = $failureKind
-                DispatchState = $dispatchState
-                OutcomeStatus = $outcomeStatus
-            }
-            return
-        }
-
-        [pscustomobject][ordered]@{
-            Marker = 'HostHunter.StreamEnvelope.v1'
-            Kind = 'Completion'
-            Sequence = $nextSequence
-            Terminated = [bool] $completionEnvelope.Terminated
-            FailureKind = if ([bool] $completionEnvelope.Terminated) {
-                'RemoteCommandFailure'
-            }
-            else {
-                $null
-            }
-            DispatchState = 'Completed'
-            OutcomeStatus = $outcomeStatus
-        }
-    }
-}
-
-function Get-HHSshRemoteEnvelopeScriptBlock {
-    [CmdletBinding()]
-    param(
-        [ValidateSet('PowerShell7', 'WindowsPowerShell51')]
-        [string] $PowerShellRuntime = 'PowerShell7'
-    )
-
-    if ($PowerShellRuntime -ceq 'WindowsPowerShell51') {
-        return Get-HHWindowsPowerShellCompatibilityEnvelopeScriptBlock
-    }
     return Get-HHSshDirectEnvelopeScriptBlock
 }
 
@@ -1247,12 +807,7 @@ function Invoke-HHSshRemoteCapture {
         [ValidateRange(1, [long]::MaxValue)]
         [long] $MaxOutputBytes = 104857600,
 
-        [ValidateSet('PowerShell7', 'WindowsPowerShell51')]
-        [string] $PowerShellRuntime = 'PowerShell7',
-
         [scriptblock] $RemoteInvoker,
-
-        [scriptblock] $BridgeInvoker,
 
         [scriptblock] $Clock
     )
@@ -1260,7 +815,7 @@ function Invoke-HHSshRemoteCapture {
     $sequence = $SequenceStart
     [long] $serializedBytes = 0
     $capturedEvents = [Collections.Generic.List[object]]::new()
-    $usesEnvelope = $PowerShellRuntime -ceq 'WindowsPowerShell51' -or $null -eq $RemoteInvoker
+    $usesEnvelope = $null -eq $RemoteInvoker
     $completionCount = 0
     $remoteTerminated = $false
     $remoteFailureKind = $null
@@ -1367,22 +922,13 @@ function Invoke-HHSshRemoteCapture {
     }
 
     try {
-        if ($PowerShellRuntime -ceq 'WindowsPowerShell51' -and $null -ne $BridgeInvoker) {
-            $bridgeWrapper = Get-HHSshRemoteEnvelopeScriptBlock -PowerShellRuntime $PowerShellRuntime
-            $bridgeArguments = @(
-                $ScriptBlock.ToString()
-                [Management.Automation.PSSerializer]::Serialize([object[]] $ArgumentList, 20)
-            )
-            & $BridgeInvoker $Session $bridgeWrapper $bridgeArguments |
-                ForEach-Object -Process $captureItem
-        }
-        elseif ($PowerShellRuntime -ceq 'PowerShell7' -and $null -ne $RemoteInvoker) {
+        if ($null -ne $RemoteInvoker) {
             & $RemoteInvoker $Session $ScriptBlock $ArgumentList | ForEach-Object -Process $captureItem
         }
         else {
             $invokeParameters = @{
                 Session = $Session
-                ScriptBlock = Get-HHSshRemoteEnvelopeScriptBlock -PowerShellRuntime $PowerShellRuntime
+                ScriptBlock = Get-HHSshRemoteEnvelopeScriptBlock
                 ArgumentList = @(
                     $ScriptBlock.ToString()
                     [Management.Automation.PSSerializer]::Serialize([object[]] $ArgumentList, 20)
@@ -1459,14 +1005,7 @@ function Get-HHSshIdentityProbeScriptBlock {
             Marker = 'HostHunter.PowerShellIdentity.v1'
             PSEdition = $PSVersionTable.PSEdition
             PowerShellVersion = $PSVersionTable.PSVersion.ToString()
-            ProcessPath = if ($PSVersionTable.PSEdition -ceq 'Desktop') {
-                # Environment.ProcessPath does not exist on .NET Framework and
-                # therefore becomes empty inside Windows PowerShell 5.1.
-                [string] [Environment]::GetCommandLineArgs()[0]
-            }
-            else {
-                [string] [Environment]::ProcessPath
-            }
+            ProcessPath = [string] [Environment]::ProcessPath
             UserName = [Environment]::UserName
             MachineName = [Environment]::MachineName
         }
@@ -1480,7 +1019,7 @@ function Get-HHSshValidatedIdentity {
         [AllowEmptyCollection()]
         [object[]] $StreamEvents,
 
-        [ValidateSet('PowerShell7', 'WindowsPowerShell51')]
+        [ValidateSet('PowerShell7')]
         [string] $PowerShellRuntime = 'PowerShell7'
     )
 
@@ -1508,134 +1047,27 @@ function Get-HHSshValidatedIdentity {
         [ref] $version
     )
     $isCommonIdentityValid = $isVersionValid -and
-        $identity.PSEdition -cin @('Core', 'Desktop') -and
+        $identity.PSEdition -ceq 'Core' -and
         -not [string]::IsNullOrWhiteSpace([string] $identity.UserName) -and
         -not [string]::IsNullOrWhiteSpace([string] $identity.MachineName) -and
-        (($identity.PSEdition -ceq 'Core' -and $processName -ceq 'pwsh') -or
-            ($identity.PSEdition -ceq 'Desktop' -and $processName -ceq 'powershell'))
-    $isRequestedRuntime = if ($PowerShellRuntime -ceq 'WindowsPowerShell51') {
-        $identity.PSEdition -ceq 'Desktop' -and
-            $null -ne $version -and
-            $version.Major -eq 5 -and
-            $version.Minor -eq 1 -and
-            $processName -ceq 'powershell'
-    }
-    else {
-        $identity.PSEdition -ceq 'Core' -and
-            $null -ne $version -and
-            $version.Major -ge 7 -and
-            $processName -ceq 'pwsh'
-    }
+        $processName -ceq 'pwsh'
+    $isRequestedRuntime = $identity.PSEdition -ceq 'Core' -and
+        $null -ne $version -and
+        $version.Major -ge 7 -and
+        $processName -ceq 'pwsh'
     if (-not $isCommonIdentityValid) {
         throw (New-HHSshClassifiedException -FailureKind SubsystemFailure `
                 -Message 'The mandatory remote PowerShell identity response was malformed or internally inconsistent.')
     }
     if (-not $isRequestedRuntime) {
-        $mismatchMessage = if ($PowerShellRuntime -ceq 'PowerShell7') {
-            'The requested PowerShell runtime does not match; the endpoint is not a PowerShell 7 endpoint.'
-        }
-        else {
-            'The requested PowerShell runtime does not match Windows PowerShell 5.1 Desktop.'
-        }
         $mismatchException = New-HHSshClassifiedException `
             -FailureKind RuntimeMismatch `
-            -Message $mismatchMessage
+            -Message 'The requested PowerShell runtime does not match; the endpoint is not a PowerShell 7 endpoint.'
         $mismatchException.Data['HHObservedIdentity'] = $identity
         $mismatchException.Data['HHObservedProbeRuntime'] = $PowerShellRuntime
         throw $mismatchException
     }
     return $identity
-}
-
-function Get-HHSshCommandRuntimeMismatchEvidence {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory)]
-        [AllowEmptyCollection()]
-        [object[]] $StreamEvents,
-
-        [Parameter(Mandatory)]
-        [ValidateSet('PowerShell7', 'WindowsPowerShell51')]
-        [string] $PowerShellRuntime
-    )
-
-    # A command-time runtime mismatch can currently be attributed only by the
-    # Windows PowerShell compatibility wrapper. Treat similarly shaped command
-    # output as untrusted data, not runtime evidence.
-    if ($PowerShellRuntime -cne 'WindowsPowerShell51') {
-        return $null
-    }
-
-    $candidateEvents = @(
-        $StreamEvents |
-            Where-Object {
-                $phaseProperty = $_.PSObject.Properties['Phase']
-                $streamProperty = $_.PSObject.Properties['Stream']
-                $typeNameProperty = $_.PSObject.Properties['TypeName']
-                $terminatingProperty = $_.PSObject.Properties['IsTerminating']
-                $valueProperty = $_.PSObject.Properties['Value']
-                if ($null -eq $phaseProperty -or $phaseProperty.Value -cne 'Command' -or
-                    $null -eq $streamProperty -or $streamProperty.Value -cne 'Error' -or
-                    $null -eq $typeNameProperty -or
-                    $typeNameProperty.Value -cne 'HostHunter.RuntimeFailure' -or
-                    $null -eq $terminatingProperty -or
-                    $terminatingProperty.Value -isnot [bool] -or
-                    -not [bool] $terminatingProperty.Value -or
-                    $null -eq $valueProperty -or $null -eq $valueProperty.Value) {
-                    return $false
-                }
-
-                $failureKindProperty = $valueProperty.Value.PSObject.Properties['FailureKind']
-                return $null -ne $failureKindProperty -and
-                    $failureKindProperty.Value -ceq 'RuntimeMismatch'
-            }
-    )
-    if ($candidateEvents.Count -ne 1) {
-        return $null
-    }
-
-    $failureValue = $candidateEvents[0].Value
-    $identityProperty = $failureValue.PSObject.Properties['ObservedIdentity']
-    if ($null -eq $identityProperty -or $null -eq $identityProperty.Value) {
-        return $null
-    }
-    $identity = $identityProperty.Value
-
-    # Reuse the canonical identity validator. A valid mismatch must be a
-    # complete, self-consistent identity which specifically does not satisfy
-    # the runtime requested from this wrapper. A matching, malformed, or
-    # internally inconsistent identity makes the envelope contradictory.
-    $syntheticIdentityEvent = [pscustomobject]@{
-        Stream = 'Output'
-        Value = $identity
-    }
-    try {
-        $null = Get-HHSshValidatedIdentity `
-            -StreamEvents @($syntheticIdentityEvent) `
-            -PowerShellRuntime $PowerShellRuntime
-        return $null
-    }
-    catch {
-        if ((Get-HHSshFailureKind -ErrorObject $_) -cne 'RuntimeMismatch') {
-            return $null
-        }
-    }
-
-    $observedAt = [DateTimeOffset]::MinValue
-    if (-not [DateTimeOffset]::TryParse(
-            [string] $candidateEvents[0].ObservedAtUtc,
-            [ref] $observedAt
-        )) {
-        return $null
-    }
-
-    return [pscustomobject][ordered]@{
-        RemotePowerShellVersion = [string] $identity.PowerShellVersion
-        RemotePSEdition = [string] $identity.PSEdition
-        ExecutionMode = 'WindowsPowerShellCompatibility'
-        RemoteIdentity = $identity
-        ValidatedAtUtc = $observedAt.ToUniversalTime().ToString('o')
-    }
 }
 
 function Close-HHSshSession {
@@ -1778,8 +1210,6 @@ function Open-HHSshValidatedSession {
 
         [scriptblock] $RemoteInvoker,
 
-        [scriptblock] $BridgeInvoker,
-
         [scriptblock] $SessionRemover,
 
         [scriptblock] $Clock,
@@ -1847,7 +1277,6 @@ function Open-HHSshValidatedSession {
                 -ScriptBlock (Get-HHSshIdentityProbeScriptBlock) `
                 -Phase Identity `
                 -MaxOutputBytes $MaxOutputBytes `
-                -PowerShellRuntime PowerShell7 `
                 -RemoteInvoker $RemoteInvoker `
                 -Clock $Clock)
         foreach ($identityEvent in $identityEvents) {
@@ -1858,31 +1287,6 @@ function Open-HHSshValidatedSession {
             -PowerShellRuntime PowerShell7
         $identity = $outerIdentity
         $executionMode = 'Direct'
-        if ($requestedRuntime -ceq 'WindowsPowerShell51') {
-            $remainingIdentityBytes = $MaxOutputBytes - (
-                Get-HHSshStreamEventByteCount -StreamEvents @($identityEvidence)
-            )
-            if ($remainingIdentityBytes -le 0) {
-                throw (New-HHSshClassifiedException -FailureKind OutputLimitExceeded `
-                        -Message "The serialized plaintext output limit of $MaxOutputBytes bytes was exceeded.")
-            }
-            $runtimeIdentityEvents = @(Invoke-HHSshRemoteCapture `
-                    -Session $session `
-                    -ScriptBlock (Get-HHSshIdentityProbeScriptBlock) `
-                    -Phase RuntimeIdentity `
-                    -SequenceStart $identityEvidence.Count `
-                    -MaxOutputBytes $remainingIdentityBytes `
-                    -PowerShellRuntime WindowsPowerShell51 `
-                    -BridgeInvoker $BridgeInvoker `
-                    -Clock $Clock)
-            foreach ($identityEvent in $runtimeIdentityEvents) {
-                $identityEvidence.Add($identityEvent)
-            }
-            $identity = Get-HHSshValidatedIdentity `
-                -StreamEvents $runtimeIdentityEvents `
-                -PowerShellRuntime WindowsPowerShell51
-            $executionMode = 'WindowsPowerShellCompatibility'
-        }
         # Runtime identity validation proves exactly one requested-runtime identity event.
         $validatedAt = $identityEvidence[-1].ObservedAtUtc
 
@@ -1951,7 +1355,7 @@ function Open-HHSshValidatedSession {
                     $observedProperty = $valueProperty.Value.PSObject.Properties['ObservedIdentity']
                     if ($null -ne $observedProperty -and $null -ne $observedProperty.Value) {
                         $observedIdentity = $observedProperty.Value
-                        $observedProbeRuntime = 'WindowsPowerShell51'
+                        $observedProbeRuntime = 'PowerShell7'
                         $observedAtUtc = $identityEvent.ObservedAtUtc
                     }
                 }
@@ -1973,14 +1377,7 @@ function Open-HHSshValidatedSession {
                     [string] $observedIdentity.PowerShellVersion
                 $originalFailure.Exception.Data['HHObservedRemotePSEdition'] =
                     [string] $observedIdentity.PSEdition
-                $originalFailure.Exception.Data['HHObservedExecutionMode'] = if (
-                    $observedProbeRuntime -ceq 'WindowsPowerShell51'
-                ) {
-                    'WindowsPowerShellCompatibility'
-                }
-                else {
-                    'Direct'
-                }
+                $originalFailure.Exception.Data['HHObservedExecutionMode'] = 'Direct'
                 $originalFailure.Exception.Data['HHObservedValidatedAtUtc'] = [string] $observedAtUtc
                 $originalFailure.Exception.Data['HHObservedHostKeyFingerprint'] =
                     [string] $Plan.HostKeyFingerprint
@@ -2021,8 +1418,6 @@ function Open-HHSshSession {
 
         [scriptblock] $RemoteInvoker,
 
-        [scriptblock] $BridgeInvoker,
-
         [scriptblock] $SessionRemover,
 
         [scriptblock] $Clock
@@ -2036,7 +1431,6 @@ function Open-HHSshSession {
         -Plan $plan `
         -SessionFactory $SessionFactory `
         -RemoteInvoker $RemoteInvoker `
-        -BridgeInvoker $BridgeInvoker `
         -SessionRemover $SessionRemover `
         -Clock $Clock `
         -MaxOutputBytes $MaxOutputBytes
@@ -2059,8 +1453,6 @@ function Invoke-HHSshSessionCommand {
 
         [scriptblock] $RemoteInvoker,
 
-        [scriptblock] $BridgeInvoker,
-
         [scriptblock] $Clock
     )
 
@@ -2068,7 +1460,7 @@ function Invoke-HHSshSessionCommand {
     foreach ($identityEvent in @($SessionContext.IdentityEvents)) {
         $events.Add($identityEvent)
     }
-    $powerShellRuntime = Get-HHSshRequestedPowerShellRuntime -InputObject $SessionContext
+    $null = Get-HHSshRequestedPowerShellRuntime -InputObject $SessionContext
     try {
         $remainingBytes = $MaxOutputBytes - [long] $SessionContext.OutputBytes
         if ($remainingBytes -le 0) {
@@ -2085,9 +1477,7 @@ function Invoke-HHSshSessionCommand {
                 -Phase Command `
                 -SequenceStart $events.Count `
                 -MaxOutputBytes $remainingBytes `
-                -PowerShellRuntime $powerShellRuntime `
                 -RemoteInvoker $RemoteInvoker `
-                -BridgeInvoker $BridgeInvoker `
                 -Clock $Clock)
         foreach ($eventRecord in $commandEvents) {
             $events.Add($eventRecord)
@@ -2116,17 +1506,7 @@ function Invoke-HHSshSessionCommand {
             }
         }
         $failureKind = Get-HHSshFailureKind -ErrorObject $_
-        $mismatchEvidence = if ($failureKind -ceq 'RuntimeMismatch') {
-            Get-HHSshCommandRuntimeMismatchEvidence `
-                -StreamEvents @($events) `
-                -PowerShellRuntime $powerShellRuntime
-        }
-        else {
-            $null
-        }
-        if ($failureKind -ceq 'RuntimeMismatch' -and $null -eq $mismatchEvidence) {
-            $failureKind = 'TransportFailure'
-        }
+        $mismatchEvidence = $null
         $commandResult = [pscustomobject][ordered]@{
             Succeeded = $false
             FailureKind = $failureKind
@@ -2221,10 +1601,7 @@ function Invoke-HHSshSessionFanOut {
     $nameByRunspaceId = [Collections.Generic.Dictionary[string, string]]::new(
         [StringComparer]::OrdinalIgnoreCase
     )
-    $activeSessionsByRuntime = [ordered]@{
-        PowerShell7 = [Collections.Generic.List[object]]::new()
-        WindowsPowerShell51 = [Collections.Generic.List[object]]::new()
-    }
+    $activeSessions = [Collections.Generic.List[object]]::new()
     [long] $aggregateOutputBytes = 0
     foreach ($entry in $SessionContextByName.GetEnumerator()) {
         $targetName = [string] $entry.Key
@@ -2281,7 +1658,7 @@ function Invoke-HHSshSessionFanOut {
             $state.ExceptionType = [InvalidOperationException].FullName
         }
         else {
-            $activeSessionsByRuntime[$powerShellRuntime].Add($context.Session)
+            $activeSessions.Add($context.Session)
         }
         $stateByName[$targetName] = $state
     }
@@ -2378,15 +1755,11 @@ function Invoke-HHSshSessionFanOut {
         $targetState.NextRemoteSequence++
     }
 
-    foreach ($runtimeName in @('PowerShell7', 'WindowsPowerShell51')) {
-        $activeSessions = $activeSessionsByRuntime[$runtimeName]
-        if ($activeSessions.Count -eq 0) {
-            continue
-        }
+    if ($activeSessions.Count -gt 0) {
         $sharedFailure = $null
         $protocolFailure = $false
         try {
-            $remoteWrapper = Get-HHSshRemoteEnvelopeScriptBlock -PowerShellRuntime $runtimeName
+            $remoteWrapper = Get-HHSshRemoteEnvelopeScriptBlock
             $remoteArguments = @(
                 $ScriptBlock.ToString()
                 [Management.Automation.PSSerializer]::Serialize([object[]] $ArgumentList, 20)
@@ -2397,7 +1770,7 @@ function Invoke-HHSshSessionFanOut {
                     $remoteWrapper `
                     $remoteArguments `
                     $ThrottleLimit `
-                    $runtimeName | ForEach-Object -Process $processEnvelope
+                    'PowerShell7' | ForEach-Object -Process $processEnvelope
             }
             else {
                 $invokeParameters = @{
@@ -2416,8 +1789,7 @@ function Invoke-HHSshSessionFanOut {
         }
         foreach ($entry in $stateByName.GetEnumerator()) {
             $targetState = $entry.Value
-            if ($targetState.PowerShellRuntime -cne $runtimeName -or
-                ($targetState.Completed -and -not $protocolFailure) -or
+            if (($targetState.Completed -and -not $protocolFailure) -or
                 $targetState.FailureKind -ceq 'OutputLimitExceeded') {
                 continue
             }
@@ -2455,18 +1827,7 @@ function Invoke-HHSshSessionFanOut {
             $targetState.OutcomeStatus = 'Failed'
         }
 
-        $mismatchEvidence = if ($targetState.FailureKind -ceq 'RuntimeMismatch') {
-            Get-HHSshCommandRuntimeMismatchEvidence `
-                -StreamEvents @($targetState.Events) `
-                -PowerShellRuntime $targetState.PowerShellRuntime
-        }
-        else {
-            $null
-        }
-        if ($targetState.FailureKind -ceq 'RuntimeMismatch' -and
-            $null -eq $mismatchEvidence) {
-            $targetState.FailureKind = 'TransportFailure'
-        }
+        $mismatchEvidence = $null
 
         $targetResult = [pscustomobject][ordered]@{
             TargetName = $targetState.TargetName
@@ -2535,8 +1896,6 @@ function Invoke-HHSshTransport {
 
         [scriptblock] $RemoteInvoker,
 
-        [scriptblock] $BridgeInvoker,
-
         [scriptblock] $SessionRemover,
 
         [scriptblock] $Clock
@@ -2553,7 +1912,6 @@ function Invoke-HHSshTransport {
             -MaxOutputBytes $MaxOutputBytes `
             -SessionFactory $SessionFactory `
             -RemoteInvoker $RemoteInvoker `
-            -BridgeInvoker $BridgeInvoker `
             -SessionRemover $SessionRemover `
             -Clock $Clock
         foreach ($eventRecord in $context.IdentityEvents) {
@@ -2567,7 +1925,6 @@ function Invoke-HHSshTransport {
                 -ArgumentList $ArgumentList `
                 -MaxOutputBytes $MaxOutputBytes `
                 -RemoteInvoker $RemoteInvoker `
-                -BridgeInvoker $BridgeInvoker `
                 -Clock $Clock
             $allEvents.Clear()
             foreach ($eventRecord in $commandResult.StreamEvents) {

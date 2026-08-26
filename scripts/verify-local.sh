@@ -3,86 +3,60 @@
 set -Eeuo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd -P)"
-readonly bounded="${repo_root}/scripts/lib/run-bounded.sh"
-readonly repo_root
+bounded="${repo_root}/scripts/lib/run-bounded.sh"
+readonly repo_root bounded
 cd -- "${repo_root}"
-scripts/lib/prepare-artifacts.sh "${repo_root}"
-mkdir -p .artifacts/logs .artifacts/summary
-HH_HOST_GID="$(id -g)"
+
+artifact_root=".artifacts/release-proof"
+mkdir -p "${artifact_root}" .artifacts/logs .artifacts/summary
+export HH_ARTIFACT_ROOT="/artifacts/release-proof"
 export HH_HOST_GID
+HH_HOST_GID="$(id -g)"
+export HH_RUNTIME_PROJECT="hosthunter-release-${HH_CANDIDATE_SHA:-local}"
+export HH_RUNTIME_CONTROLLER_IMAGE="hosthunter-next-generation-controller:local"
+export HH_RUNTIME_DATA_VOLUME="${HH_RUNTIME_PROJECT}-data"
+export HH_RUNTIME_SECRET_VOLUME="${HH_RUNTIME_PROJECT}-secrets"
+export HH_RUNTIME_ANCHOR_VOLUME="${HH_RUNTIME_PROJECT}-anchors"
+export HH_RUNTIME_SSH_VOLUME="${HH_RUNTIME_PROJECT}-ssh"
+export HH_RUNTIME_EVIDENCE_VOLUME="${HH_RUNTIME_PROJECT}-evidence"
 
 cleanup() {
-    docker compose --file compose.test.yml down --volumes --remove-orphans >/dev/null 2>&1 || true
+  docker compose --file compose.test.yml down --volumes --remove-orphans >/dev/null 2>&1 || true
 }
 trap cleanup EXIT INT TERM HUP
 
-"${repo_root}/scripts/security/scan-secrets.sh"
-"${bounded}" full-build 600 240 .artifacts/logs/full-build.log \
-    docker compose --file compose.test.yml build test controller-floor ssh-target
-"${bounded}" full-toolchain 180 120 .artifacts/logs/full-toolchain.log \
-    docker compose --file compose.test.yml run --rm test bash scripts/lanes/toolchain.sh
-"${bounded}" full-static 300 120 .artifacts/logs/full-static.log \
-    docker compose --file compose.test.yml run --rm test bash scripts/lanes/static.sh
-"${bounded}" full-module-build 300 120 .artifacts/logs/full-module-build.log \
-    docker compose --file compose.test.yml run --rm test bash scripts/lanes/build.sh
-"${bounded}" controller-floor 300 120 .artifacts/logs/controller-floor.log \
-    docker compose --file compose.test.yml run --rm controller-floor \
-        pwsh -NoLogo -NoProfile -NonInteractive \
-        -File scripts/qualification/Test-HHControllerMatrix.ps1 \
-        -PowerShellVersion 7.4.19
-"${bounded}" full-unit-coverage 1800 300 .artifacts/logs/full-unit-coverage.log \
-    docker compose --file compose.test.yml run --rm test bash scripts/lanes/unit.sh
-"${bounded}" full-ssh-start 180 120 .artifacts/logs/full-ssh-start.log \
-    docker compose --file compose.test.yml up --detach --wait ssh-target
-"${bounded}" full-ssh-contract 300 120 .artifacts/logs/full-ssh-contract.log \
-    docker compose --file compose.test.yml run --rm test \
-        pwsh -NoLogo -NoProfile -NonInteractive -File tests/fixtures/ssh/Invoke-FixtureContract.ps1
-"${bounded}" controller-floor-spaced-ssh 300 120 \
-    .artifacts/logs/controller-floor-spaced-ssh.log \
-    docker compose --file compose.test.yml run --rm controller-floor \
-        pwsh -NoLogo -NoProfile -NonInteractive \
-        -File scripts/testing/Invoke-HHPesterLane.ps1 \
-        -TestPath tests/integration/SshTransport.Tests.ps1 \
-        -Tag Integration \
-        -ResultPath /artifacts/integration/controller-floor-spaced-ssh.xml \
-        -PesterVersion 6.1.0
-"${bounded}" full-integration 900 240 .artifacts/logs/full-integration.log \
-    docker compose --file compose.test.yml run --rm test bash scripts/lanes/integration.sh
-"${bounded}" full-sqlite-fault-integration 1200 240 \
-    .artifacts/logs/full-sqlite-fault-integration.log \
-    bash scripts/lanes/sqlite-integration.sh
-"${repo_root}/scripts/runtime/verify.sh"
-runtime_contract="${repo_root}/.artifacts/runtime/runtime-container.json"
-[[ -f "${runtime_contract}" ]] || {
-    printf 'Production runtime verification did not emit its image contract.\n' >&2
-    exit 2
-}
-runtime_controller_image="$(jq -r '.controller.imageId' "${runtime_contract}")"
-runtime_parser_image="$(jq -r '.parser.imageId' "${runtime_contract}")"
-for runtime_image in "${runtime_controller_image}" "${runtime_parser_image}"; do
-    [[ "${runtime_image}" =~ ^sha256:[a-f0-9]{64}$ ]] || {
-        printf 'Production runtime verification emitted an invalid image ID.\n' >&2
-        exit 2
-    }
-done
+"${bounded}" release-build 900 180 .artifacts/logs/release-build.log \
+  docker compose --file compose.test.yml build test ssh-target
+"${bounded}" release-static 300 120 .artifacts/logs/release-static.log \
+  docker compose --file compose.test.yml run --rm --no-deps test bash scripts/lanes/static.sh
+"${bounded}" release-module 300 120 .artifacts/logs/release-module.log \
+  docker compose --file compose.test.yml run --rm --no-deps test bash scripts/lanes/build.sh
+"${bounded}" release-unit-coverage 1800 300 .artifacts/logs/release-unit-coverage.log \
+  docker compose --file compose.test.yml run --rm --no-deps test bash scripts/lanes/unit.sh
+"${bounded}" release-ssh-start 180 120 .artifacts/logs/release-ssh-start.log \
+  docker compose --file compose.test.yml up --detach --wait ssh-target
+"${bounded}" release-critical-integration 900 240 .artifacts/logs/release-critical-integration.log \
+  docker compose --file compose.test.yml run --rm test bash scripts/lanes/integration.sh
+"${bounded}" release-sqlite-faults 1200 240 .artifacts/logs/release-sqlite-faults.log \
+  bash scripts/lanes/sqlite-integration.sh
+"${bounded}" release-production-build 900 180 .artifacts/logs/release-production-build.log \
+  docker compose --file compose.runtime.yml build controller
+
+controller_image_id="$(docker image inspect --format '{{.Id}}' hosthunter-next-generation-controller:local)"
 "${repo_root}/scripts/lanes/security.sh" \
-    hosthunter-next-generation-test:local \
-    hosthunter-next-generation-controller-floor:local \
-    hosthunter-next-generation-ssh-fixture:local \
-    "${runtime_controller_image}" \
-    "${runtime_parser_image}"
+  hosthunter-next-generation-test:local \
+  hosthunter-next-generation-ssh-fixture:local \
+  "${controller_image_id}"
 
 jq -n \
-    --arg controllerImageId "${runtime_controller_image}" \
-    --arg parserImageId "${runtime_parser_image}" \
-    '{
-        status: "passed",
-        scope: "full-product-and-production-runtime",
-        productionRuntimeImageIds: [$controllerImageId, $parserImageId],
-        gitleaksReceipt: "security/gitleaks-receipt.json",
-        imageInventory: "security/image-inventory.tsv"
-    }' >.artifacts/security/receipt.json
+  --arg sha "${HH_CANDIDATE_SHA:-$(git rev-parse HEAD)}" \
+  --arg imageId "${controller_image_id}" \
+  '{
+    status: "passed",
+    scope: "release-only-coverage-integration-scans-and-production-build",
+    candidateSha: $sha,
+    controllerImageId: $imageId,
+    cmdletVerdictExcluded: true
+  }' >.artifacts/summary/verify-local.json
 
-printf '{"status":"passed","scope":"full-product"}\n' \
-    >.artifacts/summary/verify-local.json
-printf 'HostHunterNextGeneration full local product proof passed\n'
+printf 'Release-only heavy proof passed once for %s\n' "${HH_CANDIDATE_SHA:-$(git rev-parse HEAD)}"

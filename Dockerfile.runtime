@@ -1,100 +1,56 @@
 # syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
 
-FROM ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517 AS evtx-parser-assets
-
-ADD --chmod=0755 --checksum=sha256:50fcb8d316351c7a2c9f6d610ae3f9932b8f6c0ecf87f1e3756630963e263a96 \
-    https://github.com/omerbenamram/evtx/releases/download/v0.12.2/evtx_dump-v0.12.2-aarch64-unknown-linux-gnu \
-    /out/linux-arm64/evtx_dump
-ADD --chmod=0755 --checksum=sha256:c33c111c9832cff5b91dfca6fece51d603181a42dfb56f0ed0a25669f2600df9 \
-    https://github.com/omerbenamram/evtx/releases/download/v0.12.2/evtx_dump-v0.12.2-x86_64-unknown-linux-gnu \
-    /out/linux-x64/evtx_dump
-ADD --chmod=0755 --checksum=sha256:6dd3a5b09ed73d55a3ad76548e99be587ea4258ee89424c8bfcacc18bc8c7e5b \
-    https://github.com/omerbenamram/evtx/releases/download/v0.12.2/evtx_dump-v0.12.2-aarch64-apple-darwin \
-    /out/osx-arm64/evtx_dump
-ADD --chmod=0755 --checksum=sha256:60f2a775832fa2433f981ffae83a053420b523641eba1af804d2601e5866f208 \
-    https://github.com/omerbenamram/evtx/releases/download/v0.12.2/evtx_dump-v0.12.2-x86_64-apple-darwin \
-    /out/osx-x64/evtx_dump
-
 FROM mcr.microsoft.com/dotnet/sdk:10.0.400-noble@sha256:e1ffd2a92ae84c1291bc1b6887501f8af98e6331e7af6d4c8d37168c5e87a64c AS sqlite-dependencies
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 WORKDIR /restore
-
 COPY eng/sqlite/HostHunter.Sqlite.Dependencies.csproj ./
 COPY eng/sqlite/packages.lock.json ./
-
-RUN dotnet restore HostHunter.Sqlite.Dependencies.csproj \
-        --locked-mode \
-        --packages /nuget/packages \
+RUN dotnet restore HostHunter.Sqlite.Dependencies.csproj --locked-mode --packages /nuget/packages \
     && managed_assets=( \
         /nuget/packages/microsoft.data.sqlite.core/10.0.11/lib/net8.0/Microsoft.Data.Sqlite.dll \
         /nuget/packages/sqlitepclraw.config.e_sqlite3/3.0.5/lib/net8.0/SQLitePCLRaw.batteries_v2.dll \
         /nuget/packages/sqlitepclraw.core/3.0.5/lib/net8.0/SQLitePCLRaw.core.dll \
         /nuget/packages/sqlitepclraw.provider.e_sqlite3/3.0.5/lib/net8.0/SQLitePCLRaw.provider.e_sqlite3.dll \
     ) \
-    && for rid in linux-arm64 linux-x64 osx-arm64 win-x64; do \
-        install -d -m 0755 "/out/lib/${rid}"; \
-        install -m 0644 "${managed_assets[@]}" "/out/lib/${rid}/"; \
+    && for rid in linux-arm64 linux-x64; do \
+        install -d -m 0755 "/out/lib/${rid}" \
+        && install -m 0644 "${managed_assets[@]}" "/out/lib/${rid}/"; \
     done \
-    && install -m 0644 \
-        /nuget/packages/sqlite/3.53.4/runtimes/linux-arm64/native/libe_sqlite3.so \
-        /out/lib/linux-arm64/libe_sqlite3.so \
-    && install -m 0644 \
-        /nuget/packages/sqlite/3.53.4/runtimes/linux-x64/native/libe_sqlite3.so \
-        /out/lib/linux-x64/libe_sqlite3.so \
-    && install -m 0644 \
-        /nuget/packages/sqlite/3.53.4/runtimes/osx-arm64/native/libe_sqlite3.dylib \
-        /out/lib/osx-arm64/libe_sqlite3.dylib \
-    && install -m 0644 \
-        /nuget/packages/sqlite/3.53.4/runtimes/win-x64/native/e_sqlite3.dll \
-        /out/lib/win-x64/e_sqlite3.dll \
-    && find /out/lib -type f -print0 | sort -z | xargs -0 sha256sum \
-        > /out/asset-sha256.txt \
-    && test "$(find /out/lib -mindepth 2 -maxdepth 2 -type f | wc -l)" -eq 20
+    && install -m 0644 /nuget/packages/sqlite/3.53.4/runtimes/linux-arm64/native/libe_sqlite3.so /out/lib/linux-arm64/libe_sqlite3.so \
+    && install -m 0644 /nuget/packages/sqlite/3.53.4/runtimes/linux-x64/native/libe_sqlite3.so /out/lib/linux-x64/libe_sqlite3.so \
+    && find /out/lib -type f -print0 | sort -z | xargs -0 sha256sum > /out/asset-sha256.txt \
+    && test "$(find /out/lib -mindepth 2 -maxdepth 2 -type f | wc -l)" -eq 10
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0.400-noble@sha256:e1ffd2a92ae84c1291bc1b6887501f8af98e6331e7af6d4c8d37168c5e87a64c AS durability-helper
-
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 WORKDIR /src
-
 COPY eng/durability/HostHunter.Persistence.Durability.csproj ./
 COPY eng/durability/packages.lock.json ./
 COPY eng/durability/DurablePublisher.cs ./
-
-RUN dotnet restore HostHunter.Persistence.Durability.csproj \
-        --locked-mode \
-        --packages /nuget/packages \
-    && dotnet build HostHunter.Persistence.Durability.csproj \
-        --configuration Release \
-        --no-restore \
-        --output /out \
+RUN dotnet restore HostHunter.Persistence.Durability.csproj --locked-mode --packages /nuget/packages \
+    && dotnet build HostHunter.Persistence.Durability.csproj --configuration Release --no-restore --output /out \
     && test -f /out/HostHunter.Persistence.Durability.dll
 
 FROM ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517 AS powershell-assets
-
 ARG TARGETARCH
 ARG DEBIAN_FRONTEND=noninteractive
 ARG POWERSHELL_VERSION=7.6.5
 ARG POWERSHELL_AMD64_SHA256=b34ab3b19acac1d3d4d0d3cfdb02acf62f457b0b6a962ff008132033f7566844
 ARG POWERSHELL_ARM64_SHA256=ed4084f215d8bce2edd23aa7cb1f1e7b0818e41363a635a22065d2701b6141df
-
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-
 RUN apt-get update \
-    && apt-get install --no-install-recommends --yes \
-        ca-certificates=20260601~24.04.1 \
-        curl=8.5.0-2ubuntu10.12 \
+    && apt-get install --no-install-recommends --yes ca-certificates=20260601~24.04.1 curl=8.5.0-2ubuntu10.13 \
     && case "${TARGETARCH}" in \
-        amd64) powershell_arch='x64'; powershell_sha256="${POWERSHELL_AMD64_SHA256}" ;; \
-        arm64) powershell_arch='arm64'; powershell_sha256="${POWERSHELL_ARM64_SHA256}" ;; \
+        amd64) powershell_arch=x64; powershell_sha256="${POWERSHELL_AMD64_SHA256}" ;; \
+        arm64) powershell_arch=arm64; powershell_sha256="${POWERSHELL_ARM64_SHA256}" ;; \
         *) echo "Unsupported target architecture: ${TARGETARCH}" >&2; exit 1 ;; \
     esac \
-    && powershell_archive="powershell-${POWERSHELL_VERSION}-linux-${powershell_arch}.tar.gz" \
+    && archive="powershell-${POWERSHELL_VERSION}-linux-${powershell_arch}.tar.gz" \
     && curl --fail --location --proto '=https' --show-error --silent \
-        "https://github.com/PowerShell/PowerShell/releases/download/v${POWERSHELL_VERSION}/${powershell_archive}" \
+        "https://github.com/PowerShell/PowerShell/releases/download/v${POWERSHELL_VERSION}/${archive}" \
         --output /tmp/powershell.tar.gz \
-    && printf '%s  %s\n' "${powershell_sha256}" /tmp/powershell.tar.gz \
-        | sha256sum --check --strict \
+    && printf '%s  %s\n' "${powershell_sha256}" /tmp/powershell.tar.gz | sha256sum --check --strict \
     && mkdir --parents /out \
     && tar --extract --gzip --file /tmp/powershell.tar.gz --directory /out \
     && chmod 0755 /out/pwsh \
@@ -102,181 +58,53 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 FROM ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517 AS runtime-base
-
 ARG DEBIAN_FRONTEND=noninteractive
-
-ENV LANG=C.UTF-8 \
-    LC_ALL=C.UTF-8 \
-    POWERSHELL_TELEMETRY_OPTOUT=1 \
-    POWERSHELL_UPDATECHECK=Off \
+ENV LANG=C.UTF-8 LC_ALL=C.UTF-8 POWERSHELL_TELEMETRY_OPTOUT=1 POWERSHELL_UPDATECHECK=Off \
     PSModuleAnalysisCachePath=/tmp/ModuleAnalysisCache \
     PATH=/opt/microsoft/powershell/7:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-
 RUN apt-get update \
     && apt-get install --no-install-recommends --yes \
-        ca-certificates=20260601~24.04.1 \
-        gss-ntlmssp=1.2.0-1build3 \
-        libgcc-s1=14.2.0-4ubuntu2~24.04.1 \
-        libgssapi-krb5-2=1.20.1-6ubuntu2.8 \
-        libicu74=74.2-1ubuntu3.1 \
-        liblttng-ust1t64=2.13.7-1.1ubuntu2 \
-        libssl3t64=3.0.13-0ubuntu3.12 \
-        libstdc++6=14.2.0-4ubuntu2~24.04.1 \
-        libunwind8=1.6.2-3build1.1 \
-        openssh-client=1:9.6p1-3ubuntu13.18 \
+        ca-certificates=20260601~24.04.1 libgcc-s1=14.2.0-4ubuntu2~24.04.1 \
+        libicu74=74.2-1ubuntu3.1 liblttng-ust1t64=2.13.7-1.1ubuntu2 \
+        libssl3t64=3.0.13-0ubuntu3.15 libstdc++6=14.2.0-4ubuntu2~24.04.1 \
+        libunwind8=1.6.2-3build1.1 openssh-client=1:9.6p1-3ubuntu13.18 \
         zlib1g=1:1.3.dfsg-3.1ubuntu2.1 \
     && rm -rf /var/lib/apt/lists/*
-
 COPY --from=powershell-assets /out /opt/microsoft/powershell/7
-
 RUN ln --symbolic /opt/microsoft/powershell/7/pwsh /usr/local/bin/pwsh \
     && groupadd --gid 10001 hosthunter \
-    && useradd --gid 10001 --home-dir /nonexistent --no-create-home \
-        --no-log-init --shell /usr/sbin/nologin --uid 10001 hosthunter \
-    && install -d -m 0700 -o 10001 -g 10001 \
-        /var/lib/hosthunter-data \
-        '/var/lib/hosthunter-data/Library/Application Support/HostHunterNextGeneration/keys' \
-        /var/lib/hosthunter-secrets \
-        /var/lib/hosthunter-anchors \
-        /var/lib/hosthunter-data/keys \
-        /var/lib/hosthunter-evidence \
-        /run/hosthunter-parser \
+    && useradd --gid 10001 --home-dir /nonexistent --no-create-home --no-log-init \
+        --shell /usr/sbin/nologin --uid 10001 hosthunter \
+    && install -d -m 0700 -o 10001 -g 10001 /var/lib/hosthunter-data \
+        /var/lib/hosthunter-secrets /var/lib/hosthunter-anchors \
+        /var/lib/hosthunter-data/keys /var/lib/hosthunter-evidence \
     && pwsh -NoLogo -NoProfile -NonInteractive -Command \
         "if (\$PSVersionTable.PSVersion.ToString() -cne '7.6.5') { exit 1 }"
 
 FROM runtime-base AS package-builder
-
 COPY --from=sqlite-dependencies /out /opt/hosthunter-sqlite
-COPY --from=durability-helper /out/HostHunter.Persistence.Durability.dll \
-    /opt/hosthunter-durability/HostHunter.Persistence.Durability.dll
-COPY --from=evtx-parser-assets /out /opt/hosthunter-evtx
+COPY --from=durability-helper /out/HostHunter.Persistence.Durability.dll /opt/hosthunter-durability/HostHunter.Persistence.Durability.dll
 COPY src/HostHunterNextGeneration /build/src/HostHunterNextGeneration
 COPY eng/sqlite /build/eng/sqlite
-COPY eng/forensics /build/eng/forensics
 COPY scripts/build/Test-HHModulePackage.ps1 /build/scripts/Test-HHModulePackage.ps1
-
-RUN pwsh -NoLogo -NoProfile -NonInteractive \
-        -File /build/scripts/Test-HHModulePackage.ps1 \
-        -SourceRoot /build/src/HostHunterNextGeneration \
-        -ArtifactRoot /out \
-        -ProviderRoot /opt/hosthunter-sqlite \
-        -MetadataRoot /build/eng/sqlite \
+RUN pwsh -NoLogo -NoProfile -NonInteractive -File /build/scripts/Test-HHModulePackage.ps1 \
+        -SourceRoot /build/src/HostHunterNextGeneration -ArtifactRoot /out \
+        -ProviderRoot /opt/hosthunter-sqlite -MetadataRoot /build/eng/sqlite \
         -DurabilityHelperRoot /opt/hosthunter-durability \
-        -EvtxParserRoot /opt/hosthunter-evtx \
-        -EvtxMetadataRoot /build/eng/forensics \
     && module_path="$(cat /out/module-path.txt)" \
-    && case "${module_path}" in \
-        /out/HostHunterNextGeneration/*/HostHunterNextGeneration.psd1) ;; \
-        *) echo 'The package receipt resolved outside the expected package root.' >&2; exit 1 ;; \
-    esac \
     && module_root="$(dirname -- "${module_path}")" \
     && install -d -m 0755 /runtime-module \
-    && cp --archive "${module_root}/." /runtime-module/ \
-    && test -f /runtime-module/HostHunterNextGeneration.psd1
+    && cp --archive "${module_root}/." /runtime-module/
 
 FROM runtime-base AS controller
-
-ENV HOME=/tmp \
-    HH_RUNTIME_MODULE_PATH=/opt/hosthunter/module/HostHunterNextGeneration.psd1
-
+ENV HOME=/tmp HH_RUNTIME_MODULE_PATH=/opt/hosthunter/module/HostHunterNextGeneration.psd1
 COPY --from=package-builder --chown=0:0 /runtime-module /opt/hosthunter/module
 COPY --chmod=0755 scripts/runtime/controller-entrypoint.sh /usr/local/bin/hosthunter-controller
-COPY --chmod=0555 scripts/runtime/Invoke-HHParserSocketClient.ps1 \
-    /opt/hosthunter/runtime/Invoke-HHParserSocketClient.ps1
-COPY --chmod=0555 scripts/runtime/Invoke-HHRuntimeEcsJourney.ps1 \
-    /opt/hosthunter/runtime/Invoke-HHRuntimeEcsJourney.ps1
-
+COPY --chmod=0555 scripts/runtime/Invoke-HHCmdlet.ps1 /opt/hosthunter/runtime/Invoke-HHCmdlet.ps1
 USER 10001:10001
 WORKDIR /var/lib/hosthunter-data
 ENTRYPOINT ["/usr/local/bin/hosthunter-controller"]
 CMD ["serve"]
 
-FROM ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517 AS parser-selector
-
-ARG TARGETARCH
-COPY --from=evtx-parser-assets /out /tmp/evtx-assets
-
-RUN case "${TARGETARCH}" in \
-        amd64) parser_rid='linux-x64' ;; \
-        arm64) parser_rid='linux-arm64' ;; \
-        *) echo "Unsupported target architecture: ${TARGETARCH}" >&2; exit 1 ;; \
-    esac \
-    && install -D -m 0555 "/tmp/evtx-assets/${parser_rid}/evtx_dump" /out/evtx_dump \
-    && sha256sum /out/evtx_dump > /out/evtx_dump.sha256
-
-FROM ubuntu:24.04@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517 AS parser
-
-ARG DEBIAN_FRONTEND=noninteractive
-
-ENV LANG=C.UTF-8 \
-    LC_ALL=C.UTF-8 \
-    HOME=/tmp \
-    HH_PARSER_SOCKET=/run/hosthunter-parser/parser.sock \
-    HH_PARSER_EVIDENCE_ROOT=/evidence \
-    HH_PARSER_BINARY=/opt/hosthunter-parser/evtx_dump \
-    HH_PARSER_REQUIRE_HARDENING=1
-
-RUN apt-get update \
-    && apt-get install --no-install-recommends --yes \
-        libgcc-s1=14.2.0-4ubuntu2~24.04.1 \
-        python3=3.12.3-0ubuntu2.1 \
-    && groupadd --gid 10001 hosthunter \
-    && useradd --gid 10001 --home-dir /nonexistent --no-create-home \
-        --no-log-init --shell /usr/sbin/nologin --uid 10001 hosthunter \
-    && install -d -m 0700 -o 10001 -g 10001 /evidence \
-    && install -d -m 0500 -o 10001 -g 10001 /opt/hosthunter-parser \
-    && install -d -m 0700 -o 10001 -g 10001 /run/hosthunter-parser \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY --from=parser-selector /out/evtx_dump /opt/hosthunter-parser/evtx_dump
-COPY --from=parser-selector /out/evtx_dump.sha256 /opt/hosthunter-parser/evtx_dump.sha256
-COPY --chmod=0555 scripts/runtime/parser-sidecar.py /opt/hosthunter-parser/parser-sidecar.py
-COPY --chmod=0555 scripts/runtime/parser-probe.py /opt/hosthunter-parser/parser-probe.py
-
-USER 10001:10001
-WORKDIR /opt/hosthunter-parser
-ENTRYPOINT ["python3", "/opt/hosthunter-parser/parser-sidecar.py"]
-
-FROM powershell-assets AS pester-assets
-
-ARG PESTER_VERSION=6.1.0
-ARG PESTER_SHA256=0207a75ea09f81b27c1ded44898b2bb3c845bafa02045bd64a39e26a53ca41b4
-
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-
-RUN apt-get update \
-    && apt-get install --no-install-recommends --yes \
-        unzip=6.0-28ubuntu4.1 \
-    && curl --fail --location --proto '=https' --show-error --silent \
-        "https://www.powershellgallery.com/api/v2/package/Pester/${PESTER_VERSION}" \
-        --output /tmp/Pester.nupkg \
-    && printf '%s  %s\n' "${PESTER_SHA256}" /tmp/Pester.nupkg \
-        | sha256sum --check --strict \
-    && mkdir --parents "/out-pester/Pester/${PESTER_VERSION}" \
-    && unzip -q /tmp/Pester.nupkg -d "/out-pester/Pester/${PESTER_VERSION}" \
-    && rm --force /tmp/Pester.nupkg \
-    && rm -rf /var/lib/apt/lists/*
-
-FROM controller AS runtime-e2e
-
-USER 0:0
-COPY --from=pester-assets /out-pester/Pester \
-    /usr/local/share/powershell/Modules/Pester
-COPY --chown=10001:10001 tests/e2e \
-    /opt/hosthunter-runtime-tests/tests/e2e
-COPY --chown=10001:10001 tests/fixtures/ssh/fixture-askpass.sh \
-    /opt/hosthunter-runtime-tests/tests/fixtures/ssh/fixture-askpass.sh
-COPY --chown=10001:10001 scripts/testing/Invoke-HHPesterLane.ps1 \
-    /opt/hosthunter-runtime-tests/scripts/testing/Invoke-HHPesterLane.ps1
-COPY --chmod=0555 --chown=10001:10001 scripts/runtime/run-journeys.sh \
-    /opt/hosthunter-runtime-tests/run-journeys.sh
-
-USER 10001:10001
-ENTRYPOINT ["/usr/local/bin/hosthunter-controller"]
-CMD ["/opt/hosthunter-runtime-tests/run-journeys.sh"]
-
-# Keep the default build target production-only. The runtime-e2e target above
-# contains test tooling but is never inherited by this final image.
 FROM controller AS production

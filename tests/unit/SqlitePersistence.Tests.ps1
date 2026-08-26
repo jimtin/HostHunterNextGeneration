@@ -15,16 +15,11 @@ Describe 'SQLite persistence foundation' -Tag Unit {
     }
 
     InModuleScope HostHunterNextGeneration {
-        It 'maps only the four qualified controller runtime identifiers' {
-            Resolve-HHSqliteControllerRid -OperatingSystem macOS -Architecture Arm64 |
-                Should -BeExactly 'osx-arm64'
+        It 'maps only the two qualified Linux container runtime identifiers' {
             Resolve-HHSqliteControllerRid -OperatingSystem Linux -Architecture Arm64 |
                 Should -BeExactly 'linux-arm64'
             Resolve-HHSqliteControllerRid -OperatingSystem Linux -Architecture X64 |
                 Should -BeExactly 'linux-x64'
-            Resolve-HHSqliteControllerRid -OperatingSystem Windows -Architecture X64 |
-                Should -BeExactly 'win-x64'
-
             {
                 Resolve-HHSqliteControllerRid `
                     -OperatingSystem Linux `
@@ -38,10 +33,6 @@ Describe 'SQLite persistence foundation' -Tag Unit {
 
         It 'resolves current and explicit provider roots and native asset names' -Skip:(!$IsLinux) {
             Resolve-HHSqliteControllerRid | Should -BeIn @('linux-arm64', 'linux-x64')
-            Get-HHSqliteProviderAssetName -ControllerRid win-x64 |
-                Should -Contain 'e_sqlite3.dll'
-            Get-HHSqliteProviderAssetName -ControllerRid osx-arm64 |
-                Should -Contain 'libe_sqlite3.dylib'
             Get-HHSqliteProviderAssetName -ControllerRid linux-x64 |
                 Should -Contain 'libe_sqlite3.so'
 

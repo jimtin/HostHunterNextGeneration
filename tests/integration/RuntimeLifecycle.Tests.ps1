@@ -12,7 +12,7 @@ BeforeAll {
     $script:originalFailure = $env:HH_FAKE_FAIL_REMOVE_NAME
     $script:originalAttached = $env:HH_FAKE_ATTACHED
     $script:project = 'hosthunter-runtime-lifecycle-test'
-    $script:roles = @('data', 'secrets', 'anchors', 'ssh', 'evidence', 'parser-socket')
+    $script:roles = @('data', 'secrets', 'anchors', 'ssh', 'evidence')
     $script:volumeNames = @($script:roles | ForEach-Object { "$($script:project)-$_" })
 }
 
@@ -63,10 +63,10 @@ AfterEach {
     else { $env:HH_FAKE_ATTACHED = $script:originalAttached }
 }
 
-    It 'initializes exactly six fresh project-owned external volumes without migration' {
+    It 'initializes exactly five fresh project-owned external volumes without migration' {
         $output = @(& bash (Join-Path $script:runtimeRoot 'init.sh') 2>&1)
         $LASTEXITCODE | Should -Be 0 -Because ($output | Out-String)
-        @(Get-ChildItem -LiteralPath $script:fakeState -File).Count | Should -Be 6
+        @(Get-ChildItem -LiteralPath $script:fakeState -File).Count | Should -Be 5
         for ($index = 0; $index -lt $script:roles.Count; $index++) {
             $state = Get-Content -LiteralPath (
                 Join-Path $script:fakeState $script:volumeNames[$index]
@@ -85,7 +85,7 @@ AfterEach {
         $output = @(& bash (Join-Path $script:runtimeRoot 'init.sh') 2>&1)
         $LASTEXITCODE | Should -Be 65
         @(Get-ChildItem -LiteralPath $script:fakeState -File).Count | Should -Be 1
-        ($output | Out-String) | Should -Match '1 of 6 runtime volumes already exist'
+        ($output | Out-String) | Should -Match '1 of 5 runtime volumes already exist'
     }
 
     It 'requires the exact typed project and explicit volume-destruction flag' {
@@ -93,7 +93,7 @@ AfterEach {
         $output = @(& bash (Join-Path $script:runtimeRoot 'destroy.sh') `
                 --confirm-project wrong-project --destroy-volumes 2>&1)
         $LASTEXITCODE | Should -Be 64
-        @(Get-ChildItem -LiteralPath $script:fakeState -File).Count | Should -Be 6
+        @(Get-ChildItem -LiteralPath $script:fakeState -File).Count | Should -Be 5
         ($output | Out-String) | Should -Match 'did not exactly match'
         (Get-Content -LiteralPath $script:fakeLog -Raw) |
             Should -Not -Match '(?m)^volume rm '
@@ -105,11 +105,11 @@ AfterEach {
         $output = @(& bash (Join-Path $script:runtimeRoot 'destroy.sh') `
                 --confirm-project $script:project --destroy-volumes 2>&1)
         $LASTEXITCODE | Should -Be 74
-        @(Get-ChildItem -LiteralPath $script:fakeState -File).Count | Should -Be 6
+        @(Get-ChildItem -LiteralPath $script:fakeState -File).Count | Should -Be 5
         ($output | Out-String) | Should -Match 'remains attached'
     }
 
-    It 'removes and verifies only the exact six preflighted project volumes' {
+    It 'removes and verifies only the exact five preflighted project volumes' {
         $null = & bash (Join-Path $script:runtimeRoot 'init.sh') 2>&1
         $output = @(& bash (Join-Path $script:runtimeRoot 'destroy.sh') `
                 --confirm-project $script:project --destroy-volumes 2>&1)

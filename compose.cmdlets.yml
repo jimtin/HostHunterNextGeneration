@@ -1,0 +1,80 @@
+name: ${HH_CMDLET_PROJECT:?HH_CMDLET_PROJECT is required}
+
+x-verifier-environment: &verifier-environment
+  HOME: /tmp
+  HH_DATA_ROOT: /var/lib/hosthunter-data
+  HH_SECRET_PROVIDER: DockerVolume
+  HH_SECRET_ROOT: /var/lib/hosthunter-secrets
+  HH_ANCHOR_ROOT: /var/lib/hosthunter-anchors
+  HH_SSH_ROOT: /var/lib/hosthunter-data/keys
+  HH_EVIDENCE_ROOT: /var/lib/hosthunter-evidence
+  HH_SSH_HOST: ssh-target
+  HH_SSH_PORT: "22"
+  HH_SSH_RUNTIME_DIR: /run/hosthunter-ssh-fixture
+  HH_CMDLET_RECEIPT: /artifacts/cmdlets/receipt.json
+  HH_SOURCE_SHA: ${HH_SOURCE_SHA:?HH_SOURCE_SHA is required}
+  HH_VERIFIER_IMAGE_ID: ${HH_VERIFIER_IMAGE_ID:?HH_VERIFIER_IMAGE_ID is required}
+
+services:
+  verifier:
+    image: ${HH_CMDLET_VERIFIER_IMAGE:?HH_CMDLET_VERIFIER_IMAGE is required}
+    user: "10001:10001"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1.0
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+    group_add:
+      - "10002"
+    environment: *verifier-environment
+    volumes:
+      - data:/var/lib/hosthunter-data
+      - secrets:/var/lib/hosthunter-secrets
+      - anchors:/var/lib/hosthunter-anchors
+      - ssh:/var/lib/hosthunter-data/keys
+      - evidence:/var/lib/hosthunter-evidence
+      - fixture-runtime:/run/hosthunter-ssh-fixture:ro
+      - ${HH_CMDLET_ARTIFACT_ROOT:?HH_CMDLET_ARTIFACT_ROOT is required}:/artifacts
+    networks:
+      - cmdlets
+    depends_on:
+      ssh-target:
+        condition: service_healthy
+    command:
+      - /opt/hosthunter-cmdlet-tests/TargetAndCommandJourneys.Tests.ps1
+
+  ssh-target:
+    image: ${HH_CMDLET_SSH_IMAGE:?HH_CMDLET_SSH_IMAGE is required}
+    tmpfs:
+      - /tmp:mode=1777
+      - /run/sshd:mode=0755
+      - /home/hhfixture:uid=10001,gid=10001,mode=0700
+    volumes:
+      - fixture-runtime:/run/hosthunter-ssh
+    networks:
+      - cmdlets
+    healthcheck:
+      test:
+        - CMD
+        - /usr/local/bin/hh-ssh-healthcheck
+      interval: 2s
+      timeout: 2s
+      retries: 30
+      start_period: 2s
+
+networks:
+  cmdlets:
+    internal: true
+
+volumes:
+  data:
+  secrets:
+  anchors:
+  ssh:
+  evidence:
+  fixture-runtime:

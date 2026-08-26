@@ -72,6 +72,8 @@ Describe 'Windows process audit policy desired state' -Tag Unit {
             -Right ([ordered]@{ A = 2 }) | Should -BeFalse
         Test-HHAuditFlagMapsEqual -Left ([ordered]@{ A = 1 }) `
             -Right ([ordered]@{ B = 1 }) | Should -BeFalse
+        Test-HHAuditFlagMapsEqual -Left ([ordered]@{ A = 0 }) `
+            -Right ([ordered]@{ A = 4 }) | Should -BeTrue
     }
 
     It 'normalizes finite command-line projections and rejects malformed input' {
@@ -187,6 +189,22 @@ Describe 'Windows process audit policy desired state' -Tag Unit {
         $result.Changed | Should -BeTrue
         $result.AuditAfter.ProcessCreation | Should -Be 1
         $result.CommandLineAfter | Should -BeExactly Disabled
+    }
+
+    It 'accepts the native zero projection after setting AUDIT_NONE' {
+        $script:auditState = [uint32]1
+        $result = Invoke-HHWindowsProcessAuditPolicyChange `
+            -Subcategory ProcessCreation -State Disabled -CommandLineLogging Unchanged `
+            -AuditQuery { [ordered]@{ ProcessCreation = $script:auditState } } `
+            -AuditSet { param($Flags) $null = $Flags; $script:auditState = [uint32]0 } `
+            -CommandLineQuery { 'Enabled' } `
+            -CommandLineSet { throw 'command line must remain unchanged' }
+
+        $result.Succeeded | Should -BeTrue
+        $result.Changed | Should -BeTrue
+        $result.AuditDesired.ProcessCreation | Should -Be 4
+        $result.AuditAfter.ProcessCreation | Should -Be 0
+        $result.CommandLineAfter | Should -BeExactly Enabled
     }
 
     It 'detects command-line verification drift and restores the exact snapshot' {

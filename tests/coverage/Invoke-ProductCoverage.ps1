@@ -48,8 +48,6 @@ $branchTestPhases = @(
         Name = 'authenticated persistence and API integration'
         Paths = @(
             Join-Path $repoRoot 'tests/integration/SqliteMigrationV2.Tests.ps1'
-            Join-Path $repoRoot 'tests/integration/ForensicsMigration.Tests.ps1'
-            Join-Path $repoRoot 'tests/integration/ForensicsApiClient.Tests.ps1'
         )
         Tag = 'Integration'
     }

@@ -47,7 +47,7 @@ cp eng/sqlite/sqlite-dependencies.cdx.json \
 
 (cd "$provider_destination" && sha256sum --check asset-sha256.txt)
 
-expected_rids=(linux-arm64 linux-x64 osx-arm64 win-x64)
+expected_rids=(linux-arm64 linux-x64)
 for rid in "${expected_rids[@]}"; do
   rid_root="$provider_destination/lib/$rid"
   [[ -d "$rid_root" ]] || {
@@ -68,7 +68,7 @@ printf '%s\n' \
   '  "sqlitePclRawVersion": "3.0.5",' \
   '  "nativeSqliteVersion": "3.53.4",' \
   "  \"providerRoot\": \"$provider_destination\"," \
-  '  "runtimeIdentifiers": ["linux-arm64", "linux-x64", "osx-arm64", "win-x64"]' \
+  '  "runtimeIdentifiers": ["linux-arm64", "linux-x64"]' \
   '}' > "$dependency_root/restore-receipt.json"
 
 printf 'Locked SQLite provider assets exported to %s\n' "$provider_destination"

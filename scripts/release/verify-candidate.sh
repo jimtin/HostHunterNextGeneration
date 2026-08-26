@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-
 set -Eeuo pipefail
+export PYTHONDONTWRITEBYTECODE=1
 
 if [[ $# -ne 1 ]]; then
   printf 'usage: %s CANDIDATE_SHA\n' "$0" >&2
@@ -10,163 +10,183 @@ fi
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 repo_root="$(git -C "$script_dir/../.." rev-parse --show-toplevel)"
 repo_root="$(cd -- "$repo_root" && pwd -P)"
-candidate_input="$1"
-
-if [[ -n "$(git -C "$repo_root" status --porcelain=v1 --untracked-files=all)" ]]; then
-  printf 'Exact-candidate verification requires a clean source repository.\n' >&2
-  exit 2
-fi
-
-candidate_sha="$(git -C "$repo_root" rev-parse --verify \
-  "${candidate_input}^{commit}" 2>/dev/null)" || {
-  printf 'Unknown candidate commit: %s\n' "$candidate_input" >&2
+state="$script_dir/release-receipt-state.py"
+candidate_sha="$(git -C "$repo_root" rev-parse --verify "$1^{commit}" 2>/dev/null)" || {
+  printf 'Unknown candidate commit: %s\n' "$1" >&2
   exit 2
 }
 candidate_tree="$(git -C "$repo_root" show -s --format=%T "$candidate_sha")"
-short_sha="${candidate_sha:0:12}"
 artifact_root="$repo_root/.artifacts/release/$candidate_sha"
+started_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
+
+terminal_status=failed
+terminal_phase=initialization
+terminal_reason='Release process exited before completing all phases'
+terminal_exit_code=1
+sealed=false
+claim_acquired=false
+worktree_root=''
+checkout_root=''
+worktree_added=false
+project_name="hosthunter-candidate-${candidate_sha:0:12}-$$"
+
+seal_terminal() {
+  local process_exit="${1:-$?}"
+  if [[ "$claim_acquired" == true && "$sealed" == false ]]; then
+    if [[ "$terminal_exit_code" -eq 0 && "$terminal_status" != passed ]]; then
+      terminal_exit_code="$process_exit"
+    fi
+    python3 "$state" seal --root "$artifact_root" --sha "$candidate_sha" \
+      --status "$terminal_status" --phase "$terminal_phase" \
+      --exit-code "$terminal_exit_code" --reason "$terminal_reason" \
+      --finished "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >/dev/null || true
+    sealed=true
+  fi
+}
+
+# Invoked by the EXIT and signal traps below.
+# shellcheck disable=SC2329
+cleanup() {
+  local process_exit="$?"
+  trap - EXIT INT TERM HUP
+  if [[ -n "$checkout_root" && -f "$checkout_root/compose.test.yml" ]]; then
+    docker compose --project-name "$project_name" --file "$checkout_root/compose.test.yml" \
+      down --volumes --remove-orphans >/dev/null 2>&1 || true
+  fi
+  if [[ "$worktree_added" == true ]]; then
+    git -C "$repo_root" worktree remove --force "$checkout_root" >/dev/null 2>&1 || true
+  fi
+  [[ -z "$worktree_root" ]] || rm -rf -- "$worktree_root"
+  seal_terminal "$process_exit"
+  exit "$process_exit"
+}
+# Invoked by the signal traps below.
+# shellcheck disable=SC2329
+abort_signal() {
+  terminal_status=aborted
+  terminal_phase=interrupted
+  terminal_reason="Release process received signal $1; the exact SHA remains consumed"
+  terminal_exit_code=130
+  exit 130
+}
+block() {
+  terminal_status=blocked
+  terminal_phase="$1"
+  terminal_reason="$2"
+  terminal_exit_code=2
+  printf '%s\n' "$2" >&2
+  exit 2
+}
+trap cleanup EXIT
+trap 'abort_signal INT' INT
+trap 'abort_signal TERM' TERM
+trap 'abort_signal HUP' HUP
+
+# An existing directory is a permanently consumed SHA. If its owner is gone,
+# seal it aborted; in every case refuse to execute candidate work again.
+if [[ -e "$artifact_root" ]]; then
+  python3 "$state" recover --root "$artifact_root" --sha "$candidate_sha" \
+    --stale-after "${HH_RELEASE_CLAIM_STALE_AFTER_SECONDS:-86400}" >/dev/null 2>&1 || true
+  printf 'Exact SHA has already been claimed and can never rerun: %s\n' "$candidate_sha" >&2
+  exit 73
+fi
+
+# mkdir(2) on the exact-SHA directory is the atomic, durable once-only claim.
+python3 "$state" claim --root "$artifact_root" --sha "$candidate_sha" \
+  --tree "$candidate_tree" --started "$started_at" --pid "$$"
+claim_acquired=true
+
+terminal_phase=source-preconditions
+[[ -z "$(git -C "$repo_root" status --porcelain=v1 --untracked-files=all)" ]] || \
+  block "$terminal_phase" 'Exact-candidate verification requires a clean source repository.'
+
 worktree_root="$(mktemp -d "${TMPDIR:-/tmp}/hosthunter-candidate.XXXXXX")"
 checkout_root="$worktree_root/checkout"
-started_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-project_name="hosthunter-candidate-${short_sha}-$$"
-worktree_added=false
-
-cleanup() {
-  docker compose --project-name "$project_name" \
-    --file "$checkout_root/compose.test.yml" \
-    down --volumes --remove-orphans >/dev/null 2>&1 || true
-  if [[ "$worktree_added" == true ]]; then
-    git -C "$repo_root" worktree remove --force "$checkout_root" \
-      >/dev/null 2>&1 || true
-  fi
-  rm -rf -- "$worktree_root"
-}
-trap cleanup EXIT INT TERM HUP
-
-mkdir -p -- "$artifact_root"
 git -C "$repo_root" worktree add --detach "$checkout_root" "$candidate_sha"
 worktree_added=true
-
-if [[ "$(git -C "$checkout_root" rev-parse HEAD)" != "$candidate_sha" ]] ||
-  [[ -n "$(git -C "$checkout_root" status --porcelain=v1 --untracked-files=all)" ]]; then
-  printf 'Detached candidate checkout is not the requested clean commit.\n' >&2
-  exit 2
-fi
+[[ "$(git -C "$checkout_root" rev-parse HEAD)" == "$candidate_sha" ]] || \
+  block detached-checkout 'Detached checkout does not match the claimed SHA.'
 
 export COMPOSE_PROJECT_NAME="$project_name"
 export HH_CANDIDATE_SHA="$candidate_sha"
 
-(cd -- "$checkout_root" && ./scripts/verify-local.sh)
-
-package_path_container="$(jq -r '.packagePath' \
-  "$checkout_root/.artifacts/build/module-package.json")"
-case "$package_path_container" in
-  /artifacts/*)
-    package_root="$checkout_root/.artifacts/${package_path_container#/artifacts/}"
-    ;;
-  *)
-    printf 'Build receipt returned an unsafe package path: %s\n' \
-      "$package_path_container" >&2
-    exit 2
-    ;;
-esac
-[[ -d "$package_root" ]] || {
-  printf 'Built candidate package is missing: %s\n' "$package_root" >&2
-  exit 2
-}
-
-(cd -- "$checkout_root" && \
-  ./scripts/security/scan-release-package.sh "$package_root")
-
-package_inventory="$artifact_root/package-sha256.txt"
-(cd -- "$package_root" && \
-  find . -type f -exec shasum -a 256 {} \; | LC_ALL=C sort -k2) \
-  > "$package_inventory"
-package_inventory_sha256="$(shasum -a 256 "$package_inventory" | awk '{print $1}')"
-
-archive_path="$artifact_root/HostHunterNextGeneration-${candidate_sha}.tar.gz"
-COPYFILE_DISABLE=1 tar -C "$(dirname -- "$package_root")" \
-  -czf "$archive_path" "$(basename -- "$package_root")"
-package_archive_sha256="$(shasum -a 256 "$archive_path" | awk '{print $1}')"
-
-mkdir -p -- "$artifact_root/evidence"
-"$checkout_root/scripts/release/copy-proof-receipts.sh" \
-  "$checkout_root/.artifacts" "$artifact_root/evidence"
-
-runtime_receipt="$artifact_root/evidence/runtime/runtime-verification.json"
-runtime_contract="$artifact_root/evidence/runtime/runtime-container.json"
-security_receipt="$artifact_root/evidence/security/receipt.json"
-for required_receipt in "$runtime_receipt" "$runtime_contract" "$security_receipt"; do
-  [[ -f "$required_receipt" ]] || {
-    printf 'Required compact candidate evidence is missing: %s\n' \
-      "$required_receipt" >&2
-    exit 2
-  }
-done
-jq -e '
-  .status == "passed" and
-  .freshExternalVolumes == 6 and
-  .nativeMigrationAttempted == false and
-  .exactVolumeDestructionVerified == true and
-  .cliJourney.journeys == 23 and
-  .cliJourney.spaceContainingDataRootVerified == true and
-  (.parserEcsJourneys | length) == 2 and
-  ([.parserEcsJourneys[] |
-    select(.status == "passed" and .ecsVersion == "9.5.0" and
-      .plaintextJsonlArtifactCreated == false)] | length) == 2
-' \
-  "$runtime_receipt" >/dev/null
-jq -e '.status == "passed" and .controller.imageId and .parser.imageId' \
-  "$runtime_contract" >/dev/null
-jq -e '.status == "passed" and .scope == "full-product-and-production-runtime"' \
-  "$security_receipt" >/dev/null
-runtime_receipt_sha256="$(shasum -a 256 "$runtime_receipt" | awk '{print $1}')"
-controller_image_id="$(jq -r '.controller.imageId' "$runtime_contract")"
-parser_image_id="$(jq -r '.parser.imageId' "$runtime_contract")"
-
-if [[ -n "$(git -C "$checkout_root" status --porcelain=v1 --untracked-files=all)" ]]; then
-  printf 'Candidate proof dirtied tracked or unignored checkout state.\n' >&2
-  exit 2
-fi
-if [[ "$(git -C "$checkout_root" rev-parse HEAD)" != "$candidate_sha" ]]; then
-  printf 'Candidate checkout HEAD changed during proof.\n' >&2
-  exit 2
+terminal_phase=cmdlet-verdict
+cmdlet_command="${HH_CMDLET_VERIFY_COMMAND:-./scripts/verify-cmdlets.sh}"
+set +e
+(cd -- "$checkout_root" && bash -c "$cmdlet_command")
+cmdlet_exit=$?
+set -e
+cmdlet_source="${HH_CMDLET_RECEIPT_PATH:-$checkout_root/.artifacts/cmdlets/$candidate_sha/cmdlets/receipt.json}"
+if [[ -f "$cmdlet_source" ]]; then
+  python3 "$state" record --root "$artifact_root" --sha "$candidate_sha" \
+    --kind cmdlet --source "$cmdlet_source"
+else
+  cmdlet_status=failed
+  [[ "$cmdlet_exit" -eq 0 ]] && cmdlet_status=blocked
+  python3 "$state" record --root "$artifact_root" --sha "$candidate_sha" \
+    --kind cmdlet --status "$cmdlet_status" \
+    --reason "Cmdlet verifier exit $cmdlet_exit did not produce its independent receipt"
 fi
 
-finished_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-receipt_tmp="$artifact_root/receipt.json.tmp"
-jq -n \
-  --arg status passed \
-  --arg candidateSha "$candidate_sha" \
-  --arg candidateTree "$candidate_tree" \
-  --arg packageArchive "$(basename -- "$archive_path")" \
-  --arg packageArchiveSha256 "$package_archive_sha256" \
-  --arg packageInventorySha256 "$package_inventory_sha256" \
-  --arg runtimeReceiptSha256 "$runtime_receipt_sha256" \
-  --arg controllerImageId "$controller_image_id" \
-  --arg parserImageId "$parser_image_id" \
-  --arg composeProject "$project_name" \
-  --arg startedAtUtc "$started_at" \
-  --arg finishedAtUtc "$finished_at" \
-  '{
-    status: $status,
-    candidateSha: $candidateSha,
-    candidateTree: $candidateTree,
-    packageArchive: $packageArchive,
-    packageArchiveSha256: $packageArchiveSha256,
-    packageInventorySha256: $packageInventorySha256,
-    runtimeReceiptSha256: $runtimeReceiptSha256,
-    productionRuntimeImageIds: {
-      controller: $controllerImageId,
-      parser: $parserImageId
-    },
-    composeProject: $composeProject,
-    startedAtUtc: $startedAtUtc,
-    finishedAtUtc: $finishedAtUtc,
-    fullProofReceipt: "evidence/summary/verify-local.json",
-    releasePackageReceipt: "evidence/security/release-package/receipt.json"
-  }' > "$receipt_tmp"
-mv -f -- "$receipt_tmp" "$artifact_root/receipt.json"
+terminal_phase=heavy-proof
+heavy_command="${HH_RELEASE_PROOF_COMMAND:-./scripts/verify-local.sh}"
+set +e
+(cd -- "$checkout_root" && bash -c "$heavy_command")
+heavy_exit=$?
+set -e
+heavy_source="${HH_RELEASE_PROOF_RECEIPT_PATH:-$checkout_root/.artifacts/summary/verify-local.json}"
+if [[ -f "$heavy_source" ]]; then
+  python3 "$state" record --root "$artifact_root" --sha "$candidate_sha" \
+    --kind heavy --source "$heavy_source"
+else
+  heavy_status=failed
+  [[ "$heavy_exit" -eq 0 ]] && heavy_status=blocked
+  python3 "$state" record --root "$artifact_root" --sha "$candidate_sha" \
+    --kind heavy --status "$heavy_status" \
+    --reason "Heavy proof exit $heavy_exit did not produce its independent receipt"
+fi
 
-printf 'Exact candidate proof passed: %s\nReceipt: %s\n' \
-  "$candidate_sha" "$artifact_root/receipt.json"
+terminal_phase=windows-qualification
+windows_command="${HH_WINDOWS_QUALIFICATION_COMMAND:-}"
+windows_source="${HH_WINDOWS_QUALIFICATION_RECEIPT_PATH:-$checkout_root/.artifacts/qualification/windows/$candidate_sha/receipt.json}"
+if [[ -z "$windows_command" ]]; then
+  windows_exit=2
+  python3 "$state" record --root "$artifact_root" --sha "$candidate_sha" \
+    --kind windows --status blocked \
+    --reason 'Live Windows qualification command was not supplied for this exact SHA'
+else
+  set +e
+  (cd -- "$checkout_root" && bash -c "$windows_command")
+  windows_exit=$?
+  set -e
+  if [[ -f "$windows_source" ]]; then
+    python3 "$state" record --root "$artifact_root" --sha "$candidate_sha" \
+      --kind windows --source "$windows_source"
+  else
+    windows_status=failed
+    [[ "$windows_exit" -eq 0 ]] && windows_status=blocked
+    python3 "$state" record --root "$artifact_root" --sha "$candidate_sha" \
+      --kind windows --status "$windows_status" \
+      --reason "Windows qualification exit $windows_exit produced no receipt"
+  fi
+fi
+
+cmdlet_status="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$artifact_root/cmdlet-receipt.json")"
+heavy_status="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$artifact_root/heavy-receipt.json")"
+windows_status="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' "$artifact_root/windows-receipt.json")"
+terminal_phase=aggregation
+if [[ "$cmdlet_exit" -eq 0 && "$heavy_exit" -eq 0 && \
+      "$windows_exit" -eq 0 && "$cmdlet_status" == passed && \
+      "$heavy_status" == passed && "$windows_status" == passed ]]; then
+  terminal_status=passed
+  terminal_reason='Cmdlet verdict, one-shot heavy release proof, and live Windows qualification passed'
+  terminal_exit_code=0
+else
+  terminal_status=failed
+  terminal_reason="Release failed; cmdlets=$cmdlet_status heavy=$heavy_status windows=$windows_status"
+  terminal_exit_code=1
+fi
+seal_terminal "$terminal_exit_code"
+printf 'Exact candidate release is terminal: %s\nReceipt: %s\n' \
+  "$terminal_status" "$artifact_root/receipt.json"
+exit "$terminal_exit_code"

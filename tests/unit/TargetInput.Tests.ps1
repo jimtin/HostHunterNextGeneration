@@ -46,7 +46,7 @@ Describe 'target input conversion' -Tag Unit {
         }
 
         It 'reports every required property when it is absent' {
-            foreach ($propertyName in @('Name', 'Transport', 'HostName', 'Port', 'UserName', 'Authentication')) {
+            foreach ($propertyName in @('Name', 'HostName', 'Port', 'UserName', 'Authentication')) {
                 $candidate = [ordered]@{}
                 foreach ($property in $script:proposal.PSObject.Properties) {
                     if ($property.Name -ne $propertyName) {
@@ -90,19 +90,15 @@ Describe 'target input conversion' -Tag Unit {
             $target.PowerShellRuntime | Should -BeExactly 'PowerShell7'
         }
 
-        It 'creates an explicit Windows PowerShell 5.1 compatibility proposal' {
+        It 'rejects an explicit Windows PowerShell 5.1 compatibility proposal' {
             $candidate = $script:proposal.PSObject.Copy()
             Add-Member `
                 -InputObject $candidate `
                 -NotePropertyName PowerShellRuntime `
                 -NotePropertyValue WindowsPowerShell51
 
-            $target = ConvertTo-HHProposedTarget -InputObject $candidate
-
-            $target.PowerShellRuntime | Should -BeExactly 'WindowsPowerShell51'
-            $target.LastValidatedPSEdition | Should -BeExactly 'Desktop'
-            $target.LastValidatedPowerShellVersion | Should -BeExactly '5.1'
-            $target.LastValidatedExecutionMode | Should -BeExactly 'WindowsPowerShellCompatibility'
+            { ConvertTo-HHProposedTarget -InputObject $candidate } |
+                Should -Throw '*Only PowerShell7 target creation is supported*'
         }
 
         It 'rejects WinRM proposals while first-release qualification is deferred' {
@@ -116,7 +112,7 @@ Describe 'target input conversion' -Tag Unit {
             }
 
             { ConvertTo-HHProposedTarget -InputObject $candidate } |
-                Should -Throw '*WinRM target creation is deferred*'
+                Should -Throw '*Only SSH target creation is supported*'
         }
 
         It 'persists only observed runtime fields from a successful probe result' {
@@ -134,28 +130,6 @@ Describe 'target input conversion' -Tag Unit {
             $validated.LastValidatedPSEdition | Should -BeExactly 'Core'
             $validated.LastValidatedPowerShellVersion | Should -BeExactly '7.6.5'
             $validated.LastValidatedExecutionMode | Should -BeExactly 'Direct'
-        }
-
-        It 'persists an observed Windows PowerShell 5.1 compatibility result' {
-            $candidate = $script:proposal.PSObject.Copy()
-            Add-Member `
-                -InputObject $candidate `
-                -NotePropertyName PowerShellRuntime `
-                -NotePropertyValue WindowsPowerShell51
-            $target = ConvertTo-HHProposedTarget -InputObject $candidate
-            $result = [pscustomobject]@{
-                ValidatedAtUtc = '2026-08-24T01:02:03Z'
-                RemotePSEdition = 'Desktop'
-                RemotePowerShellVersion = '5.1.26100.9168'
-                ExecutionMode = 'WindowsPowerShellCompatibility'
-            }
-
-            $validated = ConvertTo-HHValidatedProbeTarget -Target $target -TransportResult $result
-
-            $validated.PowerShellRuntime | Should -BeExactly 'WindowsPowerShell51'
-            $validated.LastValidatedPSEdition | Should -BeExactly 'Desktop'
-            $validated.LastValidatedPowerShellVersion | Should -BeExactly '5.1.26100.9168'
-            $validated.LastValidatedExecutionMode | Should -BeExactly 'WindowsPowerShellCompatibility'
         }
 
         It 'fails closed when any observed runtime field is absent or empty' {

@@ -41,5 +41,5 @@ done
 runtime_validate_all_volumes
 trap - ERR INT TERM HUP
 
-printf 'Initialized %s fresh external volumes for project %s. No native state was migrated.\n' \
+printf 'Initialized %s separated trust-domain volumes for project %s. No native state was migrated.\n' \
   "${#runtime_volume_names[@]}" "$HH_RUNTIME_PROJECT"

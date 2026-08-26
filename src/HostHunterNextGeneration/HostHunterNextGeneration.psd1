@@ -5,7 +5,7 @@
     Author = 'James Hinton'
     CompanyName = 'HostHunter'
     Copyright = '(c) 2026 James Hinton. MIT License.'
-    Description = 'Containerized accountable PowerShell remoting, Windows policy control, and protected ECS Process Start processing.'
+    Description = 'Containerized accountable PowerShell 7 remoting and Windows process-audit policy control over SSH.'
     PowerShellVersion = '7.4'
     CompatiblePSEditions = @('Core')
     FunctionsToExport = @(
@@ -26,7 +26,7 @@
     AliasesToExport = @()
     PrivateData = @{
         PSData = @{
-            Tags = @('PowerShell', 'Remoting', 'SSH', 'Audit', 'Docker', 'ECS', 'Forensics')
+            Tags = @('PowerShell', 'Remoting', 'SSH', 'Audit', 'Docker', 'SQLite')
             LicenseUri = 'https://opensource.org/license/mit'
             ProjectUri = 'https://github.com/jimtin/HostHunterNextGeneration'
             Prerelease = 'preview1'

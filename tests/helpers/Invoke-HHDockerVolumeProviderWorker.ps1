@@ -13,114 +13,69 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-
 $module = Import-Module $ModulePath -Force -PassThru
-& $module {
-    param(
-        $WorkerDataRoot,
-        $WorkerSecretRoot,
-        $WorkerAnchorRoot,
-        $WorkerReadyPath,
-        $WorkerStartPath,
-        $WorkerResultPath,
-        $WorkerMode,
-        $WorkerOffset
-    )
 
-    function New-HHWorkerForensicsAnchor {
+& $module {
+    param($Data, $Secrets, $Anchors, $Ready, $Start, $Result, $WorkerMode, $ByteOffset)
+
+    function New-WorkerCoreAnchor {
         [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
             'PSUseShouldProcessForStateChangingFunctions',
             '',
-            Justification = 'Creates an in-memory integration fixture only.'
+            Justification = 'This test helper constructs an in-memory anchor object and does not mutate state.'
         )]
-        param([long]$Generation, [byte]$ByteOffset)
-
-        return [pscustomobject]@{
-            Schema = 'hosthunter.forensics-anchor/1'
-            Service = 'HostHunterNextGeneration.Forensics.v1'
-            Account = 'ledger-anchor'
-            DatabaseId = [byte[]](0..15 | ForEach-Object {
-                    [byte]($_ + $ByteOffset)
-                })
-            SchemaVersion = 1L
-            SchemaFingerprint = [byte[]](16..47 | ForEach-Object {
-                    [byte]($_ + $ByteOffset)
-                })
-            Generation = $Generation
-            StateDigest = [byte[]](48..79 | ForEach-Object {
-                    [byte]($_ + $ByteOffset)
-                })
-            StateMac = [byte[]](80..111 | ForEach-Object {
-                    [byte]($_ + $ByteOffset)
-                })
-            ProjectionDigest = [byte[]](112..143 | ForEach-Object {
-                    [byte]($_ + $ByteOffset)
-                })
-            ProjectionMac = [byte[]](144..175 | ForEach-Object {
-                    [byte]($_ + $ByteOffset)
-                })
-            AnchorMac = [byte[]](176..207 | ForEach-Object {
-                    [byte]($_ + $ByteOffset)
-                })
+        param([long]$Generation, [byte]$OffsetValue)
+        [pscustomobject]@{
+            DatabaseId = [byte[]](0..15 | ForEach-Object { [byte]($_ + $OffsetValue) })
+            LedgerId = [byte[]](16..31 | ForEach-Object { [byte]($_ + $OffsetValue) })
+            SchemaVersion = 1
+            AuditSequence = $Generation
+            AuditMac = [byte[]](32..63 | ForEach-Object { [byte]($_ + $OffsetValue) })
+            TargetGeneration = $Generation
+            TargetStateMac = [byte[]](64..95 | ForEach-Object { [byte]($_ + $OffsetValue) })
+            SchemaFingerprint = [byte[]](96..127 | ForEach-Object { [byte]($_ + $OffsetValue) })
+            ConfigurationGeneration = $Generation
+            ConfigurationStateMac = [byte[]](128..159 | ForEach-Object { [byte]($_ + $OffsetValue) })
         }
     }
 
-    function Wait-HHWorkerStartSignal {
-        [CmdletBinding()]
-        param([Parameter(Mandatory)][string]$Path)
+    $provider = New-HHDockerVolumePersistenceProvider -DataRoot $Data `
+        -SecretRoot $Secrets -AnchorRoot $Anchors
+    $context = [pscustomobject]@{ DataRoot = $Data }
+    $key = & $provider.CoreMasterKeyProvider $context $false
+    try {
+        $existingAnchor = & $provider.CoreAnchorReader $context $key
+        $expected = if ($null -eq $existingAnchor) { $null } else { $existingAnchor.Artifact }
+        $generation = if ($null -eq $existingAnchor) { 0L } else { 1L }
+        $newArtifact = ConvertTo-HHPersistenceAnchorArtifact `
+            -Anchor (New-WorkerCoreAnchor -Generation $generation -OffsetValue ([byte]$ByteOffset)) `
+            -MasterKey $key
+        if ($WorkerMode -eq 'Initialize') {
+            $expected = $null
+            $success = 'INITIALIZED'
+            $failure = 'DUPLICATE'
+        }
+        else {
+            if ($null -eq $expected) { throw 'Advance requires an initialized anchor.' }
+            $success = 'ADVANCED'
+            $failure = 'STALE'
+        }
 
+        [IO.File]::WriteAllText($Ready, 'READY')
         $deadline = [DateTime]::UtcNow.AddSeconds(15)
-        while (-not [IO.File]::Exists($Path)) {
-            if ([DateTime]::UtcNow -ge $deadline) {
-                throw 'The Docker-volume provider worker start signal timed out.'
-            }
+        while (-not [IO.File]::Exists($Start)) {
+            if ([DateTime]::UtcNow -ge $deadline) { throw 'Worker barrier timed out.' }
             Start-Sleep -Milliseconds 20
         }
-    }
-
-    $provider = New-HHDockerVolumePersistenceProvider `
-        -DataRoot $WorkerDataRoot -SecretRoot $WorkerSecretRoot `
-        -AnchorRoot $WorkerAnchorRoot
-    $context = [pscustomobject]@{ DataRoot = $WorkerDataRoot }
-    $providedKey = & $provider.ForensicsKeyProvider
-    [Array]::Clear($providedKey.KeyBytes, 0, $providedKey.KeyBytes.Length)
-
-    if ($WorkerMode -eq 'Initialize') {
-        $expected = $null
-        $newAnchor = New-HHWorkerForensicsAnchor `
-            -Generation 0 -ByteOffset ([byte]$WorkerOffset)
-        $successStatus = 'INITIALIZED'
-        $failureStatus = 'DUPLICATE'
-    }
-    else {
-        $expected = & $provider.ForensicsAnchorReader $context
-        if ($null -eq $expected) {
-            throw 'The advance worker requires an initialized anchor.'
+        $status = $success
+        try { & $provider.CoreAnchorWriter $context $expected $newArtifact $key }
+        catch {
+            if (($_.FullyQualifiedErrorId -split ',', 2)[0] -ne 'DockerVolumeAnchorCompareFailed') {
+                throw
+            }
+            $status = $failure
         }
-        $newAnchor = New-HHWorkerForensicsAnchor `
-            -Generation ([long]$expected.Generation + 1) `
-            -ByteOffset ([byte]$WorkerOffset)
-        $successStatus = 'ADVANCED'
-        $failureStatus = 'STALE'
+        [IO.File]::WriteAllText($Result, $status)
     }
-
-    [IO.File]::WriteAllText($WorkerReadyPath, 'READY')
-    Wait-HHWorkerStartSignal -Path $WorkerStartPath
-    $status = $successStatus
-    try {
-        & $provider.ForensicsAnchorWriter $expected $newAnchor $context
-    }
-    catch {
-        $errorId = ($_.FullyQualifiedErrorId -split ',', 2)[0]
-        if ($errorId -ne 'DockerVolumeAnchorCompareFailed') { throw }
-        $status = $failureStatus
-    }
-
-    $readback = & $provider.ForensicsAnchorReader $context
-    if ($null -eq $readback -or
-        [long]$readback.Generation -ne [long]$newAnchor.Generation) {
-        throw 'The Docker-volume provider worker could not verify the committed anchor.'
-    }
-    [IO.File]::WriteAllText($WorkerResultPath, $status)
+    finally { [Array]::Clear($key, 0, $key.Length) }
 } $DataRoot $SecretRoot $AnchorRoot $ReadyPath $StartPath $ResultPath $Mode $Offset
-

@@ -1,2 +1,0 @@
-{"Event":{"System":{"Provider":{"#attributes":{"Name":"Microsoft-Windows-Sysmon"}},"EventID":5,"Version":3,"TimeCreated":{"#attributes":{"SystemTime":"2026-08-25T03:00:00Z"}},"EventRecordID":301,"Channel":"Microsoft-Windows-Sysmon/Operational","Computer":"WIN-LAB"},"EventData":{"Data":[]}}}
-{"Event":{"System":{"Provider":{"#attributes":{"Name":"Microsoft-Windows-Security-Auditing"}},"EventID":4689,"Version":0,"TimeCreated":{"#attributes":{"SystemTime":"2026-08-25T03:01:00Z"}},"EventRecordID":302,"Channel":"Security","Computer":"WIN-LAB"},"EventData":{"Data":[]}}}

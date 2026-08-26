@@ -1,7 +1,5 @@
 Set-StrictMode -Version Latest
 
-$script:HHControllerIsMacOS = $IsMacOS
-
 function Resolve-HHDataRoot {
     [CmdletBinding()]
     param([string]$DataRoot)
@@ -11,12 +9,6 @@ function Resolve-HHDataRoot {
     }
     if (-not [string]::IsNullOrWhiteSpace($env:HH_DATA_ROOT)) {
         return [System.IO.Path]::GetFullPath($env:HH_DATA_ROOT)
-    }
-    if ($IsWindows) {
-        return Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'HostHunterNextGeneration'
-    }
-    if ($IsMacOS) {
-        return Join-Path ([Environment]::GetFolderPath('UserProfile')) 'Library/Application Support/HostHunterNextGeneration'
     }
     if (-not [string]::IsNullOrWhiteSpace($env:XDG_STATE_HOME)) {
         return Join-Path $env:XDG_STATE_HOME 'hosthunter-next-generation'
@@ -28,15 +20,10 @@ function Protect-HHPrivateFileMode {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path)
 
-    if ($IsWindows) {
-        Protect-HHWindowsPrivatePathAcl -Path $Path
-    }
-    else {
-        [System.IO.File]::SetUnixFileMode(
-            $Path,
-            [System.IO.UnixFileMode]::UserRead -bor [System.IO.UnixFileMode]::UserWrite
-        )
-    }
+    [System.IO.File]::SetUnixFileMode(
+        $Path,
+        [System.IO.UnixFileMode]::UserRead -bor [System.IO.UnixFileMode]::UserWrite
+    )
 }
 
 function Confirm-HHAuditKeyFileSafety {
@@ -59,26 +46,21 @@ function Confirm-HHAuditKeyFileSafety {
                 -Message 'The audit key path must be a regular private file. Remote activity is blocked.' `
                 -Category ([System.Management.Automation.ErrorCategory]::SecurityError))
     }
-    if ($IsWindows) {
-        Assert-HHWindowsPrivatePathAcl -Path $Path
+    $requiredMode = [System.IO.UnixFileMode]::UserRead -bor [System.IO.UnixFileMode]::UserWrite
+    try {
+        $actualMode = [System.IO.File]::GetUnixFileMode($Path)
     }
-    else {
-        $requiredMode = [System.IO.UnixFileMode]::UserRead -bor [System.IO.UnixFileMode]::UserWrite
-        try {
-            $actualMode = [System.IO.File]::GetUnixFileMode($Path)
-        }
-        catch {
-            throw (Get-HHAuditKeyStoreErrorRecord `
-                    -ErrorId 'AuditFileKeyUnsafe' `
-                    -Message 'The audit key permissions cannot be inspected. Remote activity is blocked.' `
-                    -Category ([System.Management.Automation.ErrorCategory]::SecurityError))
-        }
-        if ($actualMode -ne $requiredMode) {
-            throw (Get-HHAuditKeyStoreErrorRecord `
-                    -ErrorId 'AuditFileKeyUnsafe' `
-                    -Message 'The audit key file must have mode 0600. Remote activity is blocked.' `
-                    -Category ([System.Management.Automation.ErrorCategory]::SecurityError))
-        }
+    catch {
+        throw (Get-HHAuditKeyStoreErrorRecord `
+                -ErrorId 'AuditFileKeyUnsafe' `
+                -Message 'The audit key permissions cannot be inspected. Remote activity is blocked.' `
+                -Category ([System.Management.Automation.ErrorCategory]::SecurityError))
+    }
+    if ($actualMode -ne $requiredMode) {
+        throw (Get-HHAuditKeyStoreErrorRecord `
+                -ErrorId 'AuditFileKeyUnsafe' `
+                -Message 'The audit key file must have mode 0600. Remote activity is blocked.' `
+                -Category ([System.Management.Automation.ErrorCategory]::SecurityError))
     }
 }
 
@@ -140,10 +122,8 @@ function Write-HHPrivateAuditKeyFile {
     $options.Access = [System.IO.FileAccess]::Write
     $options.Share = [System.IO.FileShare]::None
     $options.Options = [System.IO.FileOptions]::WriteThrough
-    if (-not $IsWindows) {
-        $options.UnixCreateMode = [System.IO.UnixFileMode]::UserRead -bor
-            [System.IO.UnixFileMode]::UserWrite
-    }
+    $options.UnixCreateMode = [System.IO.UnixFileMode]::UserRead -bor
+        [System.IO.UnixFileMode]::UserWrite
 
     $stream = $null
     try {
@@ -159,9 +139,6 @@ function Write-HHPrivateAuditKeyFile {
             $stream.Dispose()
         }
     }
-    if ($IsWindows) {
-        Protect-HHPrivateFileMode -Path $Path
-    }
     Confirm-HHAuditKeyFileSafety -Path $Path
 }
 
@@ -173,25 +150,9 @@ function Get-HHFileAuditMasterKey {
         [switch]$RequireExisting
     )
 
-    if ($script:HHControllerIsMacOS) {
-        throw (Get-HHAuditKeyStoreErrorRecord `
-                -ErrorId 'AuditKeyPlaintextDowngradeBlocked' `
-                -Message 'The plaintext audit-key provider is disabled on macOS. Remote activity is blocked.' `
-                -Category ([System.Management.Automation.ErrorCategory]::SecurityError))
-    }
-
     $auditRoot = Join-Path $DataRoot 'audit'
     $keyPath = Join-Path $auditRoot 'audit.key'
-    $auditRootExisted = [System.IO.Directory]::Exists($auditRoot)
     [System.IO.Directory]::CreateDirectory($auditRoot) | Out-Null
-    if ($IsWindows) {
-        if ($auditRootExisted) {
-            Assert-HHWindowsPrivatePathAcl -Path $auditRoot -Directory
-        }
-        else {
-            Protect-HHWindowsPrivatePathAcl -Path $auditRoot -Directory
-        }
-    }
     if (Test-Path -LiteralPath $keyPath -PathType Leaf) {
         return Read-HHPrivateAuditKeyFile -Path $keyPath
     }
@@ -211,9 +172,6 @@ function Get-HHFileAuditMasterKey {
             -Key $key `
             -OpenedFileObserver $OpenedFileObserver
         [System.IO.File]::Move($temporaryPath, $keyPath, $false)
-        if ($IsWindows) {
-            Protect-HHWindowsPrivatePathAcl -Path $keyPath
-        }
         Confirm-HHAuditKeyFileSafety -Path $keyPath
     }
     catch {
@@ -247,8 +205,6 @@ function Get-HHMasterKey {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string]$DataRoot,
-        [scriptblock]$SecurityCommandInvoker,
-        [scriptblock]$KeychainWorkerInvoker,
         [switch]$RequireExisting
     )
 
@@ -259,39 +215,7 @@ function Get-HHMasterKey {
         return & $provider.CoreMasterKeyProvider $context ([bool]$RequireExisting)
     }
 
-    if (-not $script:HHControllerIsMacOS) {
-        return Get-HHFileAuditMasterKey -DataRoot $DataRoot -RequireExisting:$RequireExisting
-    }
-
-    Confirm-HHLegacyAuditKeyAbsent -DataRoot $DataRoot
-    if ($RequireExisting) {
-        $account = Get-HHAuditKeychainAccount -DataRoot $DataRoot
-        $keychainPath = Get-HHMacOSLoginKeychainPath `
-            -SecurityCommandInvoker $SecurityCommandInvoker
-        $storedItem = Read-HHMacOSAuditKeychainItem `
-            -Account $account `
-            -KeychainPath $keychainPath `
-            -KeychainWorkerInvoker $KeychainWorkerInvoker
-        if (-not $storedItem.Found) {
-            throw (Get-HHAuditKeyStoreErrorRecord `
-                    -ErrorId 'AuditKeyUnavailable' `
-                    -Message 'The existing HostHunter database has no matching Keychain key. Remote activity is blocked.' `
-                    -Category ([System.Management.Automation.ErrorCategory]::ResourceUnavailable))
-        }
-        return ,([byte[]]$storedItem.Key)
-    }
-    $key = Get-HHMacOSAuditMasterKey `
-        -DataRoot $DataRoot `
-        -SecurityCommandInvoker $SecurityCommandInvoker `
-        -KeychainWorkerInvoker $KeychainWorkerInvoker
-    try {
-        Confirm-HHLegacyAuditKeyAbsent -DataRoot $DataRoot
-    }
-    catch {
-        [Array]::Clear($key, 0, $key.Length)
-        throw
-    }
-    return ,$key
+    return Get-HHFileAuditMasterKey -DataRoot $DataRoot -RequireExisting:$RequireExisting
 }
 
 function Get-HHRuntimeContext {

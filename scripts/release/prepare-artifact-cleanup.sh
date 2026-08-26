@@ -72,7 +72,15 @@ if [[ -d "$artifact_root/release" ]]; then
   while IFS= read -r -d '' candidate; do
     candidate_sha="$(basename -- "$candidate")"
     if [[ "$candidate_sha" != "$active_candidate_sha" ]]; then
-      add_target "$candidate" superseded 'release candidate is not the selected active exact SHA'
+      # The candidate directory and its claim/receipts are permanent tombstones:
+      # deleting them would make an already-consumed exact SHA runnable again.
+      while IFS= read -r -d '' payload; do
+        case "$(basename -- "$payload")" in
+          claim.json|receipt.json|cmdlet-receipt.json|heavy-receipt.json|windows-receipt.json) ;;
+          *) add_target "$payload" superseded \
+            'non-receipt payload belongs to a terminal non-active release candidate' ;;
+        esac
+      done < <(find "$candidate" -mindepth 1 -maxdepth 1 -print0)
       continue
     fi
     evidence="$candidate/evidence"

@@ -115,7 +115,6 @@ Describe 'HostHunter SQLite public cmdlets' -Tag Unit {
             Mock Register-HHSshHostTrust { $script:events.Add('trust') }
             Mock Invoke-HHTargetProbe { $script:events.Add('probe'); $script:transportResult }
             Mock Test-HHTransportResult { $script:transportResult }
-            Mock Assert-HHWinRmControllerSupported
             Mock Prepare-HHSshKeyBootstrapOperation { throw 'unexpected bootstrap preparation' }
             Mock Invoke-HHSshKeyBootstrap { throw 'unexpected bootstrap execution' }
         }
@@ -174,11 +173,11 @@ Describe 'HostHunter SQLite public cmdlets' -Tag Unit {
             }
         }
 
-        It 'rejects WinRM and invalid target input before persistence' {
+        It 'rejects removed transport parameters and invalid target input before persistence' {
             {
                 Set-HHTarget -Name windows -HostName windows.test -UserName operator `
-                    -Transport WinRM -Authentication Kerberos -Confirm:$false
-            } | Should -Throw '*WinRM target creation is deferred*'
+                    -Transport WinRM -Authentication Password -Confirm:$false
+            } | Should -Throw '*parameter*Transport*'
             {
                 Set-HHTarget -Name alpha -HostName example.test -UserName operator `
                     -Confirm:$false
@@ -191,6 +190,14 @@ Describe 'HostHunter SQLite public cmdlets' -Tag Unit {
             @(Get-HHTarget).Name | Should -Be alpha
             [IO.Directory]::Delete($script:testRoot, $true)
             @(Get-HHTarget).Count | Should -Be 0
+        }
+
+        It 'returns no state for a mounted empty data root without opening persistence' {
+            [IO.File]::Delete($script:runtime.DatabasePath)
+            [IO.Directory]::Exists($script:runtime.DataRoot) | Should -BeTrue
+            @(Get-HHTarget).Count | Should -Be 0
+            [IO.File]::Exists($script:runtime.DatabasePath) | Should -BeFalse
+            Should -Not -Invoke Open-HHAuthenticatedPersistence
         }
 
         It 'falls back to read-only display rows when the authenticated key is unavailable' {
@@ -430,11 +437,10 @@ Describe 'HostHunter SQLite public cmdlets' -Tag Unit {
             Should -Invoke Close-HHAuthenticatedPersistence -Times 1
         }
 
-        It 'rejects a selected WinRM target and releases persistence' {
+        It 'rejects a selected historical transport and releases persistence' {
             $script:target.Transport = 'WinRM'
             { Invoke-HHCommand -Command 'Get-Date' -Target alpha } |
-                Should -Throw '*WinRM command execution is not qualified*'
-            Should -Invoke Assert-HHWinRmControllerSupported -Times 1
+                Should -Throw '*historical transport or runtime profile*'
             Should -Invoke Close-HHAuthenticatedPersistence -Times 1
             Should -Not -Invoke Register-HHAuthenticatedAuditBatch
         }
