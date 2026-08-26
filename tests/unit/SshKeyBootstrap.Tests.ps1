@@ -538,8 +538,10 @@ Describe 'SSH Ed25519 key bootstrap' -Tag Unit {
     }
 
     It 'creates and secures a new key directory when the native generator succeeds' -Skip:$IsWindows {
+        $script:keygenArguments = $null
         Mock ssh-keygen {
             $arguments = [object[]] $args
+            $script:keygenArguments = $arguments
             $keyPathIndex = [Array]::IndexOf($arguments, '-f')
             $generatedPath = [string] $arguments[$keyPathIndex + 1]
             [IO.File]::WriteAllText($generatedPath, 'generated-private-key')
@@ -557,6 +559,9 @@ Describe 'SSH Ed25519 key bootstrap' -Tag Unit {
 
         Test-Path -LiteralPath $script:keyPath | Should -BeTrue
         Test-Path -LiteralPath "$script:keyPath.pub" | Should -BeTrue
+        $passphraseIndex = [Array]::IndexOf($script:keygenArguments, '-N')
+        $passphraseIndex | Should -BeGreaterThan -1
+        $script:keygenArguments[$passphraseIndex + 1] | Should -BeExactly ''
         [IO.File]::GetUnixFileMode((Split-Path -Parent $script:keyPath)) | Should -Be (
             [IO.UnixFileMode]::UserRead -bor
             [IO.UnixFileMode]::UserWrite -bor
@@ -569,7 +574,7 @@ Describe 'SSH Ed25519 key bootstrap' -Tag Unit {
             $global:LASTEXITCODE = 9
         }
         { Invoke-HHSshDefaultKeyGenerator -KeyPath $script:keyPath -Comment dedicated } |
-            Should -Throw '*Interactive Ed25519 key generation failed*'
+            Should -Throw '*Dedicated Ed25519 key generation failed*'
         Test-Path -LiteralPath $script:keyPath | Should -BeFalse
         Test-Path -LiteralPath "$script:keyPath.pub" | Should -BeFalse
     }

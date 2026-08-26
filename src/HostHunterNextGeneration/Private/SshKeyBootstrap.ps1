@@ -73,11 +73,11 @@ function Invoke-HHSshDefaultKeyGenerator {
         )
     }
 
-    & ssh-keygen -q -t ed25519 -f $KeyPath -C $Comment
+    & ssh-keygen -q -t ed25519 -N '' -f $KeyPath -C $Comment
     if ($LASTEXITCODE -ne 0 -or
         -not [IO.File]::Exists($KeyPath) -or
         -not [IO.File]::Exists($publicKeyPath)) {
-        throw [IO.IOException]::new('Interactive Ed25519 key generation failed.')
+        throw [IO.IOException]::new('Dedicated Ed25519 key generation failed.')
     }
 }
 

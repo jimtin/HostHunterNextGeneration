@@ -251,6 +251,15 @@ Describe 'Immutable exact-SHA release receipt state machine' -Tag Unit {
         $script:testCompose | Should -Match '(?ms)^  coverage:.*?network_mode: none'
     }
 
+    It 'prepares writable artifacts and binds coverage to the exact candidate tree' {
+        $script:heavyRunner | Should -Match 'scripts/lib/prepare-artifacts\.sh "\$repo_root"'
+        $script:heavyRunner | Should -Match 'export HH_CANDIDATE_SHA="\$candidate_sha"'
+        $script:heavyRunner | Should -Match 'export HH_CANDIDATE_TREE'
+        $script:heavyRunner | Should -Match 'sourceInventory,metrics,uncovered'
+        $script:testCompose | Should -Match 'HH_CANDIDATE_SHA: \$\{HH_CANDIDATE_SHA:-\}'
+        $script:testCompose | Should -Match 'HH_CANDIDATE_TREE: \$\{HH_CANDIDATE_TREE:-\}'
+    }
+
     It 'rejects a passing component receipt from a failed process' {
         $script:runner | Should -Match 'contradictory passing receipt'
         $script:runner | Should -Match '\$exit_code" -ne 0 && "\$source_status" == passed'

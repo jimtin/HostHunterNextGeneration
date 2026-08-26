@@ -7,8 +7,9 @@
 - High: rollback of SQLite, anchors, secrets, or evidence could falsify history.
 - High: candidate-owned coverage code could omit source or forge a passing
   percentage unless the standalone gate independently validates the receipt.
-- High: Windows behavior is live-qualified for the working tree but is not yet
-  release-proven for an exact committed SHA.
+- High: the first exact-SHA Windows qualification stopped before key bootstrap
+  because key generation unexpectedly requested a passphrase; the candidate is
+  terminally failed and cannot be retried.
 - Overall posture is fail-closed; focused integrity/recovery evidence and live
   Windows proof are green, with immutable exact-SHA release proof still pending.
 
@@ -96,7 +97,7 @@ Non-capabilities:
 | AP-1 | contact host without audit | source change → B2 → transport/history | detection-evasion | medium | high | high | closed engine; AST guard | engine/guard |
 | AP-2 | repeat mutation | interruption → B3 → command/key/policy | execution | medium | high | high | durable arm; Unknown; no retry | engine/recovery |
 | AP-3 | falsify history | volume access → B4 → DB/evidence/anchors | integrity | medium | high | high | authentication; separate roots; encryption | persistence |
-| AP-4 | steal secrets/output | leak → B3/B4 → credentials/evidence | exfiltration | medium | high | high | dedicated roots; redacted receipts | Compose/receipts |
+| AP-4 | steal secrets/output | leak → B3/B4 → credentials/evidence | exfiltration | medium | high | high | dedicated roots; redacted receipts; noninteractive empty-passphrase dedicated-key generation | Compose/receipts/key bootstrap |
 | AP-5 | misuse command power | Invoke-HHCommand → B1/B7 → systems | execution | medium | high | high | explicit action; reason/case audit | command/engine |
 | AP-6 | spoof identity/exhaust | hostile endpoint → B3 → trust/availability | access | medium | high | high | fingerprint; PS7 marker; limits | transport/Compose |
 | AP-7 | overwrite/rerun verdict | failed process → B5 → receipts | integrity | low | high | medium | atomic claim; O_EXCL; seal | release scripts |
@@ -143,10 +144,11 @@ stake.
   coverage, and no failed exact SHA is retried.
 - unvalidated: Docker administrators and the gate operator are trusted.
 - unvalidated: minimum Windows and PowerShell versions remain to be fixed.
-- validated for the working tree: a saved local Windows host and interactive
-  Keychain credential exercised all eleven public cmdlets through the managed-host
-  engine, verified Security Event 4688 command-line capture, and restored the
-  original audit-policy and SSH-key state.
-- pending release proof: the standalone gate must repeat that bounded journey
-  against the packaged exact committed SHA; the ignored local receipt is not a
-  substitute for immutable release evidence.
+- terminal exact-SHA evidence: candidate `652157af4a3ab21702b9895d3efffb3f946b8e5f`
+  passed the eleven-cmdlet container journey, then the live-Windows phase stopped
+  at an unexpected `ssh-keygen` passphrase prompt before remote key installation.
+  The candidate remains consumed and failed.
+- remediation: dedicated Ed25519 generation supplies an explicit empty
+  passphrase without putting a credential in arguments, environment variables,
+  files, logs, or receipts. A new exact SHA must prove the full Windows journey;
+  the failed SHA must never be rerun.

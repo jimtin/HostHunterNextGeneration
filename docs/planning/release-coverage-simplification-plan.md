@@ -187,12 +187,12 @@ remain independent. A consumed SHA is never rerun; fixes require a new SHA.
 | Radical runtime simplification | One container, one `pwsh`, two Pester invocations, in-memory hits | Process/receipt contract test and bounded focused run | Verified |
 | Unit-only numerator | Remove migration/integration closure from coverage entrypoint | Negative contract asserting integration paths are absent | Verified |
 | Every shipped source file counted | Exact-tree inventory and source hash in summary | Inventory mismatch and zero-denominator negative tests | Verified |
-| At least 90 percent each; 92-percent target | Direct independent threshold evaluation and meaningful branch tests | Each-metric threshold fixture plus focused subsystem tests | Implemented; exact-SHA measurement pending |
+| At least 90 percent each; 92-percent target | Direct independent threshold evaluation and meaningful branch tests | Each-metric threshold fixture plus focused subsystem tests | Blocked: exact SHA measured 87.1994% branches (76 outcomes short); other metrics passed |
 | Cmdlet and Windows verdicts remain visible | Windows precedes coverage; independent immutable component receipts | Release orchestration contract tests | Verified |
 | No retry or diagnostic rerun | Terminal receipt includes all deficits and uncovered locations | Failure, timeout, interruption, and duplicate-attempt tests | Verified |
 | Superseded coverage surface removed | Delete classified scripts, fixtures, env references, and docs | Deleted-surface `rg` sweep and static checks | Verified |
 | Security trust boundaries retained | Read-only exact-SHA input, receipt binding, no production probes | Threat-model update, package probe scan, gitleaks | Implemented; pre-push gitleaks pending |
-| Exact-SHA release proof | Standalone gate consumes one clean candidate once | Final component and aggregate receipts | Pending |
+| Exact-SHA release proof | Standalone gate consumes one clean candidate once | Final component and aggregate receipts | Failed terminally for `652157a`; new SHA required after remediation |
 
 Non-goals are changes to the eleven cmdlets, managed-host engine, authenticated
 SQLite, encryption, audit artifacts, anchors, recovery behavior, or public

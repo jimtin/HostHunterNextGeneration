@@ -70,8 +70,12 @@ $inventory = @($sourceFiles | ForEach-Object {
 $inventoryPayload = $inventory | ConvertTo-Json -Compress
 $sourceHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData(
         [Text.Encoding]::UTF8.GetBytes($inventoryPayload))).ToLowerInvariant()
-$candidateSha = try { (& git -C $repoRoot rev-parse HEAD 2>$null).Trim() } catch { $null }
-$candidateTree = try { (& git -C $repoRoot rev-parse 'HEAD^{tree}' 2>$null).Trim() } catch { $null }
+$candidateSha = if (-not [string]::IsNullOrWhiteSpace($env:HH_CANDIDATE_SHA)) {
+    $env:HH_CANDIDATE_SHA
+} else { try { (& git -C $repoRoot rev-parse HEAD 2>$null).Trim() } catch { $null } }
+$candidateTree = if (-not [string]::IsNullOrWhiteSpace($env:HH_CANDIDATE_TREE)) {
+    $env:HH_CANDIDATE_TREE
+} else { try { (& git -C $repoRoot rev-parse 'HEAD^{tree}' 2>$null).Trim() } catch { $null } }
 $functions = [Collections.Generic.List[object]]::new()
 
 try {

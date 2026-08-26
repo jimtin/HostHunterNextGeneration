@@ -16,10 +16,14 @@ interrupted=false
 
 readonly repo_root bounded candidate_sha artifact_root receipt test_image ssh_image controller_image
 cd -- "$repo_root"
+scripts/lib/prepare-artifacts.sh "$repo_root"
 mkdir -p -- "$artifact_root" .artifacts/logs .artifacts/summary
 rm -f -- "$receipt.tmp"
 
 export HH_ARTIFACT_ROOT=/artifacts/release-proof
+export HH_CANDIDATE_SHA="$candidate_sha"
+export HH_CANDIDATE_TREE
+HH_CANDIDATE_TREE="$(git -C "$repo_root" show -s --format=%T "$candidate_sha")"
 export HH_HOST_GID
 HH_HOST_GID="$(id -g)"
 export HH_TEST_IMAGE="$test_image"
@@ -82,7 +86,7 @@ write_receipt() {
   controller_image_id="$(docker image inspect --format '{{.Id}}' "$controller_image" 2>/dev/null || true)"
   if [[ -f "$artifact_root/unit/coverage-summary.json" ]]; then
     coverage="$(jq -c '{status,minimum,invocationCount,testCount,durationMs,
-      candidateSha,candidateTree,sourceHash,sourceFileCount,sourceInventory,metrics}' \
+      candidateSha,candidateTree,sourceHash,sourceFileCount,sourceInventory,metrics,uncovered}' \
       "$artifact_root/unit/coverage-summary.json" 2>/dev/null || printf 'null')"
   fi
   jq -n \

@@ -16,6 +16,8 @@ services:
     environment:
       HOME: /tmp
       HH_ARTIFACT_ROOT: /artifacts/release-proof
+      HH_CANDIDATE_SHA: ${HH_CANDIDATE_SHA:-}
+      HH_CANDIDATE_TREE: ${HH_CANDIDATE_TREE:-}
     command:
       - bash
       - scripts/lanes/unit.sh

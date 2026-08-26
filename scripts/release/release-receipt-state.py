@@ -187,7 +187,7 @@ def record(args: argparse.Namespace) -> int:
                 coverage_allowed = {
                     "status", "minimum", "invocationCount", "testCount", "durationMs",
                     "candidateSha", "candidateTree", "sourceHash", "sourceFileCount",
-                    "sourceInventory", "metrics",
+                    "sourceInventory", "metrics", "uncovered",
                 }
                 value["coverage"] = {
                     key: item for key, item in value["coverage"].items()
