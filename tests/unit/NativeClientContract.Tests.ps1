@@ -20,6 +20,8 @@ Describe 'native PowerShell client contract' -Tag Unit {
             'scripts/runtime/Get-HHClientCommandMetadata.ps1'
         $script:fingerprintScript = Join-Path $repoRoot 'scripts/client/Get-HHSourceFingerprint.ps1'
         $script:installerScript = Join-Path $repoRoot 'scripts/client/Install-HHClient.ps1'
+        $script:installedJourneyScript = Join-Path $repoRoot `
+            'scripts/client/Test-HHInstalledNativeClientSsh.ps1'
         $script:previousSkip = $env:HH_CLIENT_SKIP_AUTO_START
         $env:HH_CLIENT_SKIP_AUTO_START = '1'
         Import-Module $clientManifest -Force
@@ -169,6 +171,28 @@ param(
             Should -Invoke Open-HHClientDockerDesktop -Times 1 -Exactly
             Should -Invoke Test-HHClientDockerReady -Times 2 -Exactly
         }
+
+        It 'suppresses the startup animation without sleeping in automation' {
+            Mock Test-HHClientAnimationSupported { $false }
+            Mock Start-Sleep {}
+
+            Show-HHClientStartupAnimation -CommandCount 11
+
+            Should -Not -Invoke Start-Sleep
+        }
+
+        It 'renders a bounded three-second animation only after command discovery' {
+            Mock Test-HHClientAnimationSupported { $true }
+            Mock Start-Sleep {}
+            Mock Write-Host {}
+
+            Show-HHClientStartupAnimation -CommandCount 11
+
+            Should -Invoke Start-Sleep -Times 14 -Exactly -ParameterFilter {
+                $Milliseconds -eq 240
+            }
+            Should -Invoke Write-Host -Times 5 -Exactly
+        }
     }
 
     It 'changes the runtime fingerprint whenever an inventoried source file changes' {
@@ -205,9 +229,25 @@ param(
                 (Get-Content -LiteralPath $testProfilePath -Raw),
                 [regex]::Escape('# HostHunter.Client auto-import begin')
             )).Count | Should -Be 1
+        $profileContents = Get-Content -LiteralPath $testProfilePath -Raw
+        $expectedSourceManifest = [regex]::Escape(
+            (Join-Path $clientSourceRoot 'HostHunter.Client.psd1')
+        )
+        $profileContents | Should -Match $expectedSourceManifest
+        $profileContents | Should -Match 'Import-Module .* -Force -ErrorAction Stop'
         if (-not $IsWindows) {
             [IO.File]::GetUnixFileMode($first.ConfigurationPath).ToString() |
                 Should -BeExactly 'UserWrite, UserRead'
         }
+    }
+
+    It 'makes the installed-profile macOS journey require all eleven commands in a fresh shell' {
+        $source = Get-Content -LiteralPath $script:installedJourneyScript -Raw
+        $source | Should -Match "'pwsh'"
+        $source | Should -Not -Match "'-NoProfile'"
+        $source | Should -Match 'RequireProfileLoadedClient'
+        $source | Should -Match 'InvokedUniqueCommandCount -ne 11'
+        $source | Should -Match 'fresh-process-installed-profile'
+        $source | Should -Match "Environment\['DOCKER_CONFIG'\]"
     }
 }

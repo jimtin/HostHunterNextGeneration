@@ -179,9 +179,9 @@ Describe 'managed-host engine contract' -Tag Unit {
             Mock Invoke-HHManagedHostSetWindowsProcessAuditPolicyOperation { 'policy' }
 
             Invoke-HHManagedHostOperation -Operation ValidateTarget -Arguments @{
-                Name = @('alpha')
-                HostName = @('alpha.example')
-                UserName = @('operator')
+                Name = 'alpha'
+                HostName = 'alpha.example'
+                UserName = 'operator'
                 WhatIf = $true
             } | Should -BeExactly validate
             Invoke-HHManagedHostOperation -Operation TestTarget -Arguments @{} |

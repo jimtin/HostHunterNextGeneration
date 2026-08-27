@@ -41,6 +41,38 @@ namespace HostHunter.Client
         public int Port => ((IPEndPoint)listener.LocalEndpoint).Port;
         public string Token => token;
 
+        private bool StorePassword(string suppliedBase64)
+        {
+            byte[] decoded = null;
+            byte[] replacement = null;
+            try
+            {
+                decoded = Convert.FromBase64String(suppliedBase64);
+                if (decoded.Length == 0 || decoded.Length > 4096) { return false; }
+                replacement = Encoding.ASCII.GetBytes(suppliedBase64);
+                byte[] prior = Interlocked.Exchange(ref passwordBase64, replacement);
+                replacement = null;
+                if (prior != null) { Array.Clear(prior, 0, prior.Length); }
+                return true;
+            }
+            catch (FormatException) { return false; }
+            finally
+            {
+                if (decoded != null) { Array.Clear(decoded, 0, decoded.Length); }
+                if (replacement != null) { Array.Clear(replacement, 0, replacement.Length); }
+            }
+        }
+
+        private bool RequestPassword(string promptFrame)
+        {
+            output.WriteLine("{\"type\":\"credential_request\",\"prompt\":\"" + promptFrame + "\"}");
+            output.Flush();
+            string response = input.ReadLine();
+            const string prefix = "credential ";
+            return response != null && response.StartsWith(prefix, StringComparison.Ordinal) &&
+                response.Length <= 131072 && StorePassword(response.Substring(prefix.Length));
+        }
+
         private void Serve()
         {
             while (!stopping)
@@ -57,44 +89,45 @@ namespace HostHunter.Client
                     client.ReceiveTimeout = 120000;
                     client.SendTimeout = 120000;
                     string suppliedToken = reader.ReadLine();
-                    string promptBase64 = reader.ReadLine();
+                    string requestKind = reader.ReadLine();
+                    string requestValue = reader.ReadLine();
                     if (!String.Equals(suppliedToken, token, StringComparison.Ordinal) ||
-                        String.IsNullOrWhiteSpace(promptBase64) || promptBase64.Length > 16384)
+                        (requestKind != "credential" && requestKind != "confirmation" &&
+                            requestKind != "credential_acquire" && requestKind != "credential_seed") ||
+                        String.IsNullOrWhiteSpace(requestValue) || requestValue.Length > 131072)
                     {
+                        continue;
+                    }
+                    if (requestKind == "credential_seed")
+                    {
+                        if (StorePassword(requestValue)) { writer.WriteLine("ok"); }
+                        continue;
+                    }
+                    byte[] promptBytes = null;
+                    string promptFrame;
+                    try
+                    {
+                        promptBytes = Convert.FromBase64String(requestValue);
+                        if (promptBytes.Length > 4096) { continue; }
+                        promptFrame = Convert.ToBase64String(promptBytes);
+                    }
+                    catch (FormatException) { continue; }
+                    finally
+                    {
+                        if (promptBytes != null) { Array.Clear(promptBytes, 0, promptBytes.Length); }
+                    }
+                    if (requestKind == "confirmation")
+                    {
+                        output.WriteLine("{\"type\":\"confirmation_request\",\"prompt\":\"" + promptFrame + "\"}");
+                        output.Flush();
+                        string confirmation = input.ReadLine();
+                        if (confirmation == "confirmation yes") { writer.WriteLine("yes"); }
+                        else if (confirmation == "confirmation no") { writer.WriteLine("no"); }
                         continue;
                     }
                     if (passwordBase64 == null)
                     {
-                        byte[] promptBytes = null;
-                        try
-                        {
-                            promptBytes = Convert.FromBase64String(promptBase64);
-                            if (promptBytes.Length > 4096) { continue; }
-                            string promptFrame = Convert.ToBase64String(promptBytes);
-                            output.WriteLine("{\"type\":\"credential_request\",\"prompt\":\"" + promptFrame + "\"}");
-                            output.Flush();
-                        }
-                        finally
-                        {
-                            if (promptBytes != null) { Array.Clear(promptBytes, 0, promptBytes.Length); }
-                        }
-                        string response = input.ReadLine();
-                        const string prefix = "credential ";
-                        if (response == null || !response.StartsWith(prefix, StringComparison.Ordinal) ||
-                            response.Length > 131072) { continue; }
-                        passwordBase64 = Encoding.ASCII.GetBytes(response.Substring(prefix.Length));
-                        byte[] decodedPassword = null;
-                        try { decodedPassword = Convert.FromBase64String(Encoding.ASCII.GetString(passwordBase64)); }
-                        catch (FormatException)
-                        {
-                            Array.Clear(passwordBase64, 0, passwordBase64.Length);
-                            passwordBase64 = null;
-                            continue;
-                        }
-                        finally
-                        {
-                            if (decodedPassword != null) { Array.Clear(decodedPassword, 0, decodedPassword.Length); }
-                        }
+                        if (!RequestPassword(promptFrame)) { continue; }
                     }
                     writer.WriteLine(Encoding.ASCII.GetString(passwordBase64));
                 }
@@ -178,7 +211,8 @@ try {
 
     $environmentNames = @(
         'DISPLAY', 'SSH_ASKPASS', 'SSH_ASKPASS_REQUIRE',
-        'HH_CLIENT_BROKER_PORT', 'HH_CLIENT_BROKER_TOKEN'
+        'HH_CLIENT_BROKER_PORT', 'HH_CLIENT_BROKER_TOKEN', 'HH_CLIENT_CONFIRM_PATH',
+        'HH_CLIENT_CREDENTIAL_PATH'
     )
     $savedEnvironment = @{}
     foreach ($name in $environmentNames) {
@@ -191,6 +225,8 @@ try {
         $env:SSH_ASKPASS_REQUIRE = 'force'
         $env:HH_CLIENT_BROKER_PORT = [string]$broker.Port
         $env:HH_CLIENT_BROKER_TOKEN = $broker.Token
+        $env:HH_CLIENT_CONFIRM_PATH = '/opt/hosthunter/runtime/client-confirm.sh'
+        $env:HH_CLIENT_CREDENTIAL_PATH = '/opt/hosthunter/runtime/client-credential.sh'
         $runner = [PowerShell]::Create()
         try {
             $runnerScript = @'
@@ -225,7 +261,23 @@ else { & $command @Parameters }
                     }
                 }
             } while (-not $async.AsyncWaitHandle.WaitOne(25))
-            $runner.EndInvoke($async)
+            try {
+                $runner.EndInvoke($async)
+            }
+            catch {
+                $runnerErrors = @($runner.Streams.Error)
+                $underlying = $_.Exception
+                if ($runnerErrors.Count -gt 0) {
+                    $underlying = $runnerErrors[$runnerErrors.Count - 1].Exception
+                }
+                while ($null -ne $underlying.InnerException) {
+                    $underlying = $underlying.InnerException
+                }
+                if (-not [string]::IsNullOrWhiteSpace($underlying.Message)) {
+                    throw [InvalidOperationException]::new($underlying.Message, $underlying)
+                }
+                throw
+            }
             while ($streamIndexes.Output -lt $output.Count) {
                 Write-HHClientRecord -Record $output[$streamIndexes.Output]
                 $streamIndexes.Output++

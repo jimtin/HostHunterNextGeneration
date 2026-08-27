@@ -20,17 +20,17 @@ including persistence/audit readback and the password-to-key transition.
 
 | Step | User action | Role/state | Expected public behavior | Required database evidence | Status |
 | ---: | --- | --- | --- | --- | --- |
-| 1 | `Get-HHTarget` / `Get-HHTargets` alias | operator; empty store | displays `No currently set`, returns no targets and creates no state | no DB or row/generation delta | pending |
-| 2 | `Set-HHTarget` | operator; password SSH fixture | validates identity and persists one PS7/SSH profile | DB created; profile=1; target generation/mutation +1; successful validation audit | pending |
-| 3 | `Test-HHTarget` | operator; saved profile | real identity probe succeeds without profile mutation | one audited invocation/outcome; target generation unchanged | pending |
-| 4 | `Invoke-HHCommand` | operator; saved profile | exact remote value and streams return once | batch/invocation/operation/event/outcome/output/audit deltas; authenticated artifact | pending |
-| 5 | `Get-HHAuditRecord` | operator; completed command | fresh process decrypts exact command/reason/case | read-only; counts and chain unchanged | pending |
-| 6 | `Get-HHAuditOutput` | operator; completed artifact | fresh process returns exact ordered output/streams | read-only; artifact and chain unchanged | pending |
-| 7 | `Enable-HHSshKeyAuthentication` | operator; password profile | installs key, proves key-only access, then commits profile | authentication Password to PublicKey; generation/mutation +1; successful audited phases | pending |
-| 8 | `Set-HHWindowsProcessAuditPolicy` | operator; managed target | Linux: finite audited unsupported failure. Windows: policy mutate/verify/restore succeeds | one intent and terminal outcome; no retry; Windows receipt proves restoration | pending |
-| 9 | `Set-HHEscalationPreference` | operator; initialized store | persists `WindowsTokenPrivilege` | configuration generation/mutation +1 | pending |
-| 10 | `Get-HHEscalationPreference` | operator; persisted preference | fresh process returns persisted method | read-only; configuration state unchanged | pending |
-| 11 | `Remove-HHTarget` | operator; key profile | atomically removes target and retains audit history | profiles=0; target generation/mutation +1; audit remains queryable | pending |
+| 1 | `Get-HHTarget` / `Get-HHTargets` alias | operator; empty store | displays `No currently set`, returns no targets and creates no state | no DB or row/generation delta | verified |
+| 2 | `Set-HHTarget` | operator; first-use SSH fixture | discovers, announces and pins host identity, offers recommended key setup, warns before encrypted-password fallback, derives the authenticated computer name, and atomically persists authentication state | DB created; profile=1; credential envelope present only for password mode; target generation/mutation +1; successful validation audit | verified |
+| 3 | `Test-HHTarget` | operator; saved profile | real identity probe succeeds without a credential prompt or profile mutation | one audited invocation/outcome; target generation unchanged | verified |
+| 4 | `Invoke-HHCommand` | operator; saved profile | exact remote value and streams return once without a credential prompt | batch/invocation/operation/event/outcome/output/audit deltas; authenticated artifact | verified |
+| 5 | `Get-HHAuditRecord` | operator; completed command | fresh process decrypts exact command/reason/case | read-only; counts and chain unchanged | verified |
+| 6 | `Get-HHAuditOutput` | operator; completed artifact | fresh process returns exact ordered output/streams | read-only; artifact and chain unchanged | verified |
+| 7 | `Enable-HHSshKeyAuthentication` | operator; encrypted-password profile | uses the stored credential without prompting, installs/proves key, then atomically deletes the password envelope | authentication Password to PublicKey; credential removed; generation/mutation +1; successful audited phases | verified |
+| 8 | `Set-HHWindowsProcessAuditPolicy` | operator; managed target | Linux: finite audited unsupported failure. Windows: policy mutate/verify/restore succeeds | one intent and terminal outcome; no retry; Windows receipt proves restoration | Linux verified; current Windows release proof pending |
+| 9 | `Set-HHEscalationPreference` | operator; initialized store | persists `WindowsTokenPrivilege` | configuration generation/mutation +1 | verified |
+| 10 | `Get-HHEscalationPreference` | operator; persisted preference | fresh process returns persisted method | read-only; configuration state unchanged | verified |
+| 11 | `Remove-HHTarget` | operator; saved profile | atomically removes target and any stored credential while retaining audit history | profiles=0; credentials=0; target generation/mutation +1; audit remains queryable | verified |
 
 ## Boundary and negative coverage
 
@@ -53,6 +53,9 @@ including persistence/audit readback and the password-to-key transition.
 - Secure prompts originate locally. Password bytes use redirected stdin and a
   token-bound controller-loopback broker, are cached only for one command's
   fixed SSH phases, and are cleared/discarded afterward.
+- First-use trust uses a distinct bounded yes/no protocol frame. Decline writes
+  no known-host entry, requests no password, and creates no target profile.
+  Matching pinned keys do not prompt; changed keys fail before authentication.
 
 ## Receipt contract
 

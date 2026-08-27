@@ -35,7 +35,7 @@ Describe 'HostHunter SQLite public cmdlets' -Tag Unit {
                 RemotePSEdition = 'Core'
                 RemotePowerShellVersion = '7.6.5'
                 ExecutionMode = 'Direct'
-                RemoteIdentity = @{ UserName = 'operator' }
+                RemoteIdentity = @{ UserName = 'operator'; MachineName = 'fixture-node' }
                 HostKeyFingerprint = $script:fingerprint
                 StreamEvents = @()
                 OutputBytes = 0L
@@ -104,17 +104,37 @@ Describe 'HostHunter SQLite public cmdlets' -Tag Unit {
                     }
                 }
                 if ($null -ne $inputData.PSObject.Properties['Transition']) {
+                    $expectedTarget = if ($null -ne $inputData.PSObject.Properties['Expected']) {
+                        $inputData.Expected
+                    }
+                    else { $inputData.ExpectedTarget }
                     return [pscustomobject]@{
-                        PreviousTarget = $inputData.ExpectedTarget
+                        PreviousTarget = $expectedTarget
                         CurrentTarget = $inputData.Transition
                         Committed = $true
                     }
                 }
                 [pscustomobject]@{ CurrentTargets = @(); Committed = $true }
             }
-            Mock Register-HHSshHostTrust { $script:events.Add('trust') }
+            Mock Register-HHSshHostTrust {
+                param($ExpectedFingerprint)
+                $script:events.Add('trust')
+                [pscustomobject]@{
+                    Fingerprint = if ([string]::IsNullOrWhiteSpace($ExpectedFingerprint)) {
+                        $script:fingerprint
+                    }
+                    else { $ExpectedFingerprint }
+                    Algorithm = 'ssh-ed25519'
+                    NewlyTrusted = $true
+                }
+            }
             Mock Invoke-HHTargetProbe { $script:events.Add('probe'); $script:transportResult }
             Mock Test-HHTransportResult { $script:transportResult }
+            Mock Request-HHSshKeyOnboardingChoice { $false }
+            Mock Request-HHPasswordStorageConsent { $true }
+            Mock Get-HHClientCredentialBytes {
+                [Text.Encoding]::UTF8.GetBytes('unit-password')
+            }
             Mock Prepare-HHSshKeyBootstrapOperation { throw 'unexpected bootstrap preparation' }
             Mock Invoke-HHSshKeyBootstrap { throw 'unexpected bootstrap execution' }
         }
@@ -126,18 +146,35 @@ Describe 'HostHunter SQLite public cmdlets' -Tag Unit {
             Should -Not -Invoke Register-HHSshHostTrust
         }
 
-        It 'previews object-form target creation and validates parallel named inputs' {
+        It 'previews object-form target creation and exposes a scalar interactive parameter set' {
             $proposal = [pscustomobject]@{
                 Name = 'object-alpha'; Transport = 'SSH'; HostName = 'object.test'
                 Port = 22; UserName = 'operator'; Authentication = 'Password'
                 HostKeyFingerprint = $script:fingerprint
             }
             { Set-HHTarget -InputObject @($proposal) -WhatIf } | Should -Not -Throw
-            {
-                Set-HHTarget -Name alpha, beta -HostName only-one.test `
-                    -UserName operator -HostKeyFingerprint $script:fingerprint -WhatIf
-            } | Should -Throw '*HostName must contain 2 value(s)*'
+            $command = Get-Command Set-HHTarget
+            $command.Parameters.Name.ParameterType | Should -Be ([string])
+            $command.Parameters.HostName.ParameterType | Should -Be ([string])
+            $command.Parameters.UserName.ParameterType | Should -Be ([string])
+            @($command.Parameters.Name.Attributes | Where-Object {
+                    $_ -is [Management.Automation.ParameterAttribute]
+                }).Mandatory | Should -Not -Contain $true
             Should -Not -Invoke Open-HHAuthenticatedPersistence
+        }
+
+        It 'discovers trust, derives the remote computer name, and saves additively by default' {
+            $result = @(Set-HHTarget -HostName example.test -UserName operator -Confirm:$false)
+
+            $result | Should -HaveCount 1
+            $result[0].Name | Should -BeExactly fixture-node
+            $result[0].HostKeyFingerprint | Should -BeExactly $script:fingerprint
+            Should -Invoke Register-HHSshHostTrust -Times 1 -ParameterFilter {
+                [string]::IsNullOrWhiteSpace([string]$ExpectedFingerprint) -and $PassThru
+            }
+            Should -Invoke Invoke-HHAnchoredPersistenceTransaction -Times 1 -ParameterFilter {
+                [bool]$ArgumentList[0].Add
+            }
         }
 
         It 'seals intent and arms trust and identity before saving a validated target' {
@@ -147,6 +184,93 @@ Describe 'HostHunter SQLite public cmdlets' -Tag Unit {
             $result[0].Name | Should -BeExactly alpha
             $script:events | Should -Be @('intent', 'arm:0', 'trust', 'arm:1', 'probe', 'terminal')
             Should -Invoke Invoke-HHAnchoredPersistenceTransaction -Times 1
+        }
+
+        It 'uses the recommended key path without persisting a password' {
+            Mock Request-HHSshKeyOnboardingChoice { $true }
+            Mock Invoke-HHManagedHostEnableSshKeyAuthenticationOperation {
+                New-HHTargetRecord -Name fixture-node -Transport SSH `
+                    -HostName example.test -Port 22 -UserName operator `
+                    -Authentication PublicKey -CredentialStorage None `
+                    -PowerShellRuntime PowerShell7 `
+                    -HostKeyFingerprint $script:fingerprint `
+                    -KeyPath /keys/hosthunter_ed25519 -IsActive $true `
+                    -LastValidatedAtUtc '2026-08-24T01:00:00Z' `
+                    -LastValidatedPSEdition Core `
+                    -LastValidatedPowerShellVersion 7.6.5 `
+                    -LastValidatedExecutionMode Direct
+            }
+
+            $result = Set-HHTarget -HostName example.test -UserName operator `
+                -HostKeyFingerprint $script:fingerprint -Confirm:$false
+
+            $result.Authentication | Should -BeExactly PublicKey
+            $result.CredentialStorage | Should -BeExactly None
+            Should -Invoke Request-HHPasswordStorageConsent -Times 0 -Exactly
+            Should -Invoke Invoke-HHManagedHostEnableSshKeyAuthenticationOperation `
+                -Times 1 -Exactly
+        }
+
+        It 'offers warned password fallback only after a definite key failure' {
+            Mock Request-HHSshKeyOnboardingChoice { $true }
+            Mock Invoke-HHManagedHostEnableSshKeyAuthenticationOperation {
+                throw 'definite key setup failure'
+            }
+            Mock Save-HHOnboardingPasswordFallback {
+                ConvertTo-HHEncryptedPasswordTarget -Target $Target
+            }
+            Mock Remove-HHIncompleteOnboardingTarget {}
+
+            $result = Set-HHTarget -HostName example.test -UserName operator `
+                -HostKeyFingerprint $script:fingerprint -Confirm:$false
+
+            $result.Authentication | Should -BeExactly Password
+            $result.CredentialStorage | Should -BeExactly Encrypted
+            Should -Invoke Request-HHPasswordStorageConsent -Times 1 -Exactly
+            Should -Invoke Save-HHOnboardingPasswordFallback -Times 1 -Exactly
+            Should -Invoke Remove-HHIncompleteOnboardingTarget -Times 0 -Exactly
+        }
+
+        It 'returns the singular target receipt after saving a password fallback' {
+            $result = Save-HHOnboardingPasswordFallback -Runtime $script:runtime `
+                -Target $script:target `
+                -PasswordBytes ([Text.Encoding]::UTF8.GetBytes('unit-password'))
+
+            $result.Name | Should -BeExactly $script:target.Name
+            $result.CredentialStorage | Should -BeExactly Encrypted
+            Should -Invoke Invoke-HHAnchoredPersistenceTransaction -Times 1 -Exactly
+            Should -Invoke Close-HHAuthenticatedPersistence -Times 1 -Exactly
+        }
+
+        It 'persists nothing when warned password storage is declined' {
+            Mock Request-HHSshKeyOnboardingChoice { $false }
+            Mock Request-HHPasswordStorageConsent { $false }
+
+            { Set-HHTarget -HostName example.test -UserName operator `
+                    -HostKeyFingerprint $script:fingerprint -Confirm:$false } |
+                Should -Throw '*Password storage was declined*no target was saved*'
+            Should -Invoke Open-HHAuthenticatedPersistence -Times 0 -Exactly
+            Should -Invoke Get-HHClientCredentialBytes -Times 0 -Exactly
+        }
+
+        It 'never falls back or retries after an uncertain key outcome' {
+            Mock Request-HHSshKeyOnboardingChoice { $true }
+            Mock Invoke-HHManagedHostEnableSshKeyAuthenticationOperation {
+                $failure = [InvalidOperationException]::new('uncertain key setup')
+                $failure.Data['HHOutcomeStatus'] = 'Unknown'
+                throw $failure
+            }
+            Mock Remove-HHIncompleteOnboardingTarget {}
+            Mock Save-HHOnboardingPasswordFallback { throw 'must not save' }
+
+            { Set-HHTarget -HostName example.test -UserName operator `
+                    -HostKeyFingerprint $script:fingerprint -Confirm:$false } |
+                Should -Throw '*uncertain state*did not save a password or retry*'
+            Should -Invoke Remove-HHIncompleteOnboardingTarget -Times 1 -Exactly
+            Should -Invoke Request-HHPasswordStorageConsent -Times 0 -Exactly
+            Should -Invoke Save-HHOnboardingPasswordFallback -Times 0 -Exactly
+            Should -Invoke Invoke-HHManagedHostEnableSshKeyAuthenticationOperation `
+                -Times 1 -Exactly
         }
 
         It 'preserves Add and explicit public-key fields in the committed target' {
@@ -173,15 +297,11 @@ Describe 'HostHunter SQLite public cmdlets' -Tag Unit {
             }
         }
 
-        It 'rejects removed transport parameters and invalid target input before persistence' {
+        It 'rejects removed transport parameters before persistence' {
             {
                 Set-HHTarget -Name windows -HostName windows.test -UserName operator `
                     -Transport WinRM -Authentication Password -Confirm:$false
             } | Should -Throw '*parameter*Transport*'
-            {
-                Set-HHTarget -Name alpha -HostName example.test -UserName operator `
-                    -Confirm:$false
-            } | Should -Throw '*requires a complete SHA256*'
             Should -Not -Invoke Open-HHAuthenticatedPersistence
         }
 
@@ -387,6 +507,21 @@ Describe 'HostHunter SQLite public cmdlets' -Tag Unit {
             $result.FailureKind | Should -BeExactly Timeout
             Should -Invoke Open-HHSshSession -Times 1
             Should -Invoke Complete-HHAuthenticatedTransportAudit -Times 1
+        }
+
+        It 'gives one Set-HHTarget recovery action when a saved password is rejected' {
+            $script:target.CredentialStorage = 'Encrypted'
+            $script:savedTargets = @($script:target)
+            Mock Initialize-HHStoredTargetCredential {}
+            Mock Open-HHSshSession { throw 'password rejected' }
+            Mock Get-HHSshFailureKind { 'AuthenticationFailure' }
+
+            $result = Invoke-HHCommand -Command 'Get-Date' -Target alpha
+
+            $result.Succeeded | Should -BeFalse
+            $result.RecoveryAction | Should -BeExactly `
+                "Run Set-HHTarget for 'alpha' to replace its saved password."
+            Should -Invoke Open-HHSshSession -Times 1 -Exactly
         }
 
         It 'retains and resequences transport evidence captured before session-open failure' {
@@ -618,10 +753,16 @@ Describe 'HostHunter SQLite public cmdlets' -Tag Unit {
 
         It 'cancels later unarmed Set intents when an earlier target fails validation' {
             Mock Invoke-HHTargetProbe { throw 'first target probe failed' }
+            $targets = @(
+                [pscustomobject]@{ Name = 'alpha'; HostName = 'alpha.test'; Port = 22
+                    UserName = 'operator'; Authentication = 'Password'
+                    HostKeyFingerprint = $script:fingerprint }
+                [pscustomobject]@{ Name = 'beta'; HostName = 'beta.test'; Port = 22
+                    UserName = 'operator'; Authentication = 'Password'
+                    HostKeyFingerprint = $script:fingerprint }
+            )
             {
-                Set-HHTarget -Name alpha, beta `
-                    -HostName alpha.test, beta.test -UserName operator `
-                    -HostKeyFingerprint $script:fingerprint -Confirm:$false
+                Set-HHTarget -InputObject $targets -Confirm:$false
             } | Should -Throw '*first target probe failed*'
             Should -Invoke Complete-HHAuthenticatedUnstartedAuditIntent -Times 1 `
                 -ParameterFilter { $Intent.InvocationId -ceq ('{0:x32}' -f 2) }
@@ -635,10 +776,16 @@ Describe 'HostHunter SQLite public cmdlets' -Tag Unit {
                 throw 'cancellation persistence failed'
             }
 
+            $targets = @(
+                [pscustomobject]@{ Name = 'alpha'; HostName = 'alpha.test'; Port = 22
+                    UserName = 'operator'; Authentication = 'Password'
+                    HostKeyFingerprint = $script:fingerprint }
+                [pscustomobject]@{ Name = 'beta'; HostName = 'beta.test'; Port = 22
+                    UserName = 'operator'; Authentication = 'Password'
+                    HostKeyFingerprint = $script:fingerprint }
+            )
             {
-                Set-HHTarget -Name alpha, beta `
-                    -HostName alpha.test, beta.test -UserName operator `
-                    -HostKeyFingerprint $script:fingerprint -Confirm:$false
+                Set-HHTarget -InputObject $targets -Confirm:$false
             } | Should -Throw '*first target probe failed*'
             Should -Invoke Complete-HHAuthenticatedUnstartedAuditIntent -Times 1
             Should -Invoke Close-HHAuthenticatedPersistence -Times 1

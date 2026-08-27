@@ -44,8 +44,21 @@ if (-not $SkipProfile) {
     $existing = if ([IO.File]::Exists($profilePath)) {
         [IO.File]::ReadAllText($profilePath)
     } else { '' }
-    if ($existing -notmatch [regex]::Escape($begin)) {
-        $block = "$begin`nImport-Module HostHunter.Client -ErrorAction Stop`n$end`n"
+    $sourceManifest = Join-Path $source 'HostHunter.Client.psd1'
+    $quotedSourceManifest = "'" + $sourceManifest.Replace("'", "''") + "'"
+    $block = @(
+        $begin
+        "Import-Module $quotedSourceManifest -Force -ErrorAction Stop"
+        $end
+        ''
+    ) -join "`n"
+    $markedBlockPattern = '(?ms)^' + [regex]::Escape($begin) +
+        '.*?^' + [regex]::Escape($end) + '\r?\n?'
+    if ($existing -match [regex]::Escape($begin)) {
+        $existing = [regex]::new($markedBlockPattern).Replace($existing, $block, 1)
+        [IO.File]::WriteAllText($profilePath, $existing, [Text.UTF8Encoding]::new($false))
+    }
+    else {
         if ($existing.Length -gt 0 -and -not $existing.EndsWith("`n")) { $existing += "`n" }
         [IO.File]::WriteAllText($profilePath, "$existing$block", [Text.UTF8Encoding]::new($false))
     }

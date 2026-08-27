@@ -7,6 +7,7 @@ $script:HHTargetSchemaProperties = @(
     'Port'
     'UserName'
     'Authentication'
+    'CredentialStorage'
     'PowerShellRuntime'
     'HostKeyFingerprint'
     'KeyPath'
@@ -61,6 +62,11 @@ function New-HHTargetRecord {
         '',
         Justification = 'This is a pure target value-object constructor and does not mutate system state.'
     )]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+        'PSAvoidUsingPlainTextForPassword',
+        'CredentialStorage',
+        Justification = 'CredentialStorage is a non-secret enum describing None, Prompt, or Encrypted state; it never contains a password.'
+    )]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
@@ -83,6 +89,10 @@ function New-HHTargetRecord {
         [Parameter(Mandatory)]
         [ValidateSet('Password', 'PublicKey', 'Kerberos', 'Certificate')]
         [string] $Authentication,
+
+        [AllowNull()]
+        [ValidateSet('None', 'Prompt', 'Encrypted')]
+        [string] $CredentialStorage,
 
         [ValidateSet('PowerShell7', 'WindowsPowerShell51')]
         [string] $PowerShellRuntime = 'PowerShell7',
@@ -182,6 +192,19 @@ function New-HHTargetRecord {
     elseif ($null -ne $normalizedKeyPath) {
         throw 'KeyPath is only valid for PublicKey authentication.'
     }
+    $normalizedCredentialStorage = if ($PSBoundParameters.ContainsKey('CredentialStorage')) {
+        $CredentialStorage
+    }
+    elseif ($Authentication -ceq 'Password') { 'Prompt' }
+    else { 'None' }
+    if ($Authentication -ceq 'Password') {
+        if ($normalizedCredentialStorage -cnotin @('Prompt', 'Encrypted')) {
+            throw 'Password authentication requires Prompt or Encrypted credential storage.'
+        }
+    }
+    elseif ($normalizedCredentialStorage -cne 'None') {
+        throw 'Only password authentication can use credential storage.'
+    }
 
     $validatedAt = [datetimeoffset]::MinValue
     if ($LastValidatedAtUtc -is [datetimeoffset]) {
@@ -261,6 +284,7 @@ function New-HHTargetRecord {
         Port                               = $Port
         UserName                           = $normalizedUserName
         Authentication                     = $Authentication
+        CredentialStorage                  = $normalizedCredentialStorage
         PowerShellRuntime                  = $normalizedRuntime
         HostKeyFingerprint                 = $normalizedFingerprint
         KeyPath                            = $normalizedKeyPath
@@ -326,6 +350,7 @@ function ConvertTo-HHValidatedTargetRecord {
             Port                               = [int] $candidate.Port
             UserName                           = [string] $candidate.UserName
             Authentication                     = [string] $candidate.Authentication
+            CredentialStorage                  = [string] $candidate.CredentialStorage
             PowerShellRuntime                  = [string] $candidate.PowerShellRuntime
             HostKeyFingerprint                 = $candidate.HostKeyFingerprint
             KeyPath                            = $candidate.KeyPath

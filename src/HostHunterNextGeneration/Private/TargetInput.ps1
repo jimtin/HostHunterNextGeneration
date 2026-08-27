@@ -65,6 +65,9 @@ function ConvertTo-HHProposedTarget {
         -Port ([int]$InputObject.Port) `
         -UserName ([string]$InputObject.UserName) `
         -Authentication ([string]$InputObject.Authentication) `
+        -CredentialStorage $(if ($null -ne $InputObject.PSObject.Properties['CredentialStorage']) {
+                [string]$InputObject.CredentialStorage
+            } elseif ([string]$InputObject.Authentication -ceq 'Password') { 'Prompt' } else { 'None' }) `
         -PowerShellRuntime $powerShellRuntime `
         -HostKeyFingerprint $fingerprint `
         -KeyPath $keyPath `
@@ -91,7 +94,8 @@ function ConvertTo-HHValidatedProbeTarget {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$Target,
-        [Parameter(Mandatory)]$TransportResult
+        [Parameter(Mandatory)]$TransportResult,
+        [ValidateLength(1, 128)][string]$Name
     )
 
     Confirm-HHObservedRuntimeField `
@@ -107,13 +111,15 @@ function ConvertTo-HHValidatedProbeTarget {
         -TransportResult $TransportResult `
         -PropertyName ExecutionMode
 
+    $resolvedName = if ($PSBoundParameters.ContainsKey('Name')) { $Name } else { [string]$Target.Name }
     New-HHTargetRecord `
-        -Name $Target.Name `
+        -Name $resolvedName `
         -Transport $Target.Transport `
         -HostName $Target.HostName `
         -Port $Target.Port `
         -UserName $Target.UserName `
         -Authentication $Target.Authentication `
+        -CredentialStorage $Target.CredentialStorage `
         -PowerShellRuntime $Target.PowerShellRuntime `
         -HostKeyFingerprint $Target.HostKeyFingerprint `
         -KeyPath $Target.KeyPath `

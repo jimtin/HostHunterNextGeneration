@@ -19,6 +19,7 @@ function Invoke-HHNativeProcess {
     param(
         [Parameter(Mandatory)][string]$FileName,
         [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$ArgumentList,
+        [AllowNull()][byte[]]$StandardInputBytes,
         [int]$TimeoutSeconds = 15
     )
 
@@ -27,6 +28,7 @@ function Invoke-HHNativeProcess {
     $startInfo.UseShellExecute = $false
     $startInfo.RedirectStandardOutput = $true
     $startInfo.RedirectStandardError = $true
+    $startInfo.RedirectStandardInput = $null -ne $StandardInputBytes
     foreach ($argument in $ArgumentList) {
         $startInfo.ArgumentList.Add($argument)
     }
@@ -38,6 +40,10 @@ function Invoke-HHNativeProcess {
         }
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()
         $stderrTask = $process.StandardError.ReadToEndAsync()
+        if ($null -ne $StandardInputBytes) {
+            $process.StandardInput.BaseStream.Write($StandardInputBytes, 0, $StandardInputBytes.Length)
+            $process.StandardInput.Close()
+        }
         if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
             $process.Kill($true)
             throw "'$FileName' exceeded the $TimeoutSeconds second timeout."
@@ -54,20 +60,27 @@ function Invoke-HHNativeProcess {
 }
 
 function Register-HHSshHostTrust {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+        'PSAvoidUsingWriteHost',
+        '',
+        Justification = 'Announces the accepted fingerprint on the capturable host information stream.'
+    )]
     [CmdletBinding(SupportsShouldProcess)]
     param(
         [Parameter(Mandatory)][string]$HostName,
         [Parameter(Mandatory)][ValidateRange(1, 65535)][int]$Port,
-        [Parameter(Mandatory)][string]$ExpectedFingerprint,
+        [AllowNull()][string]$ExpectedFingerprint,
         [Parameter(Mandatory)][string]$KnownHostsPath,
         [int]$TimeoutSeconds = 15,
-        [scriptblock]$KeyScanner
+        [scriptblock]$KeyScanner,
+        [switch]$PassThru
     )
 
     if ([Uri]::CheckHostName($HostName) -eq [UriHostNameType]::Unknown) {
         throw "SSH host name '$HostName' is invalid."
     }
-    if ($ExpectedFingerprint -notmatch '^SHA256:[A-Za-z0-9+/]{43}$') {
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedFingerprint) -and
+        $ExpectedFingerprint -notmatch '^SHA256:[A-Za-z0-9+/]{43}$') {
         throw 'ExpectedFingerprint must be a complete OpenSSH SHA256 host-key fingerprint.'
     }
 
@@ -78,13 +91,31 @@ function Register-HHSshHostTrust {
         $result = Invoke-HHNativeProcess -FileName 'ssh-keyscan' -ArgumentList @(
             '-p', [string]$Port, '-T', [string]$TimeoutSeconds, $HostName
         ) -TimeoutSeconds ($TimeoutSeconds + 2)
-        if ($result.ExitCode -ne 0 -and [string]::IsNullOrWhiteSpace($result.StandardOutput)) {
-            throw "SSH host-key discovery failed: $($result.StandardError.Trim())"
+        if ([string]::IsNullOrWhiteSpace($result.StandardOutput)) {
+            $message = @(
+                "Unable to retrieve an SSH host key from '$HostName`:$Port'."
+                "Confirm the host name or IP address, that OpenSSH Server (sshd) is running,"
+                "and that port $Port is reachable through the firewall."
+            ) -join ' '
+            $scannerDetail = $result.StandardError.Trim()
+            if (-not [string]::IsNullOrWhiteSpace($scannerDetail)) {
+                $message += " ssh-keyscan reported: $scannerDetail"
+            }
+            $exception = [InvalidOperationException]::new($message)
+            $exception.Data['HHFailureKind'] = 'TransportFailure'
+            throw $exception
         }
         $result.StandardOutput
     }
 
-    $matchingLine = $null
+    $algorithmRank = @{
+        'ssh-ed25519' = 0
+        'ecdsa-sha2-nistp256' = 1
+        'ecdsa-sha2-nistp384' = 2
+        'ecdsa-sha2-nistp521' = 3
+        'ssh-rsa' = 4
+    }
+    $candidates = [Collections.Generic.List[object]]::new()
     foreach ($line in @($scanOutput -split "`r?`n")) {
         if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#')) {
             continue
@@ -93,22 +124,51 @@ function Register-HHSshHostTrust {
         if ($parts.Count -lt 3) {
             continue
         }
-        if ((Get-HHSshKeyFingerprint -PublicKeyBase64 $parts[2]) -ceq $ExpectedFingerprint) {
-            $matchingLine = "$($parts[0]) $($parts[1]) $($parts[2])"
-            break
-        }
+        if (-not $algorithmRank.ContainsKey($parts[1])) { continue }
+        $fingerprint = Get-HHSshKeyFingerprint -PublicKeyBase64 $parts[2]
+        $candidates.Add([pscustomobject][ordered]@{
+                HostToken = $parts[0]
+                Algorithm = $parts[1]
+                Fingerprint = $fingerprint
+                Line = "$($parts[0]) $($parts[1]) $($parts[2])"
+                Rank = [int]$algorithmRank[$parts[1]]
+            })
     }
-    if ($null -eq $matchingLine) {
-        throw "No discovered SSH host key matched '$ExpectedFingerprint'."
+    if ($candidates.Count -eq 0) {
+        throw 'SSH host-key discovery returned no supported host keys.'
     }
-
     $existingLines = if (Test-Path -LiteralPath $KnownHostsPath) {
         @(Get-Content -LiteralPath $KnownHostsPath)
     }
     else {
         @()
     }
+    $selected = if ([string]::IsNullOrWhiteSpace($ExpectedFingerprint)) {
+        $matchingPinned = @($candidates | Where-Object { $_.Line -cin $existingLines })
+        if ($matchingPinned.Count -gt 0) {
+            @($matchingPinned | Sort-Object Rank, Fingerprint, Line)[0]
+        }
+        else {
+            @($candidates | Sort-Object Rank, Fingerprint, Line)[0]
+        }
+    }
+    else {
+        @($candidates | Where-Object Fingerprint -CEQ $ExpectedFingerprint |
+                Sort-Object Rank, Line | Select-Object -First 1)
+    }
+    if ($null -eq $selected) {
+        throw "No discovered SSH host key matched '$ExpectedFingerprint'."
+    }
+    $matchingLine = [string]$selected.Line
+
     if ($matchingLine -cin $existingLines) {
+        $result = [pscustomobject][ordered]@{
+            Line = $matchingLine
+            Algorithm = [string]$selected.Algorithm
+            Fingerprint = [string]$selected.Fingerprint
+            NewlyTrusted = $false
+        }
+        if ($PassThru) { return $result }
         return $matchingLine
     }
     $matchingHostToken = ($matchingLine -split '\s+', 2)[0]
@@ -117,7 +177,7 @@ function Register-HHSshHostTrust {
             ($_ -split '\s+', 2)[0] -ceq $matchingHostToken
         })
     if ($changedIdentity.Count -gt 0) {
-        throw "The saved SSH identity for '$HostName`:$Port' differs from the expected fingerprint."
+        throw "The saved SSH identity for '$HostName`:$Port' has changed. Credentials were not sent."
     }
     if (-not $PSCmdlet.ShouldProcess("$HostName`:$Port", 'Trust the verified SSH host key')) {
         return $matchingLine
@@ -137,5 +197,13 @@ function Register-HHSshHostTrust {
             Remove-Item -LiteralPath $temporaryPath -Force
         }
     }
+    Write-Host "Accepting public key $($selected.Algorithm) $($selected.Fingerprint)"
+    $result = [pscustomobject][ordered]@{
+        Line = $matchingLine
+        Algorithm = [string]$selected.Algorithm
+        Fingerprint = [string]$selected.Fingerprint
+        NewlyTrusted = $true
+    }
+    if ($PassThru) { return $result }
     $matchingLine
 }

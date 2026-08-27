@@ -59,28 +59,113 @@ function Assert-HHManagedTargetSupported {
     }
 }
 
+function ConvertTo-HHEncryptedPasswordTarget {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][object]$Target)
+
+    New-HHTargetRecord -Name $Target.Name -Transport $Target.Transport `
+        -HostName $Target.HostName -Port $Target.Port -UserName $Target.UserName `
+        -Authentication Password -CredentialStorage Encrypted `
+        -PowerShellRuntime $Target.PowerShellRuntime `
+        -HostKeyFingerprint $Target.HostKeyFingerprint -KeyPath $null `
+        -IsActive $Target.IsActive -LastValidatedAtUtc $Target.LastValidatedAtUtc `
+        -LastValidatedPSEdition $Target.LastValidatedPSEdition `
+        -LastValidatedPowerShellVersion $Target.LastValidatedPowerShellVersion `
+        -LastValidatedExecutionMode $Target.LastValidatedExecutionMode
+}
+
+function Save-HHOnboardingPasswordFallback {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][object]$Runtime,
+        [Parameter(Mandatory)][object]$Target,
+        [Parameter(Mandatory)][ValidateCount(1, 4096)][byte[]]$PasswordBytes
+    )
+
+    $context = Open-HHAuthenticatedPersistence -PersistenceContext $Runtime `
+        -OperationLock -AllowAnchorAdvance
+    try {
+        $transition = ConvertTo-HHEncryptedPasswordTarget -Target $Target
+        $arguments = [pscustomobject]@{
+            Transition = $transition
+            Expected = $Target
+            Password = $PasswordBytes
+        }
+        $receipt = Invoke-HHAnchoredPersistenceTransaction -Context $context `
+            -ArgumentList @($arguments) -Action {
+            param($Connection, $Transaction, $WriterContext, $ArgumentList)
+            $data = $ArgumentList[0]
+            $mutation = Update-HHTargetRepositoryRecord -Connection $Connection `
+                -Transaction $Transaction -MasterKey $WriterContext.MasterKey `
+                -Target $data.Transition -ExpectedTarget $data.Expected `
+                -MutationId ([Guid]::NewGuid().ToByteArray()) `
+                -RequestedAtUtc ([DateTimeOffset]::UtcNow) `
+                -ExpectedAnchor $WriterContext.Anchor
+            Set-HHTargetCredential -Connection $Connection -Transaction $Transaction `
+                -MasterKey $WriterContext.MasterKey -Name $data.Transition.Name `
+                -PasswordBytes $data.Password -StoredAtUtc ([DateTimeOffset]::UtcNow)
+            Assert-HHTargetCredentialState -Connection $Connection -Transaction $Transaction
+            $mutation
+        }
+        if ($null -eq $receipt -or
+            $null -eq $receipt.PSObject.Properties['CurrentTarget']) {
+            throw 'Password fallback target transition returned an invalid receipt.'
+        }
+        $receipt.CurrentTarget
+    }
+    finally { Close-HHAuthenticatedPersistence -Context $context }
+}
+
+function Remove-HHIncompleteOnboardingTarget {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+        'PSUseShouldProcessForStateChangingFunctions',
+        '',
+        Justification = 'This private rollback helper runs only after the caller-authorized onboarding transaction fails.'
+    )]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][object]$Runtime,
+        [Parameter(Mandatory)][string]$Name
+    )
+
+    $context = Open-HHAuthenticatedPersistence -PersistenceContext $Runtime `
+        -OperationLock -AllowAnchorAdvance
+    try {
+        Invoke-HHAnchoredPersistenceTransaction -Context $context `
+            -ArgumentList @([string[]]@($Name)) -Action {
+            param($Connection, $Transaction, $WriterContext, $ArgumentList)
+            Remove-HHTargetRepository -Connection $Connection -Transaction $Transaction `
+                -MasterKey $WriterContext.MasterKey -Name ([string[]]$ArgumentList[0]) `
+                -MutationId ([Guid]::NewGuid().ToByteArray()) `
+                -RequestedAtUtc ([DateTimeOffset]::UtcNow) `
+                -ExpectedAnchor $WriterContext.Anchor
+        } | Out-Null
+    }
+    finally { Close-HHAuthenticatedPersistence -Context $context }
+}
+
 function Invoke-HHManagedHostValidateTargetOperation {
     <#
     .SYNOPSIS
     Validates and atomically saves one or more PowerShell remoting targets.
     .DESCRIPTION
-    SSH targets use an interactive native password prompt by default. Supply an
-    explicit SHA256 host-key fingerprint on first trust. The active set is
-    replaced unless Add is specified.
+    SSH targets discover and pin their public host identity before
+    authentication. The selected algorithm and fingerprint are announced to
+    the operator. An independently verified fingerprint can be supplied for
+    higher-risk networks. Validated targets are always added without
+    deactivating unrelated targets.
     #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium', DefaultParameterSetName = 'Properties')]
     param(
-        [Parameter(Mandatory, ParameterSetName = 'Properties')]
-        [ValidateCount(1, 8)]
-        [string[]]$Name,
+        [Parameter(ParameterSetName = 'Properties')]
+        [ValidateLength(1, 128)]
+        [string]$Name,
 
         [Parameter(Mandatory, ParameterSetName = 'Properties')]
-        [ValidateCount(1, 8)]
-        [string[]]$HostName,
+        [string]$HostName,
 
         [Parameter(Mandatory, ParameterSetName = 'Properties')]
-        [ValidateCount(1, 8)]
-        [string[]]$UserName,
+        [string]$UserName,
 
         [Parameter(ParameterSetName = 'Properties')]
         [ValidateRange(1, 65535)]
@@ -91,10 +176,10 @@ function Invoke-HHManagedHostValidateTargetOperation {
         [string]$Authentication = 'Password',
 
         [Parameter(ParameterSetName = 'Properties')]
-        [string[]]$HostKeyFingerprint,
+        [string]$HostKeyFingerprint,
 
         [Parameter(ParameterSetName = 'Properties')]
-        [string[]]$KeyPath,
+        [string]$KeyPath,
 
         [Parameter(Mandatory, ValueFromPipeline, ParameterSetName = 'Object')]
         [ValidateCount(1, 8)]
@@ -107,6 +192,18 @@ function Invoke-HHManagedHostValidateTargetOperation {
 
     begin {
         $proposed = [System.Collections.Generic.List[object]]::new()
+        $deriveName = [Collections.Generic.HashSet[string]]::new(
+            [StringComparer]::OrdinalIgnoreCase
+        )
+        $keyOnboarding = [Collections.Generic.HashSet[string]]::new(
+            [StringComparer]::OrdinalIgnoreCase
+        )
+        $encryptedPassword = [Collections.Generic.HashSet[string]]::new(
+            [StringComparer]::OrdinalIgnoreCase
+        )
+        $passwordByName = [Collections.Generic.Dictionary[string, byte[]]]::new(
+            [StringComparer]::OrdinalIgnoreCase
+        )
     }
     process {
         if ($PSCmdlet.ParameterSetName -eq 'Object') {
@@ -115,48 +212,49 @@ function Invoke-HHManagedHostValidateTargetOperation {
             }
         }
         else {
-            if ($HostName.Count -ne $Name.Count) {
-                throw "HostName must contain $($Name.Count) value(s)."
+            $provisionalName = if ($PSBoundParameters.ContainsKey('Name')) { $Name } else { $HostName }
+            $targetInput = [pscustomobject]@{
+                Name = $provisionalName
+                Transport = 'SSH'
+                HostName = $HostName
+                Port = $Port
+                UserName = $UserName
+                Authentication = $Authentication
+                PowerShellRuntime = 'PowerShell7'
+                HostKeyFingerprint = $HostKeyFingerprint
+                KeyPath = $KeyPath
             }
-            for ($index = 0; $index -lt $Name.Count; $index++) {
-                $targetInput = [pscustomobject]@{
-                    Name = $Name[$index]
-                    Transport = 'SSH'
-                    HostName = $HostName[$index]
-                    Port = $Port
-                    UserName = Get-HHInputValue -Value $UserName -Index $index -ExpectedCount $Name.Count -Name UserName
-                    Authentication = $Authentication
-                    PowerShellRuntime = 'PowerShell7'
-                    HostKeyFingerprint = if ($null -eq $HostKeyFingerprint) {
-                        $null
-                    }
-                    else {
-                        Get-HHInputValue -Value $HostKeyFingerprint -Index $index -ExpectedCount $Name.Count -Name HostKeyFingerprint
-                    }
-                    KeyPath = if ($null -eq $KeyPath) {
-                        $null
-                    }
-                    else {
-                        Get-HHInputValue -Value $KeyPath -Index $index -ExpectedCount $Name.Count -Name KeyPath
-                    }
-                }
-                $proposed.Add((ConvertTo-HHProposedTarget -InputObject $targetInput))
+            $proposed.Add((ConvertTo-HHProposedTarget -InputObject $targetInput))
+            if (-not $PSBoundParameters.ContainsKey('Name')) {
+                $null = $deriveName.Add($provisionalName)
             }
         }
     }
     end {
         $proposedTargets = @(Assert-HHTargetSet -Target $proposed.ToArray())
-        foreach ($target in $proposedTargets) {
-            if ($target.Transport -eq 'SSH' -and
-                $target.HostKeyFingerprint -notmatch '^SHA256:[A-Za-z0-9+/]{43}$') {
-                throw "SSH target '$($target.Name)' requires a complete SHA256 host-key fingerprint."
-            }
-        }
-        $operation = if ($Add) { 'Add validated HostHunter target(s)' } else { 'Replace active HostHunter target set' }
+        $operation = 'Add or update a validated HostHunter target'
         if (-not $PSCmdlet.ShouldProcess(($proposedTargets.Name -join ', '), $operation)) {
             return
         }
-
+        if ($PSCmdlet.ParameterSetName -eq 'Properties') {
+            foreach ($target in $proposedTargets) {
+                if ($target.Authentication -cne 'Password') { continue }
+                $preferKey = -not $PSBoundParameters.ContainsKey('Authentication') -and
+                    (Request-HHSshKeyOnboardingChoice -TargetLabel $target.HostName)
+                if ($preferKey) {
+                    $target.CredentialStorage = 'Prompt'
+                    $null = $keyOnboarding.Add($target.Name)
+                    continue
+                }
+                if (-not (Request-HHPasswordStorageConsent -TargetLabel $target.HostName)) {
+                    throw [OperationCanceledException]::new(
+                        'Password storage was declined. No password was requested and no target was saved.'
+                    )
+                }
+                $target.CredentialStorage = 'Encrypted'
+                $null = $encryptedPassword.Add($target.Name)
+            }
+        }
         $runtime = Get-HHRuntimeContext
         $context = Open-HHAuthenticatedPersistence -PersistenceContext $runtime `
             -OperationLock -AllowAnchorAdvance
@@ -199,12 +297,21 @@ function Invoke-HHManagedHostValidateTargetOperation {
                             -Intent $intent -Ordinal @($trustOrdinal)
                         $armed.Add($trustOrdinal)
                         try {
-                            Register-HHSshHostTrust `
+                            $trust = Register-HHSshHostTrust `
                                 -HostName $target.HostName `
                                 -Port $target.Port `
                                 -ExpectedFingerprint $target.HostKeyFingerprint `
                                 -KnownHostsPath $runtime.KnownHostsPath `
-                                -Confirm:$false | Out-Null
+                                -PassThru -Confirm:$false
+                            $observedFingerprint = if ($null -ne $trust -and
+                                $null -ne $trust.PSObject.Properties['Fingerprint']) {
+                                [string]$trust.Fingerprint
+                            }
+                            else { [string]$target.HostKeyFingerprint }
+                            if ($observedFingerprint -notmatch '^SHA256:[A-Za-z0-9+/]{43}$') {
+                                throw 'SSH host trust did not return a complete SHA256 fingerprint.'
+                            }
+                            $target.HostKeyFingerprint = $observedFingerprint
                         }
                         catch {
                             $trustException = $_.Exception
@@ -249,8 +356,36 @@ function Invoke-HHManagedHostValidateTargetOperation {
                         -ArmedOrdinal $armed.ToArray() | Out-Null
                     $null = $terminalTargetNames.Add($target.Name)
                     Test-HHTransportResult -Result $result | Out-Null
-                    $validated.Add((ConvertTo-HHValidatedProbeTarget `
-                                -Target $target -TransportResult $result))
+                    if ($encryptedPassword.Contains($target.Name) -or
+                        $keyOnboarding.Contains($target.Name)) {
+                        $passwordByName[$target.Name] = Get-HHClientCredentialBytes `
+                            -Prompt "[$($target.UserName)@$($target.HostName)] password"
+                    }
+                    $savedName = if ($deriveName.Contains($target.Name)) {
+                        [string]$result.RemoteIdentity.MachineName
+                    }
+                    else { [string]$target.Name }
+                    if ([string]::IsNullOrWhiteSpace($savedName)) {
+                        throw 'The authenticated PowerShell identity did not return a computer name.'
+                    }
+                    if ($passwordByName.ContainsKey($target.Name) -and
+                        -not [string]::Equals($savedName, $target.Name,
+                            [StringComparison]::OrdinalIgnoreCase)) {
+                        $passwordByName[$savedName] = $passwordByName[$target.Name]
+                        $null = $passwordByName.Remove($target.Name)
+                    }
+                    if ($keyOnboarding.Contains($target.Name)) {
+                        $null = $keyOnboarding.Add($savedName)
+                    }
+                    if ($encryptedPassword.Contains($target.Name)) {
+                        $null = $encryptedPassword.Add($savedName)
+                    }
+                    $validatedTarget = ConvertTo-HHValidatedProbeTarget `
+                        -Target $target -TransportResult $result -Name $savedName
+                    if ($encryptedPassword.Contains($target.Name)) {
+                        $validatedTarget.CredentialStorage = 'Encrypted'
+                    }
+                    $validated.Add($validatedTarget)
                 }
             }
             catch {
@@ -270,28 +405,100 @@ function Invoke-HHManagedHostValidateTargetOperation {
                 }
                 throw
             }
+            foreach ($incoming in $validated) {
+                $sameName = @($context.TargetSnapshot.Targets | Where-Object Name -IEQ $incoming.Name)
+                if ($sameName.Count -gt 0) {
+                    $existing = $sameName[0]
+                    $sameIdentity = [string]::Equals(
+                        [string]$existing.HostName,
+                        [string]$incoming.HostName,
+                        [StringComparison]::OrdinalIgnoreCase
+                    ) -and [int]$existing.Port -eq [int]$incoming.Port -and
+                        [string]$existing.HostKeyFingerprint -ceq [string]$incoming.HostKeyFingerprint
+                    if (-not $sameIdentity) {
+                        throw ("Target name '$($incoming.Name)' already belongs to a different " +
+                            'endpoint or SSH identity. Supply an explicit alternate -Name.')
+                    }
+                }
+            }
             $arguments = [pscustomobject]@{
                 Target = $validated.ToArray()
                 ExpectedGeneration = [long]$context.TargetSnapshot.Generation
-                Add = [bool]$Add
+                Add = $true
+                PasswordByName = $passwordByName
             }
-            Invoke-HHAnchoredPersistenceTransaction -Context $context `
+            $savedTargets = @(Invoke-HHAnchoredPersistenceTransaction -Context $context `
                 -ArgumentList @($arguments) -Action {
                 param($Connection, $Transaction, $WriterContext, $ArgumentList)
                 $inputData = $ArgumentList[0]
-                Set-HHTargetRepository -Connection $Connection -Transaction $Transaction `
+                $receipt = Set-HHTargetRepository -Connection $Connection -Transaction $Transaction `
                     -MasterKey $WriterContext.MasterKey -Target $inputData.Target `
                     -ExpectedGeneration $inputData.ExpectedGeneration `
                     -MutationId ([Guid]::NewGuid().ToByteArray()) `
                     -RequestedAtUtc ([DateTimeOffset]::UtcNow) `
-                    -ExpectedAnchor $WriterContext.Anchor -Add:$inputData.Add
-            } | Select-Object -ExpandProperty CurrentTargets
+                    -ExpectedAnchor $WriterContext.Anchor -Add
+                foreach ($target in @($inputData.Target | Where-Object {
+                            $_.CredentialStorage -ceq 'Encrypted'
+                        })) {
+                    Set-HHTargetCredential -Connection $Connection -Transaction $Transaction `
+                        -MasterKey $WriterContext.MasterKey -Name $target.Name `
+                        -PasswordBytes $inputData.PasswordByName[$target.Name] `
+                        -StoredAtUtc ([DateTimeOffset]::UtcNow)
+                }
+                Assert-HHTargetCredentialState -Connection $Connection -Transaction $Transaction
+                $receipt
+            } | Select-Object -ExpandProperty CurrentTargets)
         }
         finally {
             if ($null -ne $capacityReservation) {
                 Remove-HHPersistenceCapacityReservation -Reservation $capacityReservation
             }
             Close-HHAuthenticatedPersistence -Context $context
+        }
+        try {
+            foreach ($savedTarget in @($savedTargets)) {
+                if ($keyOnboarding.Contains($savedTarget.Name)) {
+                    try {
+                        Invoke-HHManagedHostEnableSshKeyAuthenticationOperation `
+                            -Name $savedTarget.Name -Confirm:$false -Reason $Reason -CaseId $CaseId
+                    }
+                    catch {
+                        $failure = $_.Exception
+                        $uncertain = ($failure.Data['HHOutcomeStatus'] -ceq 'Unknown') -or
+                            ($failure.Data['HHDispatchState'] -ceq 'DispatchUncertain') -or
+                            ($failure.Data['HHCommitState'] -ceq 'Unknown')
+                        if ($uncertain) {
+                            Remove-HHIncompleteOnboardingTarget -Runtime $runtime `
+                                -Name $savedTarget.Name
+                            throw [InvalidOperationException]::new(
+                                ('SSH key setup ended in an uncertain state. HostHunter did not ' +
+                                    'save a password or retry. Review the remote authorized_keys ' +
+                                    'state before onboarding again.'),
+                                $failure
+                            )
+                        }
+                        if (Request-HHPasswordStorageConsent -TargetLabel $savedTarget.Name) {
+                            Save-HHOnboardingPasswordFallback -Runtime $runtime `
+                                -Target $savedTarget `
+                                -PasswordBytes $passwordByName[$savedTarget.Name]
+                        }
+                        else {
+                            Remove-HHIncompleteOnboardingTarget -Runtime $runtime `
+                                -Name $savedTarget.Name
+                            throw [OperationCanceledException]::new(
+                                'SSH key setup failed and password fallback was declined. The incomplete target was removed.',
+                                $failure
+                            )
+                        }
+                    }
+                }
+                else { $savedTarget }
+            }
+        }
+        finally {
+            foreach ($password in $passwordByName.Values) {
+                [Array]::Clear($password, 0, $password.Length)
+            }
         }
     }
 }
@@ -355,10 +562,11 @@ function Invoke-HHManagedHostTestTargetOperation {
                 $ordinals = @(0..($intent.RemoteOperations.Count - 1))
                 Arm-HHAuthenticatedRemoteOperation -Context $context `
                     -Intent $intent -Ordinal $ordinals
+                Initialize-HHStoredTargetCredential -Context $context -Target $target
                 $result = Invoke-HHTargetProbe -Target $target -RuntimeContext $runtime
                 Complete-HHAuthenticatedTransportAudit -Context $context `
                     -Intent $intent -TransportResult $result -ArmedOrdinal $ordinals | Out-Null
-                [pscustomobject]@{
+                $publicProbe = [pscustomobject]@{
                     Name = $target.Name
                     PowerShellRuntime = $target.PowerShellRuntime
                     Succeeded = $result.Succeeded
@@ -374,6 +582,13 @@ function Invoke-HHManagedHostTestTargetOperation {
                     OutputBytes = $result.OutputBytes
                     ExceptionType = $result.ExceptionType
                 }
+                $recovery = Get-HHStoredCredentialRecoveryAction -Target $target `
+                    -FailureKind $result.FailureKind
+                if ($null -ne $recovery) {
+                    $publicProbe | Add-Member -NotePropertyName RecoveryAction `
+                        -NotePropertyValue $recovery
+                }
+                $publicProbe
             }
         )
     }
@@ -510,6 +725,8 @@ function Invoke-HHManagedHostCommandCoordinator {
                 $armedOrdinalByName[$selectedTarget.Name].Add($ordinal)
             }
             try {
+                Initialize-HHStoredTargetCredential -Context $context `
+                    -Target $selectedTarget
                 $sessionByName[$selectedTarget.Name] = Open-HHSshSession `
                     -Target $selectedTarget `
                     -KnownHostsPath $runtime.KnownHostsPath
@@ -802,6 +1019,12 @@ function Invoke-HHManagedHostCommandCoordinator {
                 $publicResult | Add-Member -NotePropertyName PolicyOutcome `
                     -NotePropertyValue $policyOutcomeProperty.Value
             }
+            $recovery = Get-HHStoredCredentialRecoveryAction -Target $selectedTarget `
+                -FailureKind $transportResult.FailureKind
+            if ($null -ne $recovery) {
+                $publicResult | Add-Member -NotePropertyName RecoveryAction `
+                    -NotePropertyValue $recovery
+            }
             $publicResult
         }
     )
@@ -989,16 +1212,36 @@ function Invoke-HHManagedHostEnableSshKeyAuthenticationOperation {
                         -ExpectedAnchor $WriterContext.Anchor
                 }
             }
-            $result = Invoke-HHSshKeyBootstrap -PreparedOperation $prepared `
-                -OperationArmer $operationArmer `
-                -ProfileTransitionCommitter $profileTransitionCommitter `
-                -Confirm:$false
+            Initialize-HHStoredTargetCredential -Context $context -Target $target
+            try {
+                $result = Invoke-HHSshKeyBootstrap -PreparedOperation $prepared `
+                    -OperationArmer $operationArmer `
+                    -ProfileTransitionCommitter $profileTransitionCommitter `
+                    -Confirm:$false
+            }
+            catch {
+                if ($_.Exception.Data['HHTargetStoreCommitState'] -ceq 'Unknown') {
+                    $_.Exception.Data['HHCommitState'] = 'Unknown'
+                    $_.Exception.Data['HHOutcomeStatus'] = 'Unknown'
+                }
+                if ($_.Exception.Data['HHDispatchState'] -ceq 'DispatchUncertain') {
+                    $_.Exception.Data['HHOutcomeStatus'] = 'Unknown'
+                }
+                throw
+            }
             Complete-HHAuthenticatedTransportAudit -Context $context `
                 -Intent $intent -TransportResult $result `
                 -ArmedOrdinal $armed.ToArray() | Out-Null
             if (-not $result.Succeeded) {
-                throw ('SSH key bootstrap failed ({0}; outcome {1}; commit {2}).' -f
-                    $result.FailureKind, $result.OutcomeStatus, $result.CommitState)
+                $failure = [InvalidOperationException]::new(
+                    ('SSH key bootstrap failed ({0}; outcome {1}; commit {2}).' -f
+                        $result.FailureKind, $result.OutcomeStatus, $result.CommitState)
+                )
+                $failure.Data['HHFailureKind'] = [string]$result.FailureKind
+                $failure.Data['HHOutcomeStatus'] = [string]$result.OutcomeStatus
+                $failure.Data['HHDispatchState'] = [string]$result.DispatchState
+                $failure.Data['HHCommitState'] = [string]$result.CommitState
+                throw $failure
             }
             if ($result.CommitState -cne 'Committed' -or
                 $null -eq $result.ProfileTransition) {

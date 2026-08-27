@@ -5,7 +5,9 @@
 | Cmdlet acceptance | Pester plus read-only SQLite assertions | production-derived verifier + SSH fixture | `./scripts/verify-cmdlets.sh` | `.artifacts/cmdlets/<sha>/cmdlets/receipt.json` |
 | Boundary guard | PowerShell AST inspection | test image | `scripts/static/Test-HHManagedHostBoundary.ps1` | terminal result |
 | Native client contract | Pester protocol/proxy/install tests | test image | focused `NativeClient*.Tests.ps1` | `.artifacts/native-client-*.xml` |
-| Native macOS qualification | installed/source client + production controller + disposable SSH fixture | macOS orchestration; product execution remains containerized | `scripts/client/Test-HHNativeClientSsh.ps1` | terminal 11-command summary |
+| Native macOS qualification | fresh installed-profile client + production controller + disposable SSH fixture | macOS orchestration; product execution remains containerized | `scripts/client/Test-HHInstalledNativeClientSsh.ps1` | terminal 11-command summary |
+| Credential migration/persistence | Pester + fresh SQLite from committed migrations | test image | focused `SqlitePersistence.Tests.ps1` and `CredentialPersistence.Tests.ps1` | terminal result; hard limits 15s/30s |
+| Credential leakage | ciphertext/root/process/broker-frame assertions | test image | focused credential and native-protocol files | terminal result; hard limit 30s |
 | Release-only unit coverage | Pester native profiler + in-memory branch-outcome collector | one test container / one `pwsh` process | `scripts/lanes/unit.sh` | `.artifacts/release-proof/unit/{unit-tests.xml,coverage.xml,coverage-summary.json,coverage.log}` |
 | Critical integration | Pester + disposable SSH/SQLite | test image + SSH fixture | `scripts/lanes/integration.sh` | `.artifacts/release-proof/integration/` |
 | SQLite fault proof | Docker Compose fault workers | purpose-built containers | `scripts/lanes/sqlite-integration.sh` | integration logs/results |
@@ -20,7 +22,10 @@ no retries, and no coverage or scan work.
 
 The native macOS qualification is a platform-bound user-entry check, not a
 coverage numerator. It retrieves fixture credentials only into test-process
-memory and never prints or persists them.
+memory and never prints them. Its one ordered journey covers key-first and
+warned stored-password onboarding, invisible stored-password invocation,
+credential purge after key conversion, and all eleven public cmdlets. It has a
+120-second hard timeout and no retries or shards.
 
 The unit coverage command has one timeout owner and exactly two fixed sequential
 passes over the same unit suite: untouched source for native statement/line and

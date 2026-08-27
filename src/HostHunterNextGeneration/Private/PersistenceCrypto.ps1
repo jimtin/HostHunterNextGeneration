@@ -6,7 +6,7 @@ function Get-HHPersistenceDerivedKey {
     param(
         [Parameter(Mandatory)][AllowNull()][AllowEmptyCollection()][byte[]]$MasterKey,
         [Parameter(Mandatory)]
-        [ValidateSet('RowEncryption', 'AuditIntegrity', 'TargetState', 'TargetMutation', 'CaseLookup', 'Anchor')]
+        [ValidateSet('RowEncryption', 'CredentialEncryption', 'AuditIntegrity', 'TargetState', 'TargetMutation', 'CaseLookup', 'Anchor')]
         [string]$Purpose
     )
 
@@ -74,10 +74,12 @@ function Protect-HHPersistenceValue {
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Plaintext,
         [Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$MasterKey,
-        [Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$AssociatedData
+        [Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$AssociatedData,
+        [ValidateSet('RowEncryption', 'CredentialEncryption')]
+        [string]$Purpose = 'RowEncryption'
     )
 
-    $key = Get-HHPersistenceDerivedKey -MasterKey $MasterKey -Purpose RowEncryption
+    $key = Get-HHPersistenceDerivedKey -MasterKey $MasterKey -Purpose $Purpose
     $nonce = [byte[]]::new(12)
     [System.Security.Cryptography.RandomNumberGenerator]::Fill($nonce)
     $ciphertext = [byte[]]::new($Plaintext.Length)
@@ -113,7 +115,9 @@ function Unprotect-HHPersistenceValue {
     param(
         [Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Envelope,
         [Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$MasterKey,
-        [Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$AssociatedData
+        [Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$AssociatedData,
+        [ValidateSet('RowEncryption', 'CredentialEncryption')]
+        [string]$Purpose = 'RowEncryption'
     )
 
     if ($Envelope.Length -lt 32 -or $Envelope[0] -ne 0x48 -or
@@ -131,7 +135,7 @@ function Unprotect-HHPersistenceValue {
     [Array]::Copy($Envelope, 16, $tag, 0, 16)
     [Array]::Copy($Envelope, 32, $ciphertext, 0, $ciphertext.Length)
     $plaintext = [byte[]]::new($ciphertext.Length)
-    $key = Get-HHPersistenceDerivedKey -MasterKey $MasterKey -Purpose RowEncryption
+    $key = Get-HHPersistenceDerivedKey -MasterKey $MasterKey -Purpose $Purpose
     try {
         $aes = [System.Security.Cryptography.AesGcm]::new($key, 16)
         try {

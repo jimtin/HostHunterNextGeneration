@@ -57,6 +57,18 @@ Describe 'transport accountability validation' -Tag Unit {
             $validated.ValidatedAtUtc | Should -Match '^2026-08-24T00:00:00'
         }
 
+        It 'accepts an observed fingerprint for an audited first-trust validation intent' {
+            $script:intent.IntentRecord.payload.operation = 'ValidateTarget'
+            $script:intent.IntentRecord.payload.expectedHostKeyFingerprint = $null
+
+            $metadata = Get-HHAuditIntentTransportContext -Intent $script:intent
+            $metadata.ExpectedHostKeyFingerprint | Should -BeNullOrEmpty
+            {
+                Assert-HHTransportAuditResult -TransportResult $script:result `
+                    -IntentMetadata $metadata
+            } | Should -Not -Throw
+        }
+
         It 'requires and retains a correlated process audit policy outcome' {
             $script:intent.IntentRecord.payload.operation = 'SetWindowsProcessAuditPolicy'
             $script:result | Add-Member PolicyOutcome ([pscustomobject][ordered]@{

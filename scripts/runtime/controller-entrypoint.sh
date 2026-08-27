@@ -9,6 +9,7 @@ readonly dispatcher='/opt/hosthunter/runtime/Invoke-HHCmdlet.ps1'
 readonly client_metadata='/opt/hosthunter/runtime/Get-HHClientCommandMetadata.ps1'
 readonly client_protocol='/opt/hosthunter/runtime/Invoke-HHClientProtocol.ps1'
 readonly client_askpass='/opt/hosthunter/runtime/client-askpass.sh'
+readonly client_confirm='/opt/hosthunter/runtime/client-confirm.sh'
 
 : "${HH_DATA_ROOT:?HH_DATA_ROOT is required}"
 : "${HH_SECRET_ROOT:?HH_SECRET_ROOT is required}"
@@ -45,7 +46,8 @@ for writable_root in "${roots[@]}"; do
   [[ -w "$writable_root" ]] || fail "The runtime identity cannot write $writable_root."
 done
 [[ -f "${HH_RUNTIME_MODULE_PATH:-}" && -f "$dispatcher" && \
-  -f "$client_metadata" && -f "$client_protocol" && -x "$client_askpass" ]] ||
+  -f "$client_metadata" && -f "$client_protocol" && -x "$client_askpass" && \
+  -x "$client_confirm" ]] ||
   fail 'The packaged module or constrained dispatcher is missing.'
 
 module_count="$(pwsh -NoLogo -NoProfile -NonInteractive -Command '

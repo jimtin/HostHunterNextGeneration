@@ -415,13 +415,13 @@ INSERT INTO remote_operations(
                 ArtifactIdBytes = $artifactId
                 Sequence = $auditEvent.Sequence
                 RequestedPowerShellRuntime = $runtime
-                ExpectedHostKeyFingerprint = [string]$target.HostKeyFingerprint
+                ExpectedHostKeyFingerprint = $target.HostKeyFingerprint
                 RemoteOperations = [object[]]$manifest
                 IntentRecord = [pscustomobject]@{
                     payload = [pscustomobject]@{
                         operation = $Operation
                         requestedPowerShellRuntime = $runtime
-                        expectedHostKeyFingerprint = [string]$target.HostKeyFingerprint
+                        expectedHostKeyFingerprint = $target.HostKeyFingerprint
                     }
                 }
             }

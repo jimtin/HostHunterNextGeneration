@@ -63,16 +63,35 @@ Describe 'Packaged SQLite provider' -Tag Integration {
     }
 
     It 'keeps import and help provider-lazy' {
-        Import-Module $script:modulePath -Force -ErrorAction Stop
-        Get-Command -Module HostHunterNextGeneration | Should -Not -BeNullOrEmpty
-        Get-Help Get-HHTarget -ErrorAction Stop | Should -Not -BeNullOrEmpty
-
-        @(
-            [AppDomain]::CurrentDomain.GetAssemblies() |
-                Where-Object {
-                    $_.GetName().Name -in @('Microsoft.Data.Sqlite', 'SQLitePCLRaw.core')
-                }
-        ).Count | Should -Be 0
+        $previousModulePath = $env:HH_PROVIDER_LAZY_MODULE_PATH
+        try {
+            $env:HH_PROVIDER_LAZY_MODULE_PATH = $script:modulePath
+            $childScript = @'
+$ErrorActionPreference = 'Stop'
+Import-Module $env:HH_PROVIDER_LAZY_MODULE_PATH -Force -ErrorAction Stop
+if ($null -eq (Get-Command -Module HostHunterNextGeneration)) { exit 2 }
+if ($null -eq (Get-Help Get-HHTarget -ErrorAction Stop)) { exit 3 }
+$loaded = @(
+    [AppDomain]::CurrentDomain.GetAssemblies() |
+        Where-Object {
+            $_.GetName().Name -in @('Microsoft.Data.Sqlite', 'SQLitePCLRaw.core')
+        }
+)
+if ($loaded.Count -ne 0) {
+    $loaded | ForEach-Object { $_.GetName().Name } | Write-Error
+    exit 4
+}
+'provider-lazy'
+'@
+            $encoded = [Convert]::ToBase64String(
+                [Text.Encoding]::Unicode.GetBytes($childScript)
+            )
+            $output = @(& pwsh -NoLogo -NoProfile -NonInteractive `
+                    -EncodedCommand $encoded 2>&1)
+            $LASTEXITCODE | Should -Be 0 -Because ([string]::Join("`n", $output))
+            $output[-1] | Should -BeExactly 'provider-lazy'
+        }
+        finally { $env:HH_PROVIDER_LAZY_MODULE_PATH = $previousModulePath }
     }
 
     It 'loads the adjacent native library and reports SQLite 3.53.4' {

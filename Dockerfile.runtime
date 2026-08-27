@@ -109,6 +109,8 @@ COPY --chmod=0555 scripts/runtime/Invoke-HHCmdlet.ps1 /opt/hosthunter/runtime/In
 COPY --chmod=0555 scripts/runtime/Get-HHClientCommandMetadata.ps1 /opt/hosthunter/runtime/Get-HHClientCommandMetadata.ps1
 COPY --chmod=0555 scripts/runtime/Invoke-HHClientProtocol.ps1 /opt/hosthunter/runtime/Invoke-HHClientProtocol.ps1
 COPY --chmod=0555 scripts/runtime/client-askpass.sh /opt/hosthunter/runtime/client-askpass.sh
+COPY --chmod=0555 scripts/runtime/client-confirm.sh /opt/hosthunter/runtime/client-confirm.sh
+COPY --chmod=0555 scripts/runtime/client-credential.sh /opt/hosthunter/runtime/client-credential.sh
 USER 10001:10001
 WORKDIR /var/lib/hosthunter-data
 ENTRYPOINT ["/usr/local/bin/hosthunter-controller"]

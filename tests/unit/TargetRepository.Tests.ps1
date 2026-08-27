@@ -24,30 +24,41 @@ Describe 'SQLite target repository domain and transaction adapter' -Tag Unit {
                 '',
                 Justification = 'Creates an in-memory test value only.'
             )]
+            [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+                'PSAvoidUsingPlainTextForPassword',
+                'CredentialStorage',
+                Justification = 'CredentialStorage is a non-secret test enum, not password material.'
+            )]
             param(
                 [string]$Name = 'alpha',
                 [string]$HostName = 'alpha.example.test',
                 [string]$UserName = 'operator',
                 [bool]$IsActive = $true,
                 [string]$Authentication = 'Password',
+                [string]$CredentialStorage,
                 [string]$KeyPath = $null
             )
 
-            New-HHTargetRecord `
-                -Name $Name `
-                -Transport SSH `
-                -HostName $HostName `
-                -Port 22 `
-                -UserName $UserName `
-                -Authentication $Authentication `
-                -PowerShellRuntime PowerShell7 `
-                -HostKeyFingerprint ('SHA256:' + ('A' * 43)) `
-                -KeyPath $KeyPath `
-                -IsActive $IsActive `
-                -LastValidatedAtUtc '2026-08-24T00:00:00.0000000Z' `
-                -LastValidatedPSEdition Core `
-                -LastValidatedPowerShellVersion '7.6.5' `
-                -LastValidatedExecutionMode Direct
+            $parameters = @{
+                Name = $Name
+                Transport = 'SSH'
+                HostName = $HostName
+                Port = 22
+                UserName = $UserName
+                Authentication = $Authentication
+                PowerShellRuntime = 'PowerShell7'
+                HostKeyFingerprint = ('SHA256:' + ('A' * 43))
+                KeyPath = $KeyPath
+                IsActive = $IsActive
+                LastValidatedAtUtc = '2026-08-24T00:00:00.0000000Z'
+                LastValidatedPSEdition = 'Core'
+                LastValidatedPowerShellVersion = '7.6.5'
+                LastValidatedExecutionMode = 'Direct'
+            }
+            if ($PSBoundParameters.ContainsKey('CredentialStorage')) {
+                $parameters.CredentialStorage = $CredentialStorage
+            }
+            New-HHTargetRecord @parameters
         }
 
         function New-RepositoryTestEntry {
@@ -75,6 +86,7 @@ Describe 'SQLite target repository domain and transaction adapter' -Tag Unit {
                 port = [long]$item.Port
                 user_name = $item.UserName
                 authentication = $item.Authentication
+                credential_storage = $item.CredentialStorage
                 powershell_runtime = $item.PowerShellRuntime
                 host_key_fingerprint = $item.HostKeyFingerprint
                 key_path = $item.KeyPath
@@ -132,6 +144,17 @@ Describe 'SQLite target repository domain and transaction adapter' -Tag Unit {
             Mock Invoke-HHSqliteQuery {
                 param($Connection, $Sql, $Parameters, $Transaction)
                 $null = $Connection, $Parameters, $Transaction
+                if ($Sql -match 'expected_count') {
+                    $encryptedCount = @($script:queryRows | Where-Object {
+                            $_.authentication -ceq 'Password' -and
+                            $_.credential_storage -ceq 'Encrypted'
+                        }).Count
+                    return @([pscustomobject]@{
+                            expected_count = [long]$encryptedCount
+                            actual_count = [long]$encryptedCount
+                            invalid_count = 0L
+                        })
+                }
                 if ($Sql -match 'FROM database_identity') { return @($script:queryState) }
                 if ($Sql -match 'FROM target_profiles') { return @($script:queryRows) }
                 throw "Unexpected query: $Sql"

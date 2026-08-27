@@ -290,11 +290,23 @@ try {
         Assert-HHCondition (-not [IO.File]::Exists($databasePath)) 'Read created the database.'
         @{ count = $targets.Count }
     }
-    Invoke-HHCmdletStep 2 'Set-HHTarget' 'real SSH validation and one persisted password profile' {
-        $saved = Set-HHTarget -Name alpha -HostName $targetHost -Port $targetPort `
-            -UserName $userName -HostKeyFingerprint $fingerprint -Confirm:$false
+    Invoke-HHCmdletStep 2 'Set-HHTarget' 'real SSH validation and one prompt-only fixture profile' {
+        $proposal = [pscustomobject]@{
+            Name = 'alpha'
+            Transport = 'SSH'
+            HostName = $targetHost
+            Port = $targetPort
+            UserName = $userName
+            Authentication = 'Password'
+            CredentialStorage = 'Prompt'
+            PowerShellRuntime = 'PowerShell7'
+            HostKeyFingerprint = $fingerprint
+        }
+        $saved = Set-HHTarget -InputObject @($proposal) -Confirm:$false
         Assert-HHCondition ($saved.Name -ceq 'alpha') 'Saved target name differs.'
         Assert-HHCondition ($saved.Authentication -ceq 'Password') 'Saved target is not password-authenticated.'
+        Assert-HHCondition ($saved.CredentialStorage -ceq 'Prompt') `
+            'The container fixture must not persist its generated password.'
         $fresh = Invoke-HHFreshJson '@(Get-HHTarget -Name alpha)'
         Assert-HHCondition (@($fresh).Count -eq 1) 'Fresh process did not reload the saved target.'
         @{ name = $saved.Name; authentication = $saved.Authentication; freshReadCount = @($fresh).Count }

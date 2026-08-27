@@ -108,6 +108,7 @@ function ConvertTo-HHTargetRepositorySnapshotByte {
                 port = [int]$item.Port
                 userName = $item.UserName
                 authentication = $item.Authentication
+                credentialStorage = $item.CredentialStorage
                 powerShellRuntime = $item.PowerShellRuntime
                 hostKeyFingerprint = $item.HostKeyFingerprint
                 keyPath = $item.KeyPath
@@ -190,6 +191,7 @@ function ConvertFrom-HHTargetRepositoryRow {
         -Port ([int]$Row.port) `
         -UserName ([string]$Row.user_name) `
         -Authentication ([string]$Row.authentication) `
+        -CredentialStorage ([string]$Row.credential_storage) `
         -PowerShellRuntime ([string]$Row.powershell_runtime) `
         -HostKeyFingerprint $Row.host_key_fingerprint `
         -KeyPath $Row.key_path `
@@ -216,7 +218,7 @@ function Read-HHTargetRepositoryEntry {
             -Connection $Connection `
             -Transaction $Transaction `
             -Sql @'
-SELECT name, transport, host_name, port, user_name, authentication,
+SELECT name, transport, host_name, port, user_name, authentication, credential_storage,
     powershell_runtime, host_key_fingerprint, key_path, is_active,
     last_validated_at_utc, last_validated_ps_edition,
     last_validated_powershell_version, last_validated_execution_mode,
@@ -355,6 +357,7 @@ function Read-HHTargetRepositorySnapshot {
                 -TargetObject $Connection.DataSource
         }
     }
+    Assert-HHTargetCredentialState -Connection $Connection -Transaction $Transaction
     $selected = @(Select-HHTargetRepositoryTarget `
             -Target @(foreach ($entry in $entries) { $entry.Target }) `
             -Name $Name)
@@ -582,12 +585,12 @@ function Write-HHTargetRepositoryProfile {
             -Sql @'
 INSERT INTO target_profiles(
     name,name_key,endpoint_key,transport,host_name,port,user_name,
-    authentication,powershell_runtime,host_key_fingerprint,key_path,is_active,
+    authentication,credential_storage,powershell_runtime,host_key_fingerprint,key_path,is_active,
     last_validated_at_utc,last_validated_ps_edition,
     last_validated_powershell_version,last_validated_execution_mode,revision
 ) VALUES(
     @name,@name_key,@endpoint_key,@transport,@host_name,@port,@user_name,
-    @authentication,@runtime,@fingerprint,@key_path,@active,@validated_at,
+    @authentication,@credential_storage,@runtime,@fingerprint,@key_path,@active,@validated_at,
     @edition,@version,@execution_mode,@revision
 );
 '@ `
@@ -600,6 +603,7 @@ INSERT INTO target_profiles(
                 port = [int]$item.Port
                 user_name = $item.UserName
                 authentication = $item.Authentication
+                credential_storage = $item.CredentialStorage
                 runtime = $item.PowerShellRuntime
                 fingerprint = $item.HostKeyFingerprint
                 key_path = $item.KeyPath
@@ -611,6 +615,12 @@ INSERT INTO target_profiles(
                 revision = [long]$entry.Revision
             }
     }
+    $null = Invoke-HHSqliteNonQuery -Connection $Connection -Transaction $Transaction -Sql @'
+DELETE FROM target_credentials
+WHERE name_key NOT IN (
+    SELECT name_key FROM target_profiles WHERE credential_storage = 'Encrypted'
+);
+'@
 }
 
 function Write-HHTargetRepositoryMutation {

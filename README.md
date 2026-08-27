@@ -57,25 +57,59 @@ pwsh -NoProfile -File ./scripts/client/Install-HHClient.ps1
 Open PowerShell normally. The profile import launches Docker Desktop once when
 its engine is stopped, starts the controller when needed, reuses an unchanged
 controller, and synchronizes the eleven exported commands from the packaged
-module:
+module. In an interactive terminal it finishes with a short radar-style
+welcome animation. Set `HH_CLIENT_NO_ANIMATION=1` to suppress it; scripts,
+redirected sessions, tests, and CI never animate or wait:
 
 ```powershell
-Set-HHTarget -Name server01 -HostName 192.0.2.10 -UserName analyst
-Test-HHTarget -Name server01
-Invoke-HHCommand -Target server01 -Command 'Get-Process'
-Get-HHAuditRecord -TargetName server01
+Set-HHTarget -HostName BestLaptopEver -UserName RemoteAdmin
+Get-HHTarget
+Invoke-HHCommand -Target BESTLAPTOPEVER -Command 'Get-Process'
+Get-HHAuditRecord -TargetName BESTLAPTOPEVER
 ```
+
+You do not need to obtain a host key first. Windows OpenSSH creates the host
+identity when its SSH service starts. On first contact HostHunter retrieves the
+public key, deterministically selects a supported algorithm, pins it, and prints
+`Accepting public key <algorithm> <SHA256 fingerprint>`. Choosing SSH authorizes
+this first-use trust without a second prompt. A later key change stops before
+credentials are sent. On an untrusted network, supply an independently verified
+`-HostKeyFingerprint` so discovery must match it before authentication.
+
+HostHunter next recommends installing a dedicated Ed25519 key. Press Enter to
+accept the recommended choice. It uses the password once, independently proves
+the key, then saves only the public-key profile. A definite key failure may
+offer password fallback; an uncertain remote or commit outcome stops without a
+retry or saved password.
+
+If you explicitly choose `-Authentication Password`, or accept a definite
+fallback, HostHunter displays the storage risks and requires a separate Yes
+confirmation. It encrypts the password in SQLite using a key held in the
+separate secrets volume. Later target tests, commands, Windows policy changes,
+and key conversion authenticate invisibly. Proven key conversion and target
+removal atomically delete the saved credential.
+
+The saved target name defaults to the computer name returned by the
+authenticated PowerShell identity probe. `-Name` remains an optional override,
+and `-HostKeyFingerprint` remains available for independently verified or
+noninteractive first contact. New targets are additive and never silently
+deactivate existing targets.
 
 These are normal PowerShell functions: parameter discovery, pipelines, objects,
 warnings, errors, verbose/debug/information messages, and progress cross one
 generic versioned bridge. New exported cmdlets synchronize automatically; the
-macOS client contains no per-cmdlet business logic. Passwords are prompted with
+macOS client contains no per-cmdlet business logic. Trust decisions use a
+separate bounded yes/no frame. Passwords are prompted with
 `Read-Host -AsSecureString` and travel only through the command's standard-input
 session and an in-memory controller-local broker. They are never command-line
-arguments, environment values, persistent files, or logs.
+arguments, environment values, logs, or client output frames. Password mode
+persists only an authenticated encrypted SQLite envelope; its decryption key
+remains in the separate secrets volume.
 
 HostHunter never pulls Git changes automatically. When build-relevant checked-out
-source changes, the next import rebuilds the controller once.
+source changes, the next import rebuilds the controller once. The profile loads
+the client bridge directly from the configured repository on every new PowerShell
+session, so it cannot keep using an older copied bridge after the source changes.
 
 ## Runtime administration
 
@@ -91,7 +125,8 @@ Runtime state remains separated across five trust-domain volumes: data, secrets,
 anchors, SSH keys, and evidence. Destroying runtime state is explicit:
 
 ```sh
-./scripts/runtime/hosthunter.sh destroy
+./scripts/runtime/hosthunter.sh destroy \
+  --confirm-project hosthunter-next-generation-runtime --destroy-volumes
 ```
 
 ## Focused cmdlet verification

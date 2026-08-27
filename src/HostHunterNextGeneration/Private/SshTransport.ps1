@@ -411,6 +411,7 @@ function New-HHSshTransportPlan {
     $options = [ordered]@{
         ConnectTimeout = [string] $ConnectionTimeoutSeconds
         GlobalKnownHostsFile = 'none'
+        LogLevel = 'QUIET'
         StrictHostKeyChecking = 'yes'
         UpdateHostKeys = 'no'
     }

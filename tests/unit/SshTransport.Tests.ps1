@@ -458,6 +458,7 @@ Describe 'SSH transport trust and planning' -Tag Unit {
         $plan.Authentication | Should -BeExactly 'Password'
         $plan.ConnectingTimeoutMilliseconds | Should -Be 9000
         $plan.Options.StrictHostKeyChecking | Should -BeExactly 'yes'
+        $plan.Options.LogLevel | Should -BeExactly 'QUIET'
         $plan.Options.GlobalKnownHostsFile | Should -BeExactly 'none'
         $plan.Options.UpdateHostKeys | Should -BeExactly 'no'
         $plan.Options.Contains('UserKnownHostsFile') | Should -BeFalse

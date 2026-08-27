@@ -33,6 +33,7 @@ CREATE TABLE target_profiles (
     port INTEGER NOT NULL CHECK (port BETWEEN 1 AND 65535),
     user_name TEXT NOT NULL CHECK (length(user_name) BETWEEN 1 AND 256),
     authentication TEXT NOT NULL CHECK (authentication IN ('Password', 'PublicKey', 'Kerberos', 'Certificate')),
+    credential_storage TEXT NOT NULL CHECK (credential_storage IN ('None', 'Prompt', 'Encrypted')),
     powershell_runtime TEXT NOT NULL CHECK (powershell_runtime IN ('PowerShell7', 'WindowsPowerShell51')),
     host_key_fingerprint TEXT NULL,
     key_path TEXT NULL,
@@ -42,6 +43,13 @@ CREATE TABLE target_profiles (
     last_validated_powershell_version TEXT NOT NULL CHECK (length(last_validated_powershell_version) BETWEEN 1 AND 64),
     last_validated_execution_mode TEXT NOT NULL CHECK (last_validated_execution_mode IN ('Direct', 'WindowsPowerShellCompatibility')),
     revision INTEGER NOT NULL CHECK (revision > 0)
+) STRICT;
+
+CREATE TABLE target_credentials (
+    name_key TEXT NOT NULL PRIMARY KEY CHECK (length(name_key) BETWEEN 1 AND 256),
+    target_revision INTEGER NOT NULL CHECK (target_revision > 0),
+    password_envelope BLOB NOT NULL CHECK (length(password_envelope) >= 32),
+    stored_at_utc TEXT NOT NULL CHECK (length(stored_at_utc) >= 20)
 ) STRICT;
 
 CREATE TABLE operation_batches (
@@ -171,5 +179,6 @@ CREATE TRIGGER output_artifacts_no_update BEFORE UPDATE ON output_artifacts BEGI
 CREATE TRIGGER output_artifacts_no_delete BEFORE DELETE ON output_artifacts BEGIN SELECT RAISE(ABORT, 'append-only'); END;
 CREATE TRIGGER target_mutations_no_update BEFORE UPDATE ON target_mutations BEGIN SELECT RAISE(ABORT, 'append-only'); END;
 CREATE TRIGGER target_mutations_no_delete BEFORE DELETE ON target_mutations BEGIN SELECT RAISE(ABORT, 'append-only'); END;
+CREATE TRIGGER target_credentials_no_update BEFORE UPDATE ON target_credentials BEGIN SELECT RAISE(ABORT, 'replace-required'); END;
 CREATE TRIGGER audit_events_no_update BEFORE UPDATE ON audit_events BEGIN SELECT RAISE(ABORT, 'append-only'); END;
 CREATE TRIGGER audit_events_no_delete BEFORE DELETE ON audit_events BEGIN SELECT RAISE(ABORT, 'append-only'); END;

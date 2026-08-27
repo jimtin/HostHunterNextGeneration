@@ -12,6 +12,50 @@ $script:HHClientMaximumMetadataBytes = 8MB
 $script:HHClientMaximumRequestBytes = 16MB
 $script:HHClientMaximumFrameBytes = 32MB
 
+function Test-HHClientAnimationSupported {
+    if ($env:HH_CLIENT_NO_ANIMATION -ceq '1' -or
+        -not [string]::IsNullOrWhiteSpace($env:CI) -or
+        [Console]::IsInputRedirected -or [Console]::IsOutputRedirected -or
+        $Host.Name -cne 'ConsoleHost') { return $false }
+    try { return [bool]$Host.UI.SupportsVirtualTerminal }
+    catch { return $false }
+}
+
+function Show-HHClientStartupAnimation {
+    param([Parameter(Mandatory)][ValidateRange(1, 999)][int]$CommandCount)
+
+    if (-not (Test-HHClientAnimationSupported)) { return }
+    $esc = [char]27
+    $radar = @('◴', '◷', '◶', '◵')
+    $messages = @(
+        'Scanning the horizon',
+        'Waking the framework',
+        'Linking the command deck',
+        'Calibrating HostHunter'
+    )
+    [Console]::Write("${esc}[?25l")
+    try {
+        for ($frame = 0; $frame -lt 14; $frame++) {
+            $pulse = $radar[$frame % $radar.Count]
+            $message = $messages[[Math]::Min(
+                    [int][Math]::Floor($frame / 4), $messages.Count - 1
+                )]
+            $dots = '.' * (($frame % 3) + 1)
+            $line = "  $pulse  $message$dots"
+            [Console]::Write("`r${esc}[2K${esc}[38;5;82m$line${esc}[0m")
+            Start-Sleep -Milliseconds 240
+        }
+        [Console]::Write("`r${esc}[2K")
+        Write-Host '  ╭─ HostHunter ─────────────────────────╮' -ForegroundColor Green
+        Write-Host '  │  ✓ Framework online                 │' -ForegroundColor Green
+        Write-Host ("  │  ✓ {0,-3} commands ready               │" -f $CommandCount) `
+            -ForegroundColor Green
+        Write-Host '  │  Welcome back, hunter.              │' -ForegroundColor Green
+        Write-Host '  ╰─────────────────────────────────────╯' -ForegroundColor Green
+    }
+    finally { [Console]::Write("${esc}[?25h") }
+}
+
 function Get-HHClientConfigurationPath {
     $configurationRoot = if (-not [string]::IsNullOrWhiteSpace($env:XDG_CONFIG_HOME)) {
         $env:XDG_CONFIG_HOME
@@ -269,6 +313,7 @@ function Invoke-HHClientCommand {
             $process.StandardInput.Flush()
             $terminal = $null
             $credentialRequested = $false
+            $confirmationRequestCount = 0
             while ($null -ne ($line = $process.StandardOutput.ReadLine())) {
                 if ([string]::IsNullOrWhiteSpace($line)) { continue }
                 if ([Text.Encoding]::UTF8.GetByteCount($line) -gt $script:HHClientMaximumFrameBytes) {
@@ -280,6 +325,28 @@ function Invoke-HHClientCommand {
                     throw 'HostHunter controller emitted data after its terminal frame.'
                 }
                 switch ([string]$frame.type) {
+                    confirmation_request {
+                        $confirmationRequestCount++
+                        if ($confirmationRequestCount -gt 8) {
+                            throw 'HostHunter controller requested too many confirmations.'
+                        }
+                        $prompt = [Text.Encoding]::UTF8.GetString(
+                            [Convert]::FromBase64String([string]$frame.prompt)
+                        )
+                        if ($prompt.Length -gt 4096) {
+                            throw 'HostHunter controller emitted an oversized confirmation prompt.'
+                        }
+                        $answer = Read-Host -Prompt $prompt
+                        $defaultYes = $prompt -match '(?i)\[Y/n\]\s*$'
+                        $accepted = ([string]::IsNullOrWhiteSpace([string]$answer) -and
+                                $defaultYes) -or [string]$answer -match '^(?i:y|yes)$'
+                        $confirmationResponse = if ($accepted) {
+                            'confirmation yes'
+                        }
+                        else { 'confirmation no' }
+                        $process.StandardInput.WriteLine($confirmationResponse)
+                        $process.StandardInput.Flush()
+                    }
                     credential_request {
                         if ($credentialRequested) {
                             throw 'HostHunter controller requested credentials more than once.'
@@ -343,7 +410,13 @@ function Invoke-HHClientCommand {
                         }
                         $terminal = $frame
                     }
-                    default { throw "HostHunter controller emitted unsupported frame '$($frame.type)'." }
+                    default {
+                        throw @(
+                            "This HostHunter.Client version does not support controller frame"
+                            "'$($frame.type)'. Reload PowerShell to load the current client from"
+                            'the HostHunter repository.'
+                        ) -join ' '
+                    }
                 }
             }
             $process.StandardInput.Close()
@@ -458,6 +531,7 @@ if ($env:HH_CLIENT_SKIP_AUTO_START -cne '1') {
             -SourceFingerprint $script:HHClientSourceFingerprint
         $script:HHClientMetadata = Get-HHClientDefinition $script:HHClientControllerId
         Sync-HHClientCommand $script:HHClientMetadata
+        Show-HHClientStartupAnimation -CommandCount @($script:HHClientMetadata.commands).Count
     }
 }
 else {

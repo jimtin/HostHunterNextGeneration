@@ -12,9 +12,17 @@ the product and remain tested.
 
 The supported operator entrypoint on macOS is the current-user
 `HostHunter.Client` module. Its profile import automatically starts or reuses
-the exact-fingerprint controller and generates native proxy functions from the
+the source-fingerprint-bound controller and generates native proxy functions from the
 packaged export metadata. The client has one generic Docker bridge and no
 managed-host transport or cmdlet-specific behavior.
+
+Onboarding is key-first. Password fallback requires a full risk warning and a
+second confirmation. Saved passwords are purpose-separated authenticated
+SQLite envelopes bound to database identity and target revision; the key stays
+in the separate secret volume. Managed-host operations seed the controller
+loopback broker through standard input, making authentication invisible after
+onboarding. Proven key conversion and target deletion purge the credential
+atomically. Uncertain key outcomes never retry or fall back.
 
 ## Development verdict
 

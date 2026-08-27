@@ -199,19 +199,22 @@ function Get-HHAuditIntentTransportContext {
     if ($runtime -cnotin @('PowerShell7', 'WindowsPowerShell51')) {
         throw 'Audit intent requested PowerShell runtime is invalid.'
     }
-    $fingerprint = $fingerprintState.Value
-    if ($fingerprint -isnot [string] -or
-        $fingerprint -cnotmatch '^SHA256:[A-Za-z0-9+/]{43}$') {
-        throw 'Audit intent expected SSH host fingerprint is invalid.'
-    }
     $operation = $operationState.Value
     if ($operation -isnot [string] -or [string]::IsNullOrWhiteSpace($operation)) {
         throw 'Audit intent operation is invalid.'
     }
+    $fingerprint = $fingerprintState.Value
+    $isFirstTrust = $operation -ceq 'ValidateTarget' -and
+        ($null -eq $fingerprint -or [string]::IsNullOrWhiteSpace([string]$fingerprint))
+    if (-not $isFirstTrust -and
+        ($fingerprint -isnot [string] -or
+            $fingerprint -cnotmatch '^SHA256:[A-Za-z0-9+/]{43}$')) {
+        throw 'Audit intent expected SSH host fingerprint is invalid.'
+    }
     return [pscustomobject]@{
         Operation = $operation
         RequestedPowerShellRuntime = $runtime
-        ExpectedHostKeyFingerprint = $fingerprint
+        ExpectedHostKeyFingerprint = if ($isFirstTrust) { $null } else { $fingerprint }
     }
 }
 
@@ -644,9 +647,12 @@ function Assert-HHTransportAuditResult {
 
     $fingerprint = $values.HostKeyFingerprint
     if ($hasObservedRuntime) {
+        $expectedFingerprint = $IntentMetadata.ExpectedHostKeyFingerprint
+        $fingerprintMismatch = -not [string]::IsNullOrWhiteSpace([string]$expectedFingerprint) -and
+            $fingerprint -cne $expectedFingerprint
         if ($fingerprint -isnot [string] -or
             $fingerprint -cnotmatch '^SHA256:[A-Za-z0-9+/]{43}$' -or
-            $fingerprint -cne $IntentMetadata.ExpectedHostKeyFingerprint) {
+            $fingerprintMismatch) {
             throw 'Transport result observed SSH host fingerprint is missing, invalid, or contradicts the intent.'
         }
     }

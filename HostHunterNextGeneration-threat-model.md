@@ -6,6 +6,11 @@
 - High: repeating uncertain SSH mutations could duplicate commands, keys, or policy changes.
 - High: forged proxy metadata or credential-protocol frames could execute local
   client code or disclose a password.
+- High: a durable saved password increases the impact of combined controller,
+  data-volume, and secret-volume compromise; encryption protects a stolen
+  database alone but cannot protect against a trusted running controller.
+- High: automatic first-use SSH trust can pin an impersonating host when
+  onboarding occurs across a hostile network without an independently supplied fingerprint.
 - High: rollback of SQLite, anchors, secrets, or evidence could falsify history.
 - High: candidate-owned coverage code could omit source or forge a passing
   percentage unless the standalone gate independently validates the receipt.
@@ -37,9 +42,9 @@ consequence; unknown means not determined.
 | Public module | Eleven operator actions | Public scripts | module manifest | confirmed |
 | Managed-host engine | Closed five-operation coordinator | Invoke-HHManagedHostOperation | ManagedHostOperation.ps1 | confirmed |
 | SSH adapter | Trust, PS7 identity, streams, cleanup | engine-only calls | SshTransport.ps1; SshTrust.ps1 | confirmed |
-| Persistence | Authenticated SQLite, anchors, encrypted output, recovery | local cmdlets and engine | audit, anchor, migrations | confirmed |
+| Persistence | Authenticated SQLite, encrypted credential/output envelopes, anchors, recovery | local cmdlets and engine | audit, anchor, migrations | confirmed |
 | macOS client | Native generated proxies and framed Docker bridge | profile import; eleven proxy functions | HostHunter.Client | confirmed |
-| credential broker | Command-scoped SSH askpass handoff | redirected stdin and controller loopback | client protocol; askpass helper | confirmed |
+| interaction broker | Command-scoped risk confirmation, credential acquisition, and SSH askpass handoff | redirected stdin and controller loopback | client protocol; confirmation/credential/askpass helpers | confirmed |
 
 ### Build and test
 
@@ -57,10 +62,10 @@ consequence; unknown means not determined.
 | Boundary | From → To | Protections observed (auth, validation, rate limits) | Gaps | Evidence |
 | --- | --- | --- | --- | --- |
 | B1 | operator → dispatcher/public cmdlet | exact allowlist; validation | remote command remains powerful | runtime dispatcher; AP-5 |
-| B0 | macOS PowerShell → Docker controller | source fingerprint; closed actions; bounded NDJSON/CLIXML; non-executable proxy declarations | local Docker administrator remains trusted | client module/protocol; AP-12, AP-13 |
+| B0 | macOS PowerShell → Docker controller | source fingerprint; closed actions; bounded NDJSON/CLIXML; non-executable proxy declarations; invocation-scoped credential broker | local Docker administrator is intentionally trusted | client module/protocol; AP-12, AP-13, AP-15 |
 | B2 | public cmdlet → engine | closed operations; AST guard; one delegation | guard must stay mandatory | engine/guard; AP-1 |
 | B3 | engine → SSH adapter → host | intent/arm; fingerprint; PS7 identity; bounds | host controls content/timing | transport/audit; AP-2, AP-4, AP-6 |
-| B4 | controller → five state roots | separate mounts; authentication; encryption | Docker/root trusted | compose.runtime.yml; AP-3 |
+| B4 | controller → five state roots | separate data/secret/anchor/key/evidence mounts; AEAD; authenticated state generations | combined controller/data/secret access can use or decrypt saved passwords by accepted design | compose.runtime.yml; AP-3, AP-4, AP-15 |
 | B5 | checkout → exact-SHA gate → receipts | read-only preflight; atomic claim; exclusive writes; terminal seal | operator trusted | release scripts; AP-7 |
 | B8 | candidate source → coverage container → release verdict | read-only source; exact inventory/hash; four thresholds; external receipt validator | candidate owns the collector under test | coverage scripts; standalone gate; AP-9, AP-10, AP-11 |
 | B6 | Docker lifecycle/health → controller | local orchestration | dismissed: no host data and parser/API removed | compose.runtime.yml |
@@ -79,6 +84,7 @@ consequence; unknown means not determined.
 | Release verdicts | .artifacts/release/SHA | determines ship eligibility |
 | Coverage denominator and receipt | exact tree and heavy receipt | prevents omitted code or stale proof from authorizing release |
 | Interactive password | SecureString and command-scoped broker memory | grants initial managed-host access |
+| Stored password envelope | SQLite ciphertext; key material in separate secret root | enables invisible privileged host authentication |
 
 ## 6. Attacker Profile
 
@@ -92,7 +98,8 @@ Capabilities:
 
 Non-capabilities:
 
-- cannot administer Docker/root or replace all roots;
+- cannot administer Docker/root or replace all roots unless they already are a
+  user-trusted local operator;
 - cannot obtain trusted interactive credentials by assumption;
 - cannot make Linux evidence prove Windows mutation.
 
@@ -112,7 +119,9 @@ Non-capabilities:
 | AP-10 | ship instrumented runtime code | ephemeral branch rewrite → B8 → production image | integrity / execution | low | high | medium | separate untouched build; production image probe-token rejection | build-candidate.sh |
 | AP-11 | exhaust or loop the gate | branch hit → B8 → local compute/storage | availability | low | medium | low | in-memory hit set; two fixed invocations; 300-second bound; no retries | coverage runner; verify-local.sh |
 | AP-12 | execute injected local proxy code | forged metadata → B0 → macOS session | execution | low | high | medium | exact image fingerprint; unique names; declaration AST allows parameter metadata only; size caps | client metadata synchronization |
-| AP-13 | disclose or replay a password | malicious frame/process → B0 → credential | credential access | medium | high | high | local secure prompt; one request; stdin; random broker token; loopback only; no args/env/files/logs; buffer clearing | client protocol qualification |
+| AP-13 | disclose or replay a password | malicious frame/process → B0 → credential | access / exfiltration | medium | high | high | local secure prompt; one request; stdin; random broker token; loopback only; no args/env/files/logs; buffer clearing | client protocol qualification |
+| AP-14 | pin an impersonating host on first contact | network interception → B3 → host trust/password | access / exfiltration | medium | high | high | deterministic supported-key selection; fingerprint announcement; pin before credential; optional supplied fingerprint; changed-key hard failure | SshTrust.ps1; trust and native-client tests |
+| AP-15 | recover or silently use a saved remote password | controller compromise or combined data/secret access → B0/B4 → stored credential/managed host | access / exfiltration | medium | high | high | trusted-operator model; separate roots; AEAD endpoint/revision binding; no reveal/export surface; explicit storage warning; purge on key conversion/removal | credential repository, engine, and persistence tests |
 
 AP-1 through AP-6 are medium likelihood because realistic untrusted inputs must
 also defeat an evidenced control. AP-7 is low because exclusive writes directly
@@ -140,6 +149,8 @@ stake.
 | AP-11 | Keep one process, two fixed invocations, terminal timeout receipt, and zero retries | coverage/release runner | preventative/detective |
 | AP-12 | Keep metadata schema/fingerprint/AST/duplicate checks and static no-transport client guard | native client | preventative |
 | AP-13 | Keep one-prompt protocol, frame bounds, token-bound loopback, memory clearing, and fixture leakage assertions | native client/credential broker | preventative/detective |
+| AP-14 | Keep changed-key rejection fail-closed and document supplying an independently verified fingerprint for onboarding across untrusted networks | managed-host engine/native client/docs | preventative/governance |
+| AP-15 | Keep endpoint/revision-bound ciphertext, separate keys, no reveal/export path, explicit warning, atomic purge, and plaintext-leakage tests | credential repository/engine/broker/native client | preventative/detective |
 | AP-2, AP-6, AP-8 | Repeat the green live-Windows journey against the packaged exact-SHA image | Windows release qualification | detective |
 
 ## 9. Assumptions and Open Questions
@@ -155,7 +166,19 @@ stake.
 - user-confirmed: macOS PowerShell auto-starts Docker, synchronizes exports, and
   uses one generic native bridge; checked-out source changes rebuild once but
   never trigger an automatic Git pull.
-- unvalidated: Docker administrators and the gate operator are trusted.
+- user-confirmed: choosing SSH authorizes automatic first-use host-key pinning;
+  HostHunter announces the selected algorithm and fingerprint without a second
+  trust prompt. Changed identities still fail closed before credentials are sent.
+- user-confirmed: target names default to the authenticated remote computer name
+  and target creation is additive.
+- user-confirmed: HostHunter operators, the macOS account, and Docker
+  administrators are trusted; the accepted warning states that this access can
+  use saved remote credentials.
+- user-confirmed: SSH key is the default onboarding choice; definite key setup
+  failure may offer encrypted-password fallback only after the risks are shown
+  and separately confirmed. Uncertain key outcomes never fall back or retry.
+- user-confirmed: stored passwords are permanently deleted after proven key
+  conversion and target removal.
 - unvalidated: minimum Windows and PowerShell versions remain to be fixed.
 - terminal exact-SHA evidence: candidate `652157af4a3ab21702b9895d3efffb3f946b8e5f`
   passed the eleven-cmdlet container journey, then the live-Windows phase stopped
