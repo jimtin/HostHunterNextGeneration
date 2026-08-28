@@ -10,6 +10,7 @@ $expectedCommands = @(
     'Get-HHAuditRecord'
     'Get-HHEscalationPreference'
     'Get-HHTarget'
+    'Get-TargetHostDetails'
     'Invoke-HHCommand'
     'Remove-HHTarget'
     'Set-HHEscalationPreference'
@@ -20,6 +21,7 @@ $expectedCommands = @(
 $orderedJourney = @(
     'Get-HHTarget'
     'Set-HHTarget'
+    'Get-TargetHostDetails'
     'Test-HHTarget'
     'Invoke-HHCommand'
     'Get-HHAuditRecord'
@@ -94,6 +96,9 @@ function Get-HHDatabaseSnapshot {
             TargetMutations = 0
             ConfigurationGeneration = 0
             ConfigurationMutations = 0
+            VisualizerGeneration = 0
+            Missions = 0
+            Observations = 0
             Batches = 0
             Invocations = 0
             RemoteEvents = 0
@@ -135,6 +140,9 @@ function Get-HHDatabaseSnapshot {
             TargetMutations = [int](Read-Scalar 'SELECT COUNT(*) FROM target_mutations;')
             ConfigurationGeneration = [int](Read-Scalar 'SELECT generation FROM configuration_store_state WHERE singleton_id=1;')
             ConfigurationMutations = [int](Read-Scalar 'SELECT COUNT(*) FROM configuration_mutations;')
+            VisualizerGeneration = [int](Read-Scalar 'SELECT generation FROM visualizer_store_state WHERE singleton_id=1;')
+            Missions = [int](Read-Scalar 'SELECT COUNT(*) FROM visualizer_missions;')
+            Observations = [int](Read-Scalar 'SELECT COUNT(*) FROM visualizer_host_observations;')
             Batches = [int](Read-Scalar 'SELECT COUNT(*) FROM operation_batches;')
             Invocations = [int](Read-Scalar 'SELECT COUNT(*) FROM invocations;')
             RemoteEvents = [int](Read-Scalar 'SELECT COUNT(*) FROM remote_operation_events;')
@@ -155,7 +163,8 @@ function Get-HHDatabaseDelta {
     $delta = [ordered]@{}
     foreach ($name in @(
             'SchemaVersion', 'Profiles', 'TargetGeneration', 'TargetMutations',
-            'ConfigurationGeneration', 'ConfigurationMutations', 'Batches',
+            'ConfigurationGeneration', 'ConfigurationMutations', 'VisualizerGeneration',
+            'Missions', 'Observations', 'Batches',
             'Invocations', 'RemoteEvents', 'Outcomes', 'Artifacts', 'AuditEvents'
         )) {
         $delta[$name] = [long]$After.$name - [long]$Before.$name
@@ -179,42 +188,48 @@ function Assert-HHStepDatabaseContract {
             Assert-HHCondition ($delta.Profiles -eq 1) 'Set-HHTarget did not add exactly one profile.'
             Assert-HHCondition ($delta.TargetGeneration -eq 1) 'Set-HHTarget generation delta was not one.'
             Assert-HHCondition ($delta.TargetMutations -eq 1) 'Set-HHTarget mutation delta was not one.'
-            Assert-HHCondition ($delta.Invocations -eq 1 -and $delta.Outcomes -eq 1) `
-                'Set-HHTarget did not persist one terminal validation invocation.'
+            Assert-HHCondition ($delta.Invocations -eq 2 -and $delta.Outcomes -eq 2) `
+                'Set-HHTarget did not persist validation plus initial host-details invocations.'
+            Assert-HHCondition ($delta.Observations -eq 0) 'Paused visualization unexpectedly queued initial host details.'
         }
         3 {
+            Assert-HHCondition ($delta.Invocations -eq 1 -and $delta.Outcomes -eq 1) `
+                'Get-TargetHostDetails did not persist one terminal invocation.'
+            Assert-HHCondition ($delta.Observations -eq 0) 'Paused visualization unexpectedly queued one observation.'
+        }
+        4 {
             Assert-HHCondition ($delta.TargetGeneration -eq 0) 'Test-HHTarget changed the target generation.'
             Assert-HHCondition ($delta.Invocations -eq 1 -and $delta.Outcomes -eq 1) `
                 'Test-HHTarget did not persist one terminal invocation.'
         }
-        4 {
+        5 {
             Assert-HHCondition ($delta.Invocations -eq 1 -and $delta.Outcomes -eq 1) `
                 'Invoke-HHCommand did not persist one terminal invocation.'
             Assert-HHCondition ($delta.Artifacts -eq 1) 'Invoke-HHCommand did not persist one output artifact.'
         }
-        { $_ -in @(5, 6, 10) } {
+        { $_ -in @(6, 7, 11) } {
             foreach ($property in $delta.PSObject.Properties) {
                 Assert-HHCondition ([long]$property.Value -eq 0) `
                     "Read-only cmdlet changed database field '$($property.Name)'."
             }
         }
-        7 {
+        8 {
             Assert-HHCondition ($delta.TargetGeneration -eq 1 -and $delta.TargetMutations -eq 1) `
                 'Enable-HHSshKeyAuthentication did not commit one target mutation.'
             Assert-HHCondition ($delta.Invocations -eq 1 -and $delta.Outcomes -eq 1) `
                 'Enable-HHSshKeyAuthentication did not persist one terminal invocation.'
         }
-        8 {
+        9 {
             Assert-HHCondition ($delta.Invocations -eq 1 -and $delta.Outcomes -eq 1) `
                 'Set-HHWindowsProcessAuditPolicy did not persist one terminal invocation.'
         }
-        9 {
+        10 {
             Assert-HHCondition ($delta.ConfigurationGeneration -eq 1) `
                 'Set-HHEscalationPreference generation delta was not one.'
             Assert-HHCondition ($delta.ConfigurationMutations -eq 1) `
                 'Set-HHEscalationPreference mutation delta was not one.'
         }
-        11 {
+        12 {
             Assert-HHCondition ($delta.Profiles -eq -1) 'Remove-HHTarget did not remove exactly one profile.'
             Assert-HHCondition ($delta.TargetGeneration -eq 1 -and $delta.TargetMutations -eq 1) `
                 'Remove-HHTarget did not commit one target mutation.'
@@ -273,7 +288,7 @@ try {
     $actualCommands = @(Get-Command -Module HostHunterNextGeneration -CommandType Function |
             Sort-Object Name | ForEach-Object Name)
     Assert-HHCondition (($actualCommands -join "`n") -ceq ($expectedCommands -join "`n")) `
-        "Package exports differ from the exact eleven-command contract: $($actualCommands -join ', ')."
+        "Package exports differ from the exact twelve-command contract: $($actualCommands -join ', ')."
     $unexpectedState = @(
         Get-ChildItem -LiteralPath $dataRoot -Force -ErrorAction Stop |
             Where-Object Name -cne 'keys'
@@ -290,7 +305,7 @@ try {
         Assert-HHCondition (-not [IO.File]::Exists($databasePath)) 'Read created the database.'
         @{ count = $targets.Count }
     }
-    Invoke-HHCmdletStep 2 'Set-HHTarget' 'real SSH validation and one prompt-only fixture profile' {
+    Invoke-HHCmdletStep 2 'Set-HHTarget' 'real SSH validation, paused host details, and one prompt-only fixture profile' {
         $proposal = [pscustomobject]@{
             Name = 'alpha'
             Transport = 'SSH'
@@ -311,13 +326,20 @@ try {
         Assert-HHCondition (@($fresh).Count -eq 1) 'Fresh process did not reload the saved target.'
         @{ name = $saved.Name; authentication = $saved.Authentication; freshReadCount = @($fresh).Count }
     }
-    Invoke-HHCmdletStep 3 'Test-HHTarget' 'real identity probe without target mutation' {
+    Invoke-HHCmdletStep 3 'Get-TargetHostDetails' 'fresh paused host details through the managed-host engine' {
+        $details=@(Get-TargetHostDetails -Name alpha -Reason 'focused cmdlet verifier')
+        Assert-HHCondition ($details.Count -eq 1) 'Expected one host-details observation.'
+        Assert-HHCondition (-not [string]::IsNullOrWhiteSpace([string]$details[0].Hostname)) 'Hostname is absent.'
+        Assert-HHCondition ($details[0].VisualizerPublishingState -ceq 'Paused') 'Visualizer publishing was not paused.'
+        @{hostname=$details[0].Hostname;visualizerState=$details[0].VisualizerPublishingState}
+    }
+    Invoke-HHCmdletStep 4 'Test-HHTarget' 'real identity probe without target mutation' {
         $result = Test-HHTarget -Name alpha -Reason 'focused cmdlet verifier'
         Assert-HHCondition ([bool]$result.Succeeded) 'Target identity probe failed.'
         Assert-HHCondition ($result.RemotePSEdition -ceq 'Core') 'Remote target is not PowerShell Core.'
         @{ succeeded = $result.Succeeded; edition = $result.RemotePSEdition }
     }
-    Invoke-HHCmdletStep 4 'Invoke-HHCommand' 'one command with complete stream evidence' {
+    Invoke-HHCmdletStep 5 'Invoke-HHCommand' 'one command with complete stream evidence' {
         $command = @'
 Write-Output 'output-value'
 Write-Warning 'warning-value'
@@ -335,7 +357,7 @@ Write-Error 'nonterminating-error' -ErrorAction Continue
             "Unexpected stream set: $($streams -join ',')."
         @{ invocationId = $script:commandResult.InvocationId; streams = $streams }
     }
-    Invoke-HHCmdletStep 5 'Get-HHAuditRecord' 'fresh-process exact audit read without DB mutation' {
+    Invoke-HHCmdletStep 6 'Get-HHAuditRecord' 'fresh-process exact audit read without DB mutation' {
         Assert-HHCondition ($null -ne $script:commandResult) 'Command invocation is unavailable.'
         $id = [string]$script:commandResult.InvocationId
         $fresh = Invoke-HHFreshJson "@(Get-HHAuditRecord -InvocationId '$id' -First 1)"
@@ -344,7 +366,7 @@ Write-Error 'nonterminating-error' -ErrorAction Continue
         Assert-HHCondition ($record.CaseId -ceq 'CASE-CMDLETS-001') 'Audit case ID differs.'
         @{ invocationId = $record.InvocationId; operation = $record.Operation; status = $record.Status }
     }
-    Invoke-HHCmdletStep 6 'Get-HHAuditOutput' 'fresh-process ordered output read without DB mutation' {
+    Invoke-HHCmdletStep 7 'Get-HHAuditOutput' 'fresh-process ordered output read without DB mutation' {
         Assert-HHCondition ($null -ne $script:commandResult) 'Command invocation is unavailable.'
         $id = [string]$script:commandResult.InvocationId
         $fresh = Invoke-HHFreshJson "@(Get-HHAuditOutput -InvocationId '$id')"
@@ -354,7 +376,7 @@ Write-Error 'nonterminating-error' -ErrorAction Continue
         Assert-HHCondition ($streams -contains 'Output') 'Fresh output read omitted the Output stream.'
         @{ invocationId = $id; eventCount = $events.Count; streams = $streams }
     }
-    Invoke-HHCmdletStep 7 'Enable-HHSshKeyAuthentication' 'password-to-key proof and persisted transition' {
+    Invoke-HHCmdletStep 8 'Enable-HHSshKeyAuthentication' 'password-to-key proof and persisted transition' {
         $result = Enable-HHSshKeyAuthentication -Name alpha `
             -Reason 'focused cmdlet verifier' -Confirm:$false
         Assert-HHCondition ($result.Authentication -ceq 'PublicKey') 'SSH key transition did not complete.'
@@ -363,7 +385,7 @@ Write-Error 'nonterminating-error' -ErrorAction Continue
             'Fresh process did not reload the public-key profile.'
         @{ authentication = $result.Authentication; keyPath = $result.KeyPath }
     }
-    Invoke-HHCmdletStep 8 'Set-HHWindowsProcessAuditPolicy' 'finite audited Linux unsupported failure' {
+    Invoke-HHCmdletStep 9 'Set-HHWindowsProcessAuditPolicy' 'finite audited Linux unsupported failure' {
         $result = Set-HHWindowsProcessAuditPolicy -State Enabled -Target alpha `
             -Escalate -Reason 'focused Linux failure proof' -Confirm:$false
         Assert-HHCondition (-not [bool]$result.Succeeded) 'Linux policy request unexpectedly succeeded.'
@@ -371,13 +393,13 @@ Write-Error 'nonterminating-error' -ErrorAction Continue
         Assert-HHCondition ($result.OutcomeStatus -ceq 'Failed') 'Linux policy request was not audited failed.'
         @{ succeeded = $result.Succeeded; dispatchState = $result.DispatchState; outcome = $result.OutcomeStatus }
     }
-    Invoke-HHCmdletStep 9 'Set-HHEscalationPreference' 'persist WindowsTokenPrivilege preference' {
+    Invoke-HHCmdletStep 10 'Set-HHEscalationPreference' 'persist WindowsTokenPrivilege preference' {
         $saved = Set-HHEscalationPreference -Method WindowsTokenPrivilege -Confirm:$false
         Assert-HHCondition ($saved.Method -ceq 'WindowsTokenPrivilege') 'Escalation method differs.'
         Assert-HHCondition ($saved.Source -ceq 'Persisted') 'Escalation preference was not persisted.'
         @{ method = $saved.Method; source = $saved.Source }
     }
-    Invoke-HHCmdletStep 10 'Get-HHEscalationPreference' 'fresh-process persisted read without DB mutation' {
+    Invoke-HHCmdletStep 11 'Get-HHEscalationPreference' 'fresh-process persisted read without DB mutation' {
         $fresh = Invoke-HHFreshJson 'Get-HHEscalationPreference'
         Assert-HHCondition ($fresh.Method -ceq 'WindowsTokenPrivilege') `
             'Fresh process did not reload the escalation method.'
@@ -385,7 +407,7 @@ Write-Error 'nonterminating-error' -ErrorAction Continue
             'Fresh process did not report a persisted preference.'
         @{ method = $fresh.Method; source = $fresh.Source }
     }
-    Invoke-HHCmdletStep 11 'Remove-HHTarget' 'remove profile while retaining audit history' {
+    Invoke-HHCmdletStep 12 'Remove-HHTarget' 'remove profile while retaining audit history' {
         $script:auditCountBeforeRemoval = @(Get-HHAuditRecord -TargetName alpha -First 100).Count
         $null = Remove-HHTarget -Name alpha -Confirm:$false
         $fresh = Invoke-HHFreshJson '@(Get-HHTarget)'
@@ -399,7 +421,7 @@ Write-Error 'nonterminating-error' -ErrorAction Continue
 }
 catch {
     $setupError = $_.Exception.Message
-    while ($rows.Count -lt 11) {
+    while ($rows.Count -lt 12) {
         $index = $rows.Count + 1
         $rows.Add([pscustomobject][ordered]@{
                 index = $index
@@ -420,7 +442,7 @@ finally {
     $finalSnapshot = try { Get-HHDatabaseSnapshot } catch { $null }
     $receipt = [pscustomobject][ordered]@{
         schema = 'HostHunter.CmdletVerifierReceipt.v1'
-        status = if ($failed.Count -eq 0 -and $rows.Count -eq 11) { 'passed' } else { 'failed' }
+        status = if ($failed.Count -eq 0 -and $rows.Count -eq 12) { 'passed' } else { 'failed' }
         sourceSha = $env:HH_SOURCE_SHA
         verifierImageId = $env:HH_VERIFIER_IMAGE_ID
         moduleManifestSha256 = (Get-FileHash -LiteralPath $modulePath -Algorithm SHA256).Hash.ToLowerInvariant()

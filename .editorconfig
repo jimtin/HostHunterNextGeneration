@@ -12,6 +12,11 @@ trim_trailing_whitespace = true
 [*.{ps1,psd1,psm1}]
 indent_size = 4
 
+# The managed-host collector is intentionally compact because its script block
+# is serialized and dispatched as one fixed, audited remote operation.
+[src/HostHunterNextGeneration/Private/HostDetails.ps1]
+max_line_length = off
+
 [*.md]
 max_line_length = off
 trim_trailing_whitespace = false

@@ -6,7 +6,9 @@
 [CmdletBinding()]
 param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path,
-    [switch]$RequireProfileLoadedClient
+    [switch]$RequireProfileLoadedClient,
+    [string]$RuntimeProject = 'hosthunter-native-runtime',
+    [string]$FixtureProject = 'hosthunter-native-fixture'
 )
 
 Set-StrictMode -Version Latest
@@ -16,7 +18,7 @@ $composeFile = Join-Path $repo 'compose.test.yml'
 $clientManifest = Join-Path $repo 'client/HostHunter.Client/HostHunter.Client.psd1'
 $targetName = $null
 $fixtureHostName = 'hh-fixture-' + [Guid]::NewGuid().ToString('N').Substring(0, 12)
-$networkName = 'hosthunter-next-generation-test_test'
+$networkName = "${FixtureProject}_test"
 $controllerId = $null
 $networkConnected = $false
 $targetRemoved = $false
@@ -25,6 +27,7 @@ $script:HHNativeClientPromptCount = 0
 $script:HHNativeClientConfirmationCount = 0
 $script:HHNativeClientAllowPasswordStorage = $false
 $previousRepoRoot = $env:HH_CLIENT_REPO_ROOT
+$previousRuntimeProject = $env:HH_RUNTIME_PROJECT
 
 function Invoke-HHNativeDockerCapture {
     param([Parameter(Mandatory)][string[]]$Arguments)
@@ -35,15 +38,18 @@ function Invoke-HHNativeDockerCapture {
 
 try {
     $password = Invoke-HHNativeDockerCapture @(
-        'compose', '-f', $composeFile, 'exec', '-T', 'ssh-target',
+        'compose', '--project-name', $FixtureProject, '-f', $composeFile,
+        'exec', '-T', 'ssh-target',
         'cat', '/run/hosthunter-ssh/password'
     )
     $userName = Invoke-HHNativeDockerCapture @(
-        'compose', '-f', $composeFile, 'exec', '-T', 'ssh-target',
+        'compose', '--project-name', $FixtureProject, '-f', $composeFile,
+        'exec', '-T', 'ssh-target',
         'cat', '/run/hosthunter-ssh/username'
     )
     $fixtureContainerId = Invoke-HHNativeDockerCapture @(
-        'compose', '-f', $composeFile, 'ps', '-q', 'ssh-target'
+        'compose', '--project-name', $FixtureProject, '-f', $composeFile,
+        'ps', '-q', 'ssh-target'
     )
     & docker network disconnect $networkName $fixtureContainerId 2>$null
     if ($LASTEXITCODE -ne 0) { throw 'Unable to reset the disposable fixture network alias.' }
@@ -69,6 +75,7 @@ try {
     }
 
     $env:HH_CLIENT_REPO_ROOT = $repo
+    $env:HH_RUNTIME_PROJECT = $RuntimeProject
     if ($RequireProfileLoadedClient) {
         $loadedClient = Get-Module HostHunter.Client
         if ($null -eq $loadedClient) {
@@ -87,7 +94,7 @@ try {
     }
     $exports = @(Get-Command -Module HostHunter.Client -CommandType Function |
             Where-Object Name -ne Repair-HHClientRuntime)
-    if ($exports.Count -ne 11) { throw "Native client exported $($exports.Count) cmdlets; expected 11." }
+    if ($exports.Count -ne 14) { throw "Native client exported $($exports.Count) commands; expected 14." }
     $observedCommands = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     [void]$observedCommands.Add('Get-HHTarget')
     $emptyTargetInformation = @()
@@ -110,7 +117,7 @@ try {
 
     $controllerId = Invoke-HHNativeDockerCapture @(
         'ps', '--filter',
-        'label=com.docker.compose.project=hosthunter-next-generation-runtime',
+        "label=com.docker.compose.project=$RuntimeProject",
         '--filter', 'label=com.docker.compose.service=controller', '--format', '{{.ID}}'
     )
     & docker network connect $networkName $controllerId 2>$null
@@ -122,6 +129,30 @@ try {
         -Confirm:$false -InformationVariable trustInformation
     [void]$observedCommands.Add('Set-HHTarget')
     $targetName = [string]$saved.Name
+    $hostDetails=@(Get-TargetHostDetails -Name $targetName -Reason 'native host-details qualification')
+    [void]$observedCommands.Add('Get-TargetHostDetails')
+    if ($hostDetails.Count -ne 1) {
+        throw "The native host-details collection returned $($hostDetails.Count) results; expected one."
+    }
+    $hostDetailsProperties = @($hostDetails[0].PSObject.Properties.Name)
+    if ('Hostname' -cnotin $hostDetailsProperties -or
+        [string]::IsNullOrWhiteSpace([string]$hostDetails[0].Hostname) -or
+        'VisualizerPublishingState' -cnotin $hostDetailsProperties -or
+        $hostDetails[0].VisualizerPublishingState -cne 'Paused') {
+        $failureSummary = if ('Succeeded' -cin $hostDetailsProperties -and
+            -not [bool]$hostDetails[0].Succeeded) {
+            $remoteErrors = @($hostDetails[0].StreamEvents | Where-Object {
+                    $_.Stream -ceq 'Error'
+                } | ForEach-Object { [string]$_.Value } | Select-Object -Last 2)
+            ' FailureKind={0}; DispatchState={1}; OutcomeStatus={2}; RemoteError={3}' -f
+                $hostDetails[0].FailureKind,
+                $hostDetails[0].DispatchState,
+                $hostDetails[0].OutcomeStatus,
+                ($remoteErrors -join ' | ')
+        }
+        else { '' }
+        throw "The native host-details collection was incomplete.$failureSummary Returned properties: $($hostDetailsProperties -join ', ')."
+    }
     if ([string]::IsNullOrWhiteSpace($targetName) -or
         $saved.HostKeyFingerprint -notmatch '^SHA256:[A-Za-z0-9+/]{43}$' -or
         $saved.Authentication -cne 'PublicKey' -or $saved.CredentialStorage -cne 'None') {
@@ -225,8 +256,8 @@ try {
     }
     Remove-HHTarget -Name $targetName -Confirm:$false | Out-Null
     $targetRemoved = $true
-    if ($observedCommands.Count -ne 11) {
-        throw "Native qualification observed $($observedCommands.Count) unique cmdlets; expected 11."
+    if ($observedCommands.Count -ne 12) {
+        throw "Native qualification observed $($observedCommands.Count) unique framework cmdlets; expected 12."
     }
     if ($script:HHNativeClientPromptCount -ne 2) {
         throw "Expected two onboarding secure prompts; observed $script:HHNativeClientPromptCount."
@@ -257,7 +288,8 @@ try {
     }
 }
 finally {
-    if (-not $targetRemoved -and $null -ne (
+    if (-not $targetRemoved -and
+        -not [string]::IsNullOrWhiteSpace([string]$targetName) -and $null -ne (
             Get-Command Remove-HHTarget -ErrorAction SilentlyContinue
         )) {
         Remove-HHTarget -Name $targetName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
@@ -269,4 +301,5 @@ finally {
     Remove-Module HostHunter.Client -Force -ErrorAction SilentlyContinue
     $script:HHNativeClientCredential = $null
     $env:HH_CLIENT_REPO_ROOT = $previousRepoRoot
+    $env:HH_RUNTIME_PROJECT = $previousRuntimeProject
 }

@@ -2,6 +2,12 @@
 
 Status: CONFIRMED 2026-08-26
 
+Lifecycle amendment: the later confirmed
+`visualization-lifecycle-implementation-ledger.md` supersedes this document's
+`Start-Mission` additions. Current scope is twelve framework cmdlets (the
+original eleven plus `Get-TargetHostDetails`) and two client-local visualization
+commands. Historical numbered sections below are retained as decision history.
+
 Implementation status: Core simplification implemented; release coverage
 replacement authorized on 2026-08-26 and tracked in
 `release-coverage-simplification-plan.md`.
@@ -83,7 +89,7 @@ destructive and was explicitly authorized by the user.
 
 ## 4. Confirmed product boundary
 
-### 4.1 Retain exactly these 11 cmdlets
+### 4.1 Retain these 13 cmdlets
 
 1. `Set-HHTarget`
 2. `Get-HHTarget`
@@ -96,6 +102,11 @@ destructive and was explicitly authorized by the user.
 9. `Set-HHWindowsProcessAuditPolicy`
 10. `Set-HHEscalationPreference`
 11. `Get-HHEscalationPreference`
+12. `Get-TargetHostDetails`
+13. `Start-Mission`
+
+The final two cmdlets are the accepted post-prune visualizer extension. They do
+not restore the removed Forensics, parser, API, or event-log surfaces.
 
 ### 4.2 Retain these guarantees
 
@@ -705,8 +716,8 @@ After implementation begins:
 | Lane | Ownership | Expected evidence |
 |---|---|---|
 | Main agent | Cleanup, contracts, integration, threat model, final gate | Final ledgers and exact-SHA receipts |
-| Engine worker | Private engine, five adapters, engine contract tests | Focused unit/integration evidence |
-| Test worker | One 11-step journey and SQLite verifier | 11-row JSON/JUnit receipt |
+| Engine worker | Private engine, six adapters, engine contract tests | Focused unit/integration evidence |
+| Test worker | One 13-step journey and SQLite verifier | 13-row JSON/JUnit receipt |
 | Gate/runtime worker | Immutable receipts, Docker simplification, aggregation | No-rerun and lifecycle evidence |
 
 Workers receive disjoint file ownership and may not revert existing changes.
@@ -717,9 +728,9 @@ qualification remains serialized because it mutates one controlled host.
 
 | Requirement | Implementation evidence | Final proof |
 |---|---|---|
-| Exactly 11 cmdlets | Export/manifest contract | 11 unique receipt rows |
-| Exclusive host engine | Private module and AST guard | Zero bypasses; five exact delegations |
-| Uniform logging | Engine-owned lifecycle | Five semantic operation correlations |
+| Exactly 13 cmdlets | Export/manifest contract | 13 unique receipt rows |
+| Exclusive host engine | Private module and AST guard | Zero bypasses; six exact delegations |
+| Uniform logging | Engine-owned lifecycle | Six semantic operation correlations |
 | Preserve SQLite guarantees | Existing formats and focused tests | Integrity/tamper/rollback/recovery pass |
 | Fast container test | Two-service Compose | Normal duration near current baseline |
 | Read/write verification | Public mutations and read-only SQL | Expected generation/count changes |
@@ -733,10 +744,10 @@ qualification remains serialized because it mutates one controlled host.
 
 The work is complete only when:
 
-- exactly 11 cmdlets export;
-- all 11 have an explicit user-flow verdict;
-- all five host-facing cmdlets use the single engine;
-- the other six prove no managed-host communication;
+- exactly 13 cmdlets export;
+- all 13 have an explicit user-flow verdict;
+- all six host-facing cmdlets use the single engine;
+- the other seven prove no managed-host communication;
 - no production or qualification bypass exists;
 - the local journey runs in two containers with one fresh SQLite state;
 - real Windows PS7/OpenSSH proof passes;
@@ -759,7 +770,8 @@ The work is complete only when:
 
 The user approved:
 
-- testing exactly the 11 cmdlets;
+- the original 11-cmdlet prune, later expanded only by the accepted
+  `Get-TargetHostDetails` and `Start-Mission` visualizer actions;
 - direct read/write database verification;
 - preserving authenticated SQLite, encryption, anchors, output, and recovery;
 - removing Forensics, parser, WinRM, native controllers, and PowerShell 5.1;

@@ -1,9 +1,10 @@
 Set-StrictMode -Version Latest
 
-$script:HHSqliteSchemaVersion = 2
+$script:HHSqliteSchemaVersion = 3
 $script:HHSqliteMigrationNames = @(
     '0001_initial_sqlite'
     '0002_process_audit_and_escalation'
+    '0003_host_details_and_missions'
 )
 $script:HHSqliteCommandTimeoutSeconds = 5
 
@@ -254,7 +255,7 @@ function Get-HHExpectedSqliteSchemaFingerprint {
     [OutputType([byte[]])]
     param(
         [Parameter(Mandatory)][string]$MigrationPath,
-        [ValidateRange(1, 2)][int]$SchemaVersion = $script:HHSqliteSchemaVersion,
+        [ValidateRange(1, 3)][int]$SchemaVersion = $script:HHSqliteSchemaVersion,
         [string]$ProviderRoot
     )
 
@@ -355,10 +356,16 @@ function Test-HHSqliteDatabaseSchema {
                 -Sql 'SELECT COUNT(*) FROM configuration_store_state WHERE singleton_id = 1;')
     }
     else { 0L }
+    $visualizerCount = if ($migrationRows.Count -ge 3) {
+        [long](Invoke-HHSqliteScalar -Connection $Connection `
+                -Sql 'SELECT COUNT(*) FROM visualizer_store_state WHERE singleton_id = 1;')
+    }
+    else { 0L }
     if ($identityRows.Count -ne 1 -or [long]$identityRows[0].format_version -ne 1 -or
         ([byte[]]$identityRows[0].database_id).Length -ne 16 -or
         ([byte[]]$identityRows[0].ledger_id).Length -ne 16 -or $stateCount -ne 1 -or
-        ($migrationRows.Count -ge 2 -and $configurationCount -ne 1)) {
+        ($migrationRows.Count -ge 2 -and $configurationCount -ne 1) -or
+        ($migrationRows.Count -ge 3 -and $visualizerCount -ne 1)) {
         Stop-HHPersistenceOperation `
             -ErrorId 'PersistenceSchemaUnsupported' `
             -Message 'The HostHunter database identity or target state is invalid.' `
@@ -391,13 +398,14 @@ function Update-HHSqliteDatabaseToLatest {
         [string]$ProviderRoot
     )
 
-    if ([int]$ExistingSchema.SchemaVersion -ne 1 -or
-        $null -ne $ExistingAnchor.PSObject.Properties['ConfigurationGeneration']) {
+    if ([int]$ExistingSchema.SchemaVersion -lt 1 -or
+        [int]$ExistingSchema.SchemaVersion -ge $script:HHSqliteSchemaVersion) {
         Stop-HHPersistenceOperation -ErrorId PersistenceSchemaUnsupported `
-            -Message 'Only an authenticated schema-v1 database can be upgraded.' `
+            -Message 'Only an authenticated older supported schema can be upgraded.' `
             -Category ([Management.Automation.ErrorCategory]::InvalidData) `
             -TargetObject $Connection.DataSource
     }
+
     $chain = Test-HHSqliteAuditChain -Connection $Connection -MasterKey $MasterKey
     $snapshot = Read-HHTargetRepositorySnapshot -Connection $Connection -MasterKey $MasterKey
     $identity = @(Invoke-HHSqliteQuery -Connection $Connection `
@@ -412,63 +420,71 @@ function Update-HHSqliteDatabaseToLatest {
         TargetStateMac = [byte[]]$snapshot.StateEvidence.TargetStateMac
         SchemaFingerprint = [byte[]]$ExistingSchema.SchemaFingerprint
     }
+    if ([int]$ExistingSchema.SchemaVersion -ge 2) {
+        $configuration = Read-HHConfigurationRepositorySnapshot -Connection $Connection `
+            -MasterKey $MasterKey
+        $legacyHead | Add-Member -NotePropertyName ConfigurationGeneration `
+            -NotePropertyValue ([long]$configuration.Generation)
+        $legacyHead | Add-Member -NotePropertyName ConfigurationStateMac `
+            -NotePropertyValue ([byte[]]$configuration.StateMac)
+    }
     $comparison = Test-HHPersistenceAnchorState -DatabaseHead $legacyHead -Anchor $ExistingAnchor
     if (-not $comparison.IsEqual) {
         Stop-HHPersistenceOperation -ErrorId AuditRecoveryRequired `
-            -Message 'The schema-v1 database must match its authenticated anchor before migration.' `
+            -Message 'The existing database must match its authenticated anchor before migration.' `
             -Category ([Management.Automation.ErrorCategory]::InvalidOperation) `
             -TargetObject $Connection.DataSource
     }
 
     $migrationPaths = @(Get-HHSqliteMigrationPath -MigrationPath $PersistenceContext.MigrationPath)
-    $migrationBytes = Get-HHSqliteMigrationContent -MigrationPath $migrationPaths[1]
+    $now = if ($null -eq $Clock) { [DateTimeOffset]::UtcNow } else { & $Clock }
+    $utcText = $now.UtcDateTime.ToString('o', [Globalization.CultureInfo]::InvariantCulture)
+    $null = Invoke-HHSqliteNonQuery -Connection $Connection -Sql 'PRAGMA foreign_keys = OFF;'
     try {
-        $migrationHash = Get-HHPersistenceHash -Bytes $migrationBytes
-        $migrationSql = [Text.UTF8Encoding]::new($false, $true).GetString($migrationBytes)
-        $now = if ($null -eq $Clock) { [DateTimeOffset]::UtcNow } else { & $Clock }
-        $utcText = $now.UtcDateTime.ToString('o', [Globalization.CultureInfo]::InvariantCulture)
-        $null = Invoke-HHSqliteNonQuery -Connection $Connection -Sql 'PRAGMA foreign_keys = OFF;'
-        $transaction = $Connection.BeginTransaction([Data.IsolationLevel]::Serializable, $false)
-        try {
-            $null = Invoke-HHSqliteNonQuery -Connection $Connection -Transaction $transaction `
-                -Sql $migrationSql
-            $null = Invoke-HHSqliteNonQuery -Connection $Connection -Transaction $transaction -Sql @'
+        for ($index = [int]$ExistingSchema.SchemaVersion; $index -lt $script:HHSqliteSchemaVersion; $index++) {
+            $migrationBytes = Get-HHSqliteMigrationContent -MigrationPath $migrationPaths[$index]
+            try {
+                $migrationHash = Get-HHPersistenceHash -Bytes $migrationBytes
+                $migrationSql = [Text.UTF8Encoding]::new($false, $true).GetString($migrationBytes)
+                $transaction = $Connection.BeginTransaction([Data.IsolationLevel]::Serializable, $false)
+                try {
+                    $null = Invoke-HHSqliteNonQuery -Connection $Connection -Transaction $transaction -Sql $migrationSql
+                    $null = Invoke-HHSqliteNonQuery -Connection $Connection -Transaction $transaction -Sql @'
 INSERT INTO schema_migrations(version,name,sql_checksum,applied_at_utc)
-VALUES(2,@name,@checksum,@applied);
-'@ -Parameters @{
-                name = $script:HHSqliteMigrationNames[1]
-                checksum = $migrationHash
-                applied = $utcText
+VALUES(@version,@name,@checksum,@applied);
+'@ -Parameters @{ version=$index+1; name=$script:HHSqliteMigrationNames[$index]; checksum=$migrationHash; applied=$utcText }
+                    if ($index -eq 1) {
+                        Initialize-HHConfigurationRepositoryState -Connection $Connection -Transaction $transaction `
+                            -DatabaseId ([byte[]]$identity[0].database_id) -LedgerId ([byte[]]$identity[0].ledger_id) -MasterKey $MasterKey
+                    }
+                    if ($index -eq 2) {
+                        Initialize-HHVisualizerRepositoryState -Connection $Connection -Transaction $transaction -MasterKey $MasterKey
+                    }
+                    $transaction.Commit()
+                }
+                catch {
+                    try { $transaction.Rollback() }
+                    catch { $null = $_.Exception }
+                    throw
+                }
+                finally { $transaction.Dispose() }
             }
-            Initialize-HHConfigurationRepositoryState -Connection $Connection `
-                -Transaction $transaction `
-                -DatabaseId ([byte[]]$identity[0].database_id) `
-                -LedgerId ([byte[]]$identity[0].ledger_id) `
-                -MasterKey $MasterKey
-            $transaction.Commit()
-        }
-        catch {
-            try { $transaction.Rollback() } catch { Write-Debug 'SQLite rolled back migration.' }
-            throw
-        }
-        finally {
-            $transaction.Dispose()
-            $null = Invoke-HHSqliteNonQuery -Connection $Connection -Sql 'PRAGMA foreign_keys = ON;'
+            finally { [Array]::Clear($migrationBytes,0,$migrationBytes.Length) }
         }
     }
-    finally {
-        [Array]::Clear($migrationBytes, 0, $migrationBytes.Length)
-    }
+    finally { $null = Invoke-HHSqliteNonQuery -Connection $Connection -Sql 'PRAGMA foreign_keys = ON;' }
     $verified = Test-HHSqliteDatabaseSchema -Connection $Connection `
         -MigrationPath $PersistenceContext.MigrationPath -ProviderRoot $ProviderRoot
     $configuration = Read-HHConfigurationRepositorySnapshot -Connection $Connection `
         -MasterKey $MasterKey
+    $visualizer = Read-HHVisualizerRepositorySnapshot -Connection $Connection -MasterKey $MasterKey
     $head = Get-HHSqlitePersistenceHead -Connection $Connection `
         -SchemaFingerprint $verified.SchemaFingerprint
     if ($configuration.Generation -ne $head.ConfigurationGeneration -or
-        -not (Test-HHPersistenceBytesEqual -Left $configuration.StateMac `
-            -Right $head.ConfigurationStateMac)) {
-        throw 'The migrated configuration state did not authenticate.'
+        -not (Test-HHPersistenceBytesEqual -Left $configuration.StateMac -Right $head.ConfigurationStateMac) -or
+        $visualizer.Generation -ne $head.VisualizerGeneration -or
+        -not (Test-HHPersistenceBytesEqual -Left $visualizer.StateMac -Right $head.VisualizerStateMac)) {
+        throw 'The migrated authenticated repository state did not authenticate.'
     }
     Write-HHPersistenceAnchor -PersistenceContext $PersistenceContext -Anchor $head `
         -MasterKey $MasterKey -ExpectedArtifact ([byte[]]$ExistingAnchor.Artifact) `
@@ -490,8 +506,43 @@ function Repair-HHSqliteMigrationSeal {
 
     $anchor = Read-HHPersistenceAnchor -PersistenceContext $PersistenceContext `
         -MasterKey $MasterKey -AnchorReader $AnchorReader
-    if ($null -eq $anchor -or
+    if ($null -eq $anchor -or $null -ne $anchor.PSObject.Properties['VisualizerGeneration']) {
+        return $Schema
+    }
+    if ([int]$Schema.SchemaVersion -eq 3 -and
         $null -ne $anchor.PSObject.Properties['ConfigurationGeneration']) {
+        $visualizer = Read-HHVisualizerRepositorySnapshot -Connection $Connection -MasterKey $MasterKey
+        if ($visualizer.Generation -ne 0 -or $null -ne $visualizer.CurrentMissionId) {
+            Stop-HHPersistenceOperation -ErrorId AuditRecoveryRequired `
+                -Message 'A schema-v2 anchor cannot authenticate mutated schema-v3 visualizer state.' `
+                -Category ([Management.Automation.ErrorCategory]::SecurityError) `
+                -TargetObject $Connection.DataSource
+        }
+        $chain = Test-HHSqliteAuditChain -Connection $Connection -MasterKey $MasterKey
+        $snapshot = Read-HHTargetRepositorySnapshot -Connection $Connection -MasterKey $MasterKey
+        $configuration = Read-HHConfigurationRepositorySnapshot -Connection $Connection -MasterKey $MasterKey
+        $identity = @(Invoke-HHSqliteQuery -Connection $Connection `
+                -Sql 'SELECT database_id,ledger_id FROM database_identity WHERE singleton_id=1;')
+        $legacyFingerprint = Get-HHExpectedSqliteSchemaFingerprint `
+            -MigrationPath $PersistenceContext.MigrationPath -SchemaVersion 2 -ProviderRoot $ProviderRoot
+        $legacyHead = [pscustomobject]@{
+            DatabaseId=[byte[]]$identity[0].database_id; LedgerId=[byte[]]$identity[0].ledger_id
+            SchemaVersion=1; AuditSequence=[long]$chain.Sequence; AuditMac=[byte[]]$chain.LastMac
+            TargetGeneration=[long]$snapshot.Generation; TargetStateMac=[byte[]]$snapshot.StateEvidence.TargetStateMac
+            SchemaFingerprint=$legacyFingerprint; ConfigurationGeneration=[long]$configuration.Generation
+            ConfigurationStateMac=[byte[]]$configuration.StateMac
+        }
+        if (-not (Test-HHPersistenceAnchorState -DatabaseHead $legacyHead -Anchor $anchor).IsEqual) {
+            Stop-HHPersistenceOperation -ErrorId AuditRecoveryRequired `
+                -Message 'The schema-v2 anchor does not authenticate the pre-migration database state.' `
+                -Category ([Management.Automation.ErrorCategory]::SecurityError) -TargetObject $Connection.DataSource
+        }
+        $head=Get-HHSqlitePersistenceHead -Connection $Connection -SchemaFingerprint $Schema.SchemaFingerprint
+        Write-HHPersistenceAnchor -PersistenceContext $PersistenceContext -Anchor $head -MasterKey $MasterKey `
+            -ExpectedArtifact ([byte[]]$anchor.Artifact) -AnchorWriter $AnchorWriter
+        return $Schema
+    }
+    if ($null -ne $anchor.PSObject.Properties['ConfigurationGeneration']) {
         return $Schema
     }
     $configuration = Read-HHConfigurationRepositorySnapshot -Connection $Connection `
@@ -695,6 +746,8 @@ VALUES(1, 0, @snapshot, @state, @prior, NULL);
                     Initialize-HHConfigurationRepositoryState -Connection $connection `
                         -Transaction $transaction -DatabaseId $databaseId -LedgerId $ledgerId `
                         -MasterKey $MasterKey
+                    Initialize-HHVisualizerRepositoryState -Connection $connection `
+                        -Transaction $transaction -MasterKey $MasterKey
                     $transaction.Commit()
                 }
                 catch {
@@ -711,6 +764,8 @@ VALUES(1, 0, @snapshot, @state, @prior, NULL);
                     -MigrationPath $PersistenceContext.MigrationPath `
                     -ProviderRoot $ProviderRoot
                 $verifiedConfiguration = Read-HHConfigurationRepositorySnapshot `
+                    -Connection $connection -MasterKey $MasterKey
+                $verifiedVisualizer = Read-HHVisualizerRepositorySnapshot `
                     -Connection $connection -MasterKey $MasterKey
             }
             finally {
@@ -732,6 +787,8 @@ VALUES(1, 0, @snapshot, @state, @prior, NULL);
                 SchemaFingerprint = $verified.SchemaFingerprint
                 ConfigurationGeneration = 0L
                 ConfigurationStateMac = $verifiedConfiguration.StateMac
+                VisualizerGeneration = 0L
+                VisualizerStateMac = $verifiedVisualizer.StateMac
             }
             if ($null -ne $AnchorWriter) {
                 & $AnchorWriter $PersistenceContext $null `

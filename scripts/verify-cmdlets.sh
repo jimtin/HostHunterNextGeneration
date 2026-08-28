@@ -39,14 +39,14 @@ finish() {
         moduleManifestSha256: null,
         expectedCommands: [
           "Enable-HHSshKeyAuthentication", "Get-HHAuditOutput", "Get-HHAuditRecord",
-          "Get-HHEscalationPreference", "Get-HHTarget", "Invoke-HHCommand",
+          "Get-HHEscalationPreference", "Get-HHTarget", "Get-TargetHostDetails", "Invoke-HHCommand",
           "Remove-HHTarget", "Set-HHEscalationPreference", "Set-HHTarget",
           "Set-HHWindowsProcessAuditPolicy", "Test-HHTarget"
         ],
-        observedCommands: [], rowCount: 11, failedCount: 11,
+        observedCommands: [], rowCount: 12, failedCount: 12,
         infrastructureFailure: $error,
         rows: ([
-          "Get-HHTarget", "Set-HHTarget", "Test-HHTarget", "Invoke-HHCommand",
+          "Get-HHTarget", "Set-HHTarget", "Get-TargetHostDetails", "Test-HHTarget", "Invoke-HHCommand",
           "Get-HHAuditRecord", "Get-HHAuditOutput", "Enable-HHSshKeyAuthentication",
           "Set-HHWindowsProcessAuditPolicy", "Set-HHEscalationPreference",
           "Get-HHEscalationPreference", "Remove-HHTarget"
@@ -108,8 +108,8 @@ jq --exit-status \
   --arg image "${verifier_image_id}" \
   '.schema == "HostHunter.CmdletVerifierReceipt.v1" and
     .sourceSha == $sha and .verifierImageId == $image and
-    .rowCount == 11 and (.rows | length) == 11 and
-    ([.rows[].cmdlet] | unique | length) == 11' \
+    .rowCount == 12 and (.rows | length) == 12 and
+    ([.rows[].cmdlet] | unique | length) == 12' \
   "${receipt_path}" >/dev/null
 
 if [[ "${verifier_exit}" -ne 0 ]]; then
@@ -119,4 +119,4 @@ if [[ "${verifier_exit}" -ne 0 ]]; then
 fi
 jq --exit-status '.status == "passed" and .failedCount == 0' \
   "${receipt_path}" >/dev/null
-printf 'HostHunter 11-cmdlet verifier passed: %s\n' "${receipt_path}"
+printf 'HostHunter 12-cmdlet verifier passed: %s\n' "${receipt_path}"

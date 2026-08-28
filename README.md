@@ -1,7 +1,7 @@
 # HostHunterNextGeneration
 
 HostHunter is a container-first PowerShell module for operating managed Linux
-and Windows hosts through PowerShell 7 over OpenSSH. It exposes eleven cmdlets
+and Windows hosts through PowerShell 7 over OpenSSH. It exposes twelve framework cmdlets
 and records every managed-host operation in authenticated SQLite with encrypted,
 tamper-evident output artifacts.
 
@@ -30,17 +30,29 @@ Get-HHAuditOutput
 Set-HHWindowsProcessAuditPolicy
 Set-HHEscalationPreference
 Get-HHEscalationPreference
+Get-TargetHostDetails
 ```
 
 `Get-HHTargets` is an alias for `Get-HHTarget`. When no matching targets are
 saved, either name displays `No currently set` and returns no pipeline objects.
 
-Five cmdlets contact managed hosts: `Set-HHTarget`, `Test-HHTarget`,
+Six cmdlets contact managed hosts: `Set-HHTarget`, `Test-HHTarget`,
 `Invoke-HHCommand`, `Enable-HHSshKeyAuthentication`, and
-`Set-HHWindowsProcessAuditPolicy`. They all delegate once to the same private
+`Set-HHWindowsProcessAuditPolicy`, plus `Get-TargetHostDetails`. They all delegate once to the same private
 engine, which owns intent persistence, dispatch arming, SSH phases, stream
 capture, encrypted evidence, terminal audit, cleanup, and uncertain-outcome
-handling. The other six cmdlets operate only on local authenticated state.
+handling. The remaining local cmdlets never contact a managed host.
+
+`Set-HHTarget` performs a best-effort initial host inventory after successful
+authentication. `Get-TargetHostDetails` refreshes one to eight named targets,
+or every active target when `-Name` is omitted. Complete and partial ECS
+observations are encrypted and rollback-sealed locally before one bounded send
+to the visualizer while visualization publishing is enabled. Controller startup
+never creates or resets a mission. `Start-HHVisualization` explicitly starts or
+resumes visualization; `Stop-HHVisualization` pauses publishing before stopping
+the visualizer containers without deleting either repository's durable state.
+Visualizer downtime leaves local delivery state and never blocks HostHunter.
+No endpoint event logs or continuous collectors are part of this release.
 
 `Invoke-HHCommand` accepts arbitrary remote PowerShell. HostHunter audits the
 originating request and result; it cannot constrain network activity performed
@@ -51,22 +63,44 @@ by that user-supplied command after it begins on the managed host.
 Install the current-user client once from the repository:
 
 ```powershell
-pwsh -NoProfile -File ./scripts/client/Install-HHClient.ps1
+pwsh -NoProfile -File ./scripts/client/Install-HHClient.ps1 `
+  -RepoRoot /path/to/HostHunterNextGeneration `
+  -VisualizerRepoRoot /path/to/HostHunterVisualizer
 ```
 
 Open PowerShell normally. The profile import launches Docker Desktop once when
 its engine is stopped, starts the controller when needed, reuses an unchanged
-controller, and synchronizes the eleven exported commands from the packaged
+controller, and synchronizes the twelve exported framework commands from the packaged
 module. In an interactive terminal it finishes with a short radar-style
-welcome animation. Set `HH_CLIENT_NO_ANIMATION=1` to suppress it; scripts,
-redirected sessions, tests, and CI never animate or wait:
+welcome animation, then presents a separate visualization prompt when the
+visualizer is stopped. That prompt defaults to No. If the visualizer is already
+running, HostHunter instead connects to it and offers a new mission with a
+default of No, so ordinary shell restarts continue the current mission. Accepted
+startup shows a second animated sequence while retaining the real Docker,
+health, authentication, mission, and browser-opening steps. A failure in this
+automatic prompt warns and returns to a ready HostHunter shell; an explicit
+`Start-HHVisualization` failure remains terminating.
+
+Set `HH_CLIENT_NO_ANIMATION=1` to suppress both animations, or
+`HH_CLIENT_NO_VISUALIZATION_ANIMATION=1` to suppress only the visualizer
+sequence. Scripts, redirected sessions, tests, and CI never animate or wait:
 
 ```powershell
 Set-HHTarget -HostName BestLaptopEver -UserName RemoteAdmin
 Get-HHTarget
 Invoke-HHCommand -Target BESTLAPTOPEVER -Command 'Get-Process'
 Get-HHAuditRecord -TargetName BESTLAPTOPEVER
+Start-HHVisualization
+Stop-HHVisualization
 ```
+
+When the visualizer is already running, `Start-HHVisualization` offers a new
+mission with a default of No. No continues the active mission; Yes establishes
+the replacement first and then prunes older visualizer-derived sessions. After
+an authenticated connection succeeds, opening `http://127.0.0.1:4310` is offered
+with a default of Yes. Use `-NewMission` or `-Open:$false` for explicit scripted
+behavior. Stopping pauses publication and preserves PostgreSQL and HostHunter
+volumes; starting again resumes the same mission unless a new one is requested.
 
 You do not need to obtain a host key first. Windows OpenSSH creates the host
 identity when its SSH service starts. On first contact HostHunter retrieves the
@@ -138,7 +172,7 @@ Run the only development acceptance journey:
 ```
 
 It builds a production-derived verifier and a disposable SSH fixture, calls all
-eleven cmdlets in one ordered stateful journey, and validates read-only SQLite
+twelve framework cmdlets in one ordered stateful journey, and validates read-only SQLite
 snapshots and deltas. It has one timeout owner, no shards, and no retries.
 Results are written below `.artifacts/cmdlets/<source-sha>/`.
 

@@ -1,0 +1,513 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hosthunter.local/schemas/host-details-observation.v1.schema.json",
+  "title": "HostHunter ECS Target Host Details Observation v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["@timestamp", "ecs", "event", "agent", "host", "hosthunter"],
+  "properties": {
+    "@timestamp": { "$ref": "#/$defs/dateTime" },
+    "ecs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version"],
+      "properties": {
+        "version": { "const": "9.5.0" }
+      }
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "category",
+        "type",
+        "action",
+        "dataset",
+        "module",
+        "provider",
+        "created",
+        "hash"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "kind": { "const": "asset" },
+        "category": { "const": ["host"] },
+        "type": {
+          "oneOf": [{ "const": ["info"] }, { "const": ["error"] }]
+        },
+        "action": {
+          "enum": ["host-details-collected", "host-details-collection-failed"]
+        },
+        "dataset": { "const": "hosthunter.host_details" },
+        "module": { "const": "hosthunter" },
+        "provider": { "const": "HostHunter" },
+        "created": { "$ref": "#/$defs/dateTime" },
+        "hash": { "$ref": "#/$defs/sha256" },
+        "outcome": { "enum": ["failure", "success", "unknown"] }
+      }
+    },
+    "agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "type", "version"],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "name": { "$ref": "#/$defs/shortText" },
+        "type": { "const": "hosthunter" },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      }
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^hh_[a-z2-7]{52}$"
+        },
+        "hostname": { "$ref": "#/$defs/hostText" },
+        "name": { "$ref": "#/$defs/hostText" },
+        "domain": { "$ref": "#/$defs/hostText" },
+        "architecture": { "$ref": "#/$defs/shortText" },
+        "ip": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/ipAddress" }
+        },
+        "os": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "enum": ["linux", "windows"]
+            },
+            "family": { "$ref": "#/$defs/shortText" },
+            "name": { "$ref": "#/$defs/mediumText" },
+            "full": { "$ref": "#/$defs/mediumText" },
+            "version": { "$ref": "#/$defs/shortText" },
+            "platform": { "$ref": "#/$defs/shortText" },
+            "kernel": { "$ref": "#/$defs/shortText" }
+          }
+        }
+      }
+    },
+    "related": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ip": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/ipAddress" }
+        }
+      }
+    },
+    "hosthunter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema",
+        "target",
+        "identity",
+        "membership",
+        "collection_run",
+        "collection",
+        "provenance",
+        "audit"
+      ],
+      "properties": {
+        "schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version"],
+          "properties": {
+            "name": { "const": "host-details" },
+            "version": { "const": "1.0.0" }
+          }
+        },
+        "target": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "connection_address", "port"],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            },
+            "connection_address": { "$ref": "#/$defs/hostText" },
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            }
+          }
+        },
+        "identity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["strategy", "match_status"],
+          "properties": {
+            "strategy": {
+              "enum": ["platform_instance_hmac_sha256", "persisted_random"]
+            },
+            "match_status": {
+              "enum": ["new", "exact", "fallback"]
+            }
+          }
+        },
+        "membership": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
+          "properties": {
+            "type": {
+              "enum": ["domain", "workgroup", "none", "unknown"]
+            },
+            "name": { "$ref": "#/$defs/hostText" },
+            "directory_role": {
+              "enum": [
+                "standalone_workstation",
+                "member_workstation",
+                "standalone_server",
+                "member_server",
+                "backup_domain_controller",
+                "primary_domain_controller",
+                "unknown"
+              ]
+            }
+          }
+        },
+        "os": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "build": { "$ref": "#/$defs/shortText" },
+            "edition": { "$ref": "#/$defs/mediumText" }
+          }
+        },
+        "hardware": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "manufacturer": { "$ref": "#/$defs/mediumText" },
+            "model": { "$ref": "#/$defs/mediumText" },
+            "logical_processor_count": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1048576
+            },
+            "total_memory_bytes": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "network": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "interfaces": {
+              "type": "array",
+              "maxItems": 32,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name", "addresses"],
+                "properties": {
+                  "name": { "$ref": "#/$defs/mediumText" },
+                  "addresses": {
+                    "type": "array",
+                    "minItems": 1,
+                    "maxItems": 32,
+                    "uniqueItems": true,
+                    "items": { "$ref": "#/$defs/ipAddress" }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "boot": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "time": { "$ref": "#/$defs/dateTime" }
+          }
+        },
+        "time_zone": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": { "$ref": "#/$defs/mediumText" },
+            "utc_offset_seconds": {
+              "type": "integer",
+              "minimum": -64800,
+              "maximum": 64800
+            }
+          }
+        },
+        "collection_run": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id"],
+          "properties": {
+            "id": { "$ref": "#/$defs/uuid" }
+          }
+        },
+        "collection": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "last_successful_connection_at", "field_results"],
+          "properties": {
+            "status": {
+              "enum": ["complete", "partial", "unavailable", "failed"]
+            },
+            "last_successful_connection_at": { "$ref": "#/$defs/dateTime" },
+            "field_results": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 64,
+              "items": { "$ref": "#/$defs/fieldResult" }
+            }
+          }
+        },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["engine_operation", "transport", "controller_platform", "source_methods"],
+          "properties": {
+            "engine_operation": {
+              "enum": ["ValidateTarget", "GetHostDetails"]
+            },
+            "transport": { "const": "powershell7_over_ssh" },
+            "controller_platform": { "const": "linux_container" },
+            "source_methods": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 16,
+              "uniqueItems": true,
+              "items": { "$ref": "#/$defs/sourceMethod" }
+            }
+          }
+        },
+        "audit": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["batch_id", "invocation_id"],
+          "properties": {
+            "batch_id": { "$ref": "#/$defs/hexId" },
+            "invocation_id": { "$ref": "#/$defs/hexId" }
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "hosthunter": {
+            "type": "object",
+            "properties": {
+              "membership": {
+                "type": "object",
+                "properties": { "type": { "const": "domain" } },
+                "required": ["type"]
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "host": {
+            "type": "object",
+            "properties": {
+              "domain": true
+            },
+            "required": ["domain"]
+          },
+          "hosthunter": {
+            "type": "object",
+            "properties": {
+              "membership": {
+                "type": "object",
+                "properties": {
+                  "name": true
+                },
+                "required": ["name"]
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "hosthunter": {
+            "type": "object",
+            "properties": {
+              "collection": {
+                "type": "object",
+                "properties": {
+                  "status": { "enum": ["complete", "partial"] }
+                },
+                "required": ["status"]
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "event": {
+            "type": "object",
+            "properties": {
+              "type": { "const": ["info"] },
+              "action": { "const": "host-details-collected" }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "event": {
+            "type": "object",
+            "required": ["outcome"],
+            "properties": {
+              "type": { "const": ["error"] },
+              "action": { "const": "host-details-collection-failed" },
+              "outcome": { "const": "failure" }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "dateTime": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "hexId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{32}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "ipAddress": {
+      "type": "string",
+      "oneOf": [{ "format": "ipv4" }, { "format": "ipv6" }]
+    },
+    "shortText": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "mediumText": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512
+    },
+    "hostText": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 253
+    },
+    "sourceMethod": {
+      "enum": [
+        "dotnet_environment",
+        "dotnet_network_information",
+        "dotnet_runtime_information",
+        "dotnet_time_zone",
+        "win32_computer_system",
+        "win32_operating_system",
+        "linux_os_release",
+        "linux_procfs",
+        "linux_sysfs",
+        "hosthunter_target",
+        "hosthunter_identity"
+      ]
+    },
+    "fieldPath": {
+      "enum": [
+        "host.hostname",
+        "host.name",
+        "host.domain",
+        "host.architecture",
+        "host.ip",
+        "host.os.type",
+        "host.os.family",
+        "host.os.name",
+        "host.os.full",
+        "host.os.version",
+        "hosthunter.membership.type",
+        "hosthunter.membership.name",
+        "hosthunter.membership.directory_role",
+        "hosthunter.os.build",
+        "hosthunter.os.edition",
+        "hosthunter.hardware.manufacturer",
+        "hosthunter.hardware.model",
+        "hosthunter.hardware.logical_processor_count",
+        "hosthunter.hardware.total_memory_bytes",
+        "hosthunter.network.interfaces",
+        "hosthunter.boot.time",
+        "hosthunter.time_zone.id",
+        "hosthunter.time_zone.utc_offset_seconds"
+      ]
+    },
+    "fieldResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field", "status", "source_method"],
+      "properties": {
+        "field": { "$ref": "#/$defs/fieldPath" },
+        "status": {
+          "enum": [
+            "observed",
+            "unsupported",
+            "access_denied",
+            "not_reported",
+            "not_applicable",
+            "collection_failed"
+          ]
+        },
+        "source_method": { "$ref": "#/$defs/sourceMethod" },
+        "observed_at": { "$ref": "#/$defs/dateTime" },
+        "detail": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "status": { "const": "observed" } },
+            "required": ["status"]
+          },
+          "then": { "required": ["observed_at"] },
+          "else": { "not": { "required": ["observed_at"] } }
+        }
+      ]
+    }
+  }
+}

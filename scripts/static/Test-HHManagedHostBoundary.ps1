@@ -10,6 +10,7 @@ $expected = [ordered]@{
     'Set-HHTarget.ps1' = 'ValidateTarget'
     'Test-HHTarget.ps1' = 'TestTarget'
     'Invoke-HHCommand.ps1' = 'InvokeCommand'
+    'Get-TargetHostDetails.ps1' = 'GetHostDetails'
     'Enable-HHSshKeyAuthentication.ps1' = 'EnableSshKeyAuthentication'
     'Set-HHWindowsProcessAuditPolicy.ps1' = 'SetWindowsProcessAuditPolicy'
 }

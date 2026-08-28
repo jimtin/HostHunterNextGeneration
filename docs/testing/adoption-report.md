@@ -5,7 +5,7 @@ exact-SHA release proof remains pending until the intended changes are committed
 
 ## Adopted flow
 
-- Exactly eleven exported cmdlets.
+- Exactly twelve exported framework cmdlets plus two client-local visualization lifecycle commands.
 - One ordered container acceptance journey with real SQLite reads and writes.
 - One private managed-host engine and a fail-closed AST boundary check.
 - One production Linux controller and one disposable acceptance SSH fixture.

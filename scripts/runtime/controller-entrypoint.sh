@@ -4,10 +4,11 @@
 set -Eeuo pipefail
 
 readonly expected_provider='DockerVolume'
-readonly expected_exports=11
+readonly expected_exports=12
 readonly dispatcher='/opt/hosthunter/runtime/Invoke-HHCmdlet.ps1'
 readonly client_metadata='/opt/hosthunter/runtime/Get-HHClientCommandMetadata.ps1'
 readonly client_protocol='/opt/hosthunter/runtime/Invoke-HHClientProtocol.ps1'
+readonly visualization_lifecycle='/opt/hosthunter/runtime/Invoke-HHVisualizationLifecycle.ps1'
 readonly client_askpass='/opt/hosthunter/runtime/client-askpass.sh'
 readonly client_confirm='/opt/hosthunter/runtime/client-confirm.sh'
 
@@ -46,7 +47,7 @@ for writable_root in "${roots[@]}"; do
   [[ -w "$writable_root" ]] || fail "The runtime identity cannot write $writable_root."
 done
 [[ -f "${HH_RUNTIME_MODULE_PATH:-}" && -f "$dispatcher" && \
-  -f "$client_metadata" && -f "$client_protocol" && -x "$client_askpass" && \
+  -f "$client_metadata" && -f "$client_protocol" && -f "$visualization_lifecycle" && -x "$client_askpass" && \
   -x "$client_confirm" ]] ||
   fail 'The packaged module or constrained dispatcher is missing.'
 
@@ -90,7 +91,13 @@ case "${1:-serve}" in
     [[ "$#" -eq 0 ]] || fail 'invoke-native accepts no arguments.'
     exec pwsh -NoLogo -NoProfile -NonInteractive -File "$client_protocol"
     ;;
+  visualization)
+    shift
+    [[ "$#" -eq 1 && "$1" =~ ^(status|start|new|pause)$ ]] ||
+      fail 'visualization requires exactly one of status, start, new, or pause.'
+    exec pwsh -NoLogo -NoProfile -NonInteractive -File "$visualization_lifecycle" -Action "$1"
+    ;;
   *)
-    fail 'Only serve, doctor, invoke, describe, and invoke-native are permitted.'
+    fail 'Only serve, doctor, invoke, describe, invoke-native, and visualization are permitted.'
     ;;
 esac

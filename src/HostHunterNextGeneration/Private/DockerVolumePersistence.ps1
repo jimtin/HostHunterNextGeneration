@@ -5,7 +5,7 @@ $script:HHDockerVolumeProviderVersion = 1
 $script:HHDockerVolumeEnvelopeHeaderLength = 80
 $script:HHDockerVolumeEnvelopeAuthenticatorLength = 32
 $script:HHDockerVolumeKeyLength = 32
-$script:HHDockerVolumeCoreAnchorLengths = @(196, 236)
+$script:HHDockerVolumeCoreAnchorLengths = @(196, 236, 276)
 $script:HHDockerVolumeLockTimeoutMilliseconds = 10000
 
 function New-HHDockerVolumeProviderErrorRecord {

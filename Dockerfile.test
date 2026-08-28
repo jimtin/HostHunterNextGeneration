@@ -42,6 +42,10 @@ RUN dotnet restore HostHunter.Sqlite.Dependencies.csproj \
         /nuget/packages/sqlitepclraw.config.e_sqlite3/3.0.5/lib/net8.0/SQLitePCLRaw.batteries_v2.dll \
         /nuget/packages/sqlitepclraw.core/3.0.5/lib/net8.0/SQLitePCLRaw.core.dll \
         /nuget/packages/sqlitepclraw.provider.e_sqlite3/3.0.5/lib/net8.0/SQLitePCLRaw.provider.e_sqlite3.dll \
+        /nuget/packages/humanizer.core/2.14.1/lib/netstandard2.0/Humanizer.dll \
+        /nuget/packages/json.more.net/3.0.1/lib/net9.0/Json.More.dll \
+        /nuget/packages/jsonpointer.net/7.0.2/lib/net9.0/JsonPointer.Net.dll \
+        /nuget/packages/jsonschema.net/9.4.0/lib/net9.0/JsonSchema.Net.dll \
     ) \
     && for rid in linux-arm64 linux-x64; do \
         install -d -m 0755 "/out/lib/${rid}"; \
@@ -53,7 +57,7 @@ RUN dotnet restore HostHunter.Sqlite.Dependencies.csproj \
     && install -m 0644 \
         /nuget/packages/sqlite/3.53.4/runtimes/linux-x64/native/libe_sqlite3.so \
         /out/lib/linux-x64/libe_sqlite3.so \
-    && test "$(find /out/lib -mindepth 2 -maxdepth 2 -type f | wc -l)" -eq 10
+    && test "$(find /out/lib -mindepth 2 -maxdepth 2 -type f | wc -l)" -eq 18
 
 WORKDIR /out
 RUN find lib -type f -print0 | sort -z | xargs -0 sha256sum \

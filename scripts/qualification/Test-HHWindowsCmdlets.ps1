@@ -15,7 +15,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $null = @($SshHost, $UserName, $HostKeyFingerprint, $Port)
 $expected = @(
-    'Get-HHTarget', 'Set-HHTarget', 'Test-HHTarget', 'Invoke-HHCommand',
+    'Get-HHTarget', 'Set-HHTarget', 'Get-TargetHostDetails', 'Test-HHTarget', 'Invoke-HHCommand',
     'Get-HHAuditRecord', 'Get-HHAuditOutput', 'Enable-HHSshKeyAuthentication',
     'Set-HHWindowsProcessAuditPolicy', 'Set-HHEscalationPreference',
     'Get-HHEscalationPreference', 'Remove-HHTarget'
@@ -238,7 +238,7 @@ try {
     Import-Module $ModuleManifestPath -Force
     $exports = @(Get-Command -Module HostHunterNextGeneration -CommandType Function |
             Sort-Object Name | ForEach-Object Name)
-    if ($exports.Count -ne 11) { throw "Expected 11 exports; observed $($exports.Count)." }
+    if ($exports.Count -ne 12) { throw "Expected 12 exports; observed $($exports.Count)." }
 
     $null = Invoke-QualificationStep Get-HHTarget { @(Get-HHTarget -Name $targetName).Count }
     $null = Invoke-QualificationStep Set-HHTarget {
@@ -246,6 +246,12 @@ try {
             -HostKeyFingerprint $HostKeyFingerprint -Reason 'exact-SHA Windows qualification' -Confirm:$false
     }
     $targetSaved = $true
+    $details = Invoke-QualificationStep Get-TargetHostDetails {
+        Get-TargetHostDetails -Name $targetName -Reason 'exact-SHA Windows qualification'
+    }
+    if ($details.Platform -cne 'windows' -or $details.VisualizerPublishingState -cne 'Paused') {
+        throw 'Windows host details did not report Windows while visualization was paused.'
+    }
     $probe = Invoke-QualificationStep Test-HHTarget {
         Test-HHTarget -Name $targetName -Reason 'exact-SHA Windows qualification'
     }

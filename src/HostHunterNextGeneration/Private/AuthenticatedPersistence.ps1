@@ -35,6 +35,11 @@ SELECT generation, state_mac
 FROM configuration_store_state
 WHERE singleton_id = 1;
 '@)
+    $visualizerRows = @(Invoke-HHSqliteQuery -Connection $Connection -Sql @'
+SELECT generation,state_mac
+FROM visualizer_store_state
+WHERE singleton_id = 1;
+'@)
     if ($identityRows.Count -ne 1 -or $targetRows.Count -ne 1 -or $auditRows.Count -gt 1) {
         Stop-HHPersistenceOperation `
             -ErrorId 'AuditIntegrityFailed' `
@@ -59,6 +64,13 @@ WHERE singleton_id = 1;
             -Category ([Management.Automation.ErrorCategory]::InvalidData) `
             -TargetObject $Connection.DataSource
     }
+    if ($visualizerRows.Count -ne 1 -or [long]$visualizerRows[0].generation -lt 0 -or
+        ([byte[]]$visualizerRows[0].state_mac).Length -ne 32) {
+        Stop-HHPersistenceOperation -ErrorId AuditIntegrityFailed `
+            -Message 'The authenticated visualizer head is invalid.' `
+            -Category ([Management.Automation.ErrorCategory]::InvalidData) `
+            -TargetObject $Connection.DataSource
+    }
     if ($databaseId.Length -ne 16 -or $ledgerId.Length -ne 16 -or
         $targetMac.Length -ne 32 -or $auditMac.Length -ne 32 -or
         [long]$targetRows[0].generation -lt 0 -or $auditSequence -lt 0) {
@@ -79,6 +91,8 @@ WHERE singleton_id = 1;
         SchemaFingerprint = [byte[]]$SchemaFingerprint.Clone()
         ConfigurationGeneration = [long]$configurationRows[0].generation
         ConfigurationStateMac = [byte[]]$configurationRows[0].state_mac
+        VisualizerGeneration = [long]$visualizerRows[0].generation
+        VisualizerStateMac = [byte[]]$visualizerRows[0].state_mac
     }
 }
 
@@ -149,6 +163,28 @@ function Test-HHPersistenceAnchorState {
             -Category ([Management.Automation.ErrorCategory]::InvalidData) `
             -TargetObject $null
     }
+    $databaseHasVisualizer = $null -ne $DatabaseHead.PSObject.Properties['VisualizerGeneration'] -or
+        $null -ne $DatabaseHead.PSObject.Properties['VisualizerStateMac']
+    $anchorHasVisualizer = $null -ne $Anchor.PSObject.Properties['VisualizerGeneration'] -or
+        $null -ne $Anchor.PSObject.Properties['VisualizerStateMac']
+    if ($databaseHasVisualizer -ne $anchorHasVisualizer -or ($databaseHasVisualizer -and
+        ($null -eq $DatabaseHead.PSObject.Properties['VisualizerGeneration'] -or
+            $null -eq $DatabaseHead.PSObject.Properties['VisualizerStateMac'] -or
+            $null -eq $Anchor.PSObject.Properties['VisualizerGeneration'] -or
+            $null -eq $Anchor.PSObject.Properties['VisualizerStateMac']))) {
+        Stop-HHPersistenceOperation -ErrorId AuditIntegrityFailed `
+            -Message 'The database and external anchor visualizer heads are incompatible.' `
+            -Category ([Management.Automation.ErrorCategory]::InvalidData) -TargetObject $null
+    }
+    if ($databaseHasVisualizer -and ([long]$DatabaseHead.VisualizerGeneration -lt 0 -or
+        [long]$Anchor.VisualizerGeneration -lt 0 -or
+        $DatabaseHead.VisualizerStateMac -isnot [byte[]] -or
+        $Anchor.VisualizerStateMac -isnot [byte[]] -or
+        $DatabaseHead.VisualizerStateMac.Length -ne 32 -or $Anchor.VisualizerStateMac.Length -ne 32)) {
+        Stop-HHPersistenceOperation -ErrorId AuditIntegrityFailed `
+            -Message 'The database or external anchor visualizer head is invalid.' `
+            -Category ([Management.Automation.ErrorCategory]::InvalidData) -TargetObject $null
+    }
 
     if ([long]$DatabaseHead.AuditSequence -lt 0 -or [long]$Anchor.AuditSequence -lt 0 -or
         [long]$DatabaseHead.TargetGeneration -lt 0 -or [long]$Anchor.TargetGeneration -lt 0) {
@@ -166,7 +202,11 @@ function Test-HHPersistenceAnchorState {
         )
     }
     else { 0 }
-    if ($auditComparison -lt 0 -or $targetComparison -lt 0 -or $configurationComparison -lt 0) {
+    $visualizerComparison = if ($databaseHasVisualizer) {
+        ([long]$DatabaseHead.VisualizerGeneration).CompareTo([long]$Anchor.VisualizerGeneration)
+    } else { 0 }
+    if ($auditComparison -lt 0 -or $targetComparison -lt 0 -or
+        $configurationComparison -lt 0 -or $visualizerComparison -lt 0) {
         Stop-HHPersistenceOperation `
             -ErrorId 'AuditRollbackDetected' `
             -Message 'The database is behind its external persistence anchor.' `
@@ -182,7 +222,10 @@ function Test-HHPersistenceAnchorState {
         ($databaseHasConfiguration -and $configurationComparison -eq 0 -and
             -not (Test-HHPersistenceBytesEqual `
                 -Left ([byte[]]$DatabaseHead.ConfigurationStateMac) `
-                -Right ([byte[]]$Anchor.ConfigurationStateMac)))) {
+                -Right ([byte[]]$Anchor.ConfigurationStateMac))) -or
+        ($databaseHasVisualizer -and $visualizerComparison -eq 0 -and
+            -not (Test-HHPersistenceBytesEqual -Left ([byte[]]$DatabaseHead.VisualizerStateMac) `
+                -Right ([byte[]]$Anchor.VisualizerStateMac)))) {
         Stop-HHPersistenceOperation `
             -ErrorId 'AuditIntegrityFailed' `
             -Message 'The database head differs from the external anchor at the same position.' `
@@ -191,12 +234,13 @@ function Test-HHPersistenceAnchorState {
     }
     [pscustomobject][ordered]@{
         IsEqual = $auditComparison -eq 0 -and $targetComparison -eq 0 -and
-            $configurationComparison -eq 0
+            $configurationComparison -eq 0 -and $visualizerComparison -eq 0
         RequiresVerifiedAdvance = $auditComparison -gt 0 -or $targetComparison -gt 0 -or
-            $configurationComparison -gt 0
+            $configurationComparison -gt 0 -or $visualizerComparison -gt 0
         AuditAdvanceRequired = $auditComparison -gt 0
         TargetAdvanceRequired = $targetComparison -gt 0
         ConfigurationAdvanceRequired = $configurationComparison -gt 0
+        VisualizerAdvanceRequired = $visualizerComparison -gt 0
     }
 }
 
@@ -282,6 +326,7 @@ function Open-HHAuthenticatedPersistence {
         $configuration = Read-HHConfigurationRepositorySnapshot `
             -Connection $connection `
             -MasterKey $masterKey
+        $visualizer = Read-HHVisualizerRepositorySnapshot -Connection $connection -MasterKey $masterKey
         $head = Get-HHSqlitePersistenceHead `
             -Connection $connection `
             -SchemaFingerprint $schema.SchemaFingerprint
@@ -294,7 +339,9 @@ function Open-HHAuthenticatedPersistence {
             $configuration.Generation -ne $head.ConfigurationGeneration -or
             -not (Test-HHPersistenceBytesEqual `
                 -Left $configuration.StateMac `
-                -Right $head.ConfigurationStateMac)) {
+                -Right $head.ConfigurationStateMac) -or
+            $visualizer.Generation -ne $head.VisualizerGeneration -or
+            -not (Test-HHPersistenceBytesEqual -Left $visualizer.StateMac -Right $head.VisualizerStateMac)) {
             Stop-HHPersistenceOperation `
                 -ErrorId 'AuditIntegrityFailed' `
                 -Message 'The authenticated repository heads do not match their verified state.' `
@@ -331,6 +378,7 @@ function Open-HHAuthenticatedPersistence {
             Schema = $schema
             TargetSnapshot = $snapshot
             ConfigurationSnapshot = $configuration
+            VisualizerSnapshot = $visualizer
             OperationLock = $operationLockContext
             WriterLock = $writerLockContext
             ProviderRoot = $ProviderRoot
@@ -427,6 +475,8 @@ function Invoke-HHAnchoredPersistenceTransaction {
         $configuration = Read-HHConfigurationRepositorySnapshot `
             -Connection $Context.Connection `
             -MasterKey $Context.MasterKey
+        $visualizer = Read-HHVisualizerRepositorySnapshot -Connection $Context.Connection `
+            -MasterKey $Context.MasterKey
         if ($chain.Sequence -ne $head.AuditSequence -or
             -not (Test-HHPersistenceBytesEqual -Left $chain.LastMac -Right $head.AuditMac) -or
             $snapshot.Generation -ne $head.TargetGeneration -or
@@ -436,7 +486,9 @@ function Invoke-HHAnchoredPersistenceTransaction {
             $configuration.Generation -ne $head.ConfigurationGeneration -or
             -not (Test-HHPersistenceBytesEqual `
                 -Left $configuration.StateMac `
-                -Right $head.ConfigurationStateMac)) {
+                -Right $head.ConfigurationStateMac) -or
+            $visualizer.Generation -ne $head.VisualizerGeneration -or
+            -not (Test-HHPersistenceBytesEqual -Left $visualizer.StateMac -Right $head.VisualizerStateMac)) {
             throw 'The committed database head did not verify before sealing.'
         }
         Write-HHPersistenceAnchor `
@@ -453,6 +505,7 @@ function Invoke-HHAnchoredPersistenceTransaction {
         $Context.Schema = $schema
         $Context.TargetSnapshot = $snapshot
         $Context.ConfigurationSnapshot = $configuration
+        $Context.VisualizerSnapshot = $visualizer
         if ($null -ne $preparedReceipt) {
             $preparedReceipt | Add-Member -NotePropertyName Prepared -NotePropertyValue $true -Force
             $preparedReceipt | Add-Member -NotePropertyName Committed -NotePropertyValue $true -Force

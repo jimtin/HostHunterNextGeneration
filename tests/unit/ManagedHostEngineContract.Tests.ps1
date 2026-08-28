@@ -18,7 +18,7 @@ Describe 'managed-host engine contract' -Tag Unit {
         $script:engineGuardPath = Join-Path $script:engineRepoRoot 'scripts/static/Test-HHManagedHostBoundary.ps1'
     }
 
-    It 'accepts the five closed operation values and rejects every other value' {
+    It 'accepts the six closed operation values and rejects every other value' {
         InModuleScope HostHunterNextGeneration {
             $command = Get-Command Invoke-HHManagedHostOperation
             $attribute = @($command.Parameters.Operation.Attributes | Where-Object {
@@ -27,6 +27,7 @@ Describe 'managed-host engine contract' -Tag Unit {
             $attribute.Count | Should -Be 1
             @($attribute[0].ValidValues | Sort-Object) | Should -Be @(
                 'EnableSshKeyAuthentication',
+                'GetHostDetails',
                 'InvokeCommand',
                 'SetWindowsProcessAuditPolicy',
                 'TestTarget',
@@ -38,7 +39,7 @@ Describe 'managed-host engine contract' -Tag Unit {
         }
     }
 
-    It 'keeps the engine private and exports exactly eleven cmdlets' {
+    It 'keeps the engine private and exports exactly twelve framework cmdlets' {
         $exported = @(Get-Command -Module HostHunterNextGeneration -CommandType Function |
                 Select-Object -ExpandProperty Name | Sort-Object)
         $exported | Should -Be @(
@@ -47,6 +48,7 @@ Describe 'managed-host engine contract' -Tag Unit {
             'Get-HHAuditRecord',
             'Get-HHEscalationPreference',
             'Get-HHTarget',
+            'Get-TargetHostDetails',
             'Invoke-HHCommand',
             'Remove-HHTarget',
             'Set-HHEscalationPreference',
@@ -60,14 +62,15 @@ Describe 'managed-host engine contract' -Tag Unit {
             Should -BeNullOrEmpty
     }
 
-    It 'routes all five public cmdlets through the sole boundary' {
+    It 'routes all six public cmdlets through the sole boundary' {
         $result = & $script:engineGuardPath -ModuleRoot $script:engineSourceRoot
         $result.Succeeded | Should -BeTrue
-        $result.ManagedHostCmdletCount | Should -Be 5
+        $result.ManagedHostCmdletCount | Should -Be 6
         @($result.Operations) | Should -Be @(
             'ValidateTarget',
             'TestTarget',
             'InvokeCommand',
+            'GetHostDetails',
             'EnableSshKeyAuthentication',
             'SetWindowsProcessAuditPolicy'
         )

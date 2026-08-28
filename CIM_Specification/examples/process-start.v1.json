@@ -1,0 +1,80 @@
+{
+  "@timestamp": "2026-08-28T10:00:00Z",
+  "ecs": {
+    "version": "9.5.0"
+  },
+  "event": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "kind": "event",
+    "category": [
+      "process"
+    ],
+    "type": [
+      "start"
+    ],
+    "action": "process-started",
+    "dataset": "hosthunter.process_lifecycle",
+    "module": "hosthunter",
+    "provider": "HostHunter",
+    "created": "2026-08-28T10:00:02Z",
+    "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "agent": {
+    "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "name": "hosthunter-controller",
+    "type": "hosthunter",
+    "version": "0.5.0"
+  },
+  "host": {
+    "id": "hh_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "hostname": "WIN-CLIENT-01",
+    "name": "win-client-01.lab.example"
+  },
+  "process": {
+    "pid": 4120,
+    "entity_id": "{11111111-2222-4333-8444-555555555555}",
+    "name": "powershell.exe",
+    "executable": "C:\\\\Program Files\\\\PowerShell\\\\7\\\\pwsh.exe",
+    "command_line": "pwsh.exe -NoProfile -File C:\\\\ProgramData\\\\Example\\\\task.ps1",
+    "args": [
+      "-NoProfile",
+      "-File",
+      "C:\\\\ProgramData\\\\Example\\\\task.ps1"
+    ],
+    "parent": {
+      "pid": 980,
+      "entity_id": "{aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee}",
+      "name": "services.exe"
+    }
+  },
+  "user": {
+    "id": "S-1-5-21-1000",
+    "name": "analyst",
+    "domain": "LAB"
+  },
+  "hosthunter": {
+    "collection_run": {
+      "id": "22222222-2222-4222-8222-222222222222"
+    },
+    "source": {
+      "provider": "Microsoft-Windows-Sysmon",
+      "channel": "Microsoft-Windows-Sysmon/Operational",
+      "event_code": "1",
+      "record_id": "12345",
+      "computer": "WIN-CLIENT-01"
+    },
+    "process": {
+      "boot_id": "boot-20260828-01",
+      "source_instance_id": "{11111111-2222-4333-8444-555555555555}",
+      "source_parent_instance_id": "{aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee}"
+    },
+    "provenance": {
+      "transport": "event-log-export",
+      "collected_at": "2026-08-28T10:00:02Z"
+    },
+    "audit": {
+      "batch_id": "33333333-3333-4333-8333-333333333333",
+      "invocation_id": "44444444-4444-4444-8444-444444444444"
+    }
+  }
+}

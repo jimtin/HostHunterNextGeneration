@@ -1,6 +1,7 @@
 [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
 param(
     [string]$RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path,
+    [string]$VisualizerRepoRoot,
     [string]$UserHome = $HOME,
     [string]$ProfilePath = $PROFILE.CurrentUserAllHosts,
     [switch]$SkipProfile
@@ -9,6 +10,15 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path -LiteralPath $RepoRoot).Path
+$visualizerRepo = $null
+if (-not [string]::IsNullOrWhiteSpace($VisualizerRepoRoot)) {
+    $visualizerRepo = (Resolve-Path -LiteralPath $VisualizerRepoRoot).Path
+    foreach ($relativePath in @('scripts/up.sh','scripts/down.sh','scripts/bootstrap-secrets.sh','compose.yaml')) {
+        if (-not [IO.File]::Exists((Join-Path $visualizerRepo $relativePath))) {
+            throw "The visualizer repository is missing '$relativePath'."
+        }
+    }
+}
 $source = Join-Path $repo 'client/HostHunter.Client'
 $manifest = Import-PowerShellDataFile (Join-Path $source 'HostHunter.Client.psd1')
 $version = [string]$manifest.ModuleVersion
@@ -22,10 +32,22 @@ if (-not $PSCmdlet.ShouldProcess($moduleRoot, 'Install HostHunter.Client')) { re
 [IO.Directory]::CreateDirectory($moduleRoot) | Out-Null
 Copy-Item -LiteralPath (Join-Path $source 'HostHunter.Client.psd1') -Destination $moduleRoot -Force
 Copy-Item -LiteralPath (Join-Path $source 'HostHunter.Client.psm1') -Destination $moduleRoot -Force
+$privateSource = Join-Path $source 'Private'
+$privateDestination = Join-Path $moduleRoot 'Private'
+if ([IO.Directory]::Exists($privateSource)) {
+    [IO.Directory]::CreateDirectory($privateDestination) | Out-Null
+    Copy-Item -Path (Join-Path $privateSource '*') -Destination $privateDestination `
+        -Recurse -Force
+}
 [IO.Directory]::CreateDirectory((Split-Path -Parent $configurationPath)) | Out-Null
 [IO.File]::WriteAllText(
     $configurationPath,
-    ([ordered]@{ schema = 'HostHunter.ClientConfiguration.v1'; repoRoot = $repo } |
+    ([ordered]@{
+            schema = 'HostHunter.ClientConfiguration.v2'
+            repoRoot = $repo
+            visualizerRepoRoot = $visualizerRepo
+            visualizerUrl = 'http://127.0.0.1:4310'
+        } |
         ConvertTo-Json -Compress),
     [Text.UTF8Encoding]::new($false)
 )
@@ -34,6 +56,14 @@ if (-not $IsWindows) {
         $configurationPath,
         [IO.UnixFileMode]::UserRead -bor [IO.UnixFileMode]::UserWrite
     )
+}
+
+if ($null -ne $visualizerRepo) {
+    $bootstrap = Join-Path $visualizerRepo 'scripts/bootstrap-secrets.sh'
+    $bootstrapOutput = @(& /usr/bin/env bash $bootstrap 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        throw "Visualizer credential bootstrap failed: $([string]::Join([Environment]::NewLine, $bootstrapOutput))"
+    }
 }
 
 if (-not $SkipProfile) {
@@ -67,5 +97,6 @@ if (-not $SkipProfile) {
 [pscustomobject]@{
     ModulePath = $moduleRoot
     ConfigurationPath = $configurationPath
+    VisualizerRepoRoot = $visualizerRepo
     ProfilePath = if ($SkipProfile) { $null } else { $ProfilePath }
 }

@@ -102,6 +102,10 @@ function Get-HHSqliteProviderAssetName {
 
     $nativeName = 'libe_sqlite3.so'
     @(
+        'Humanizer.dll'
+        'Json.More.dll'
+        'JsonPointer.Net.dll'
+        'JsonSchema.Net.dll'
         'SQLitePCLRaw.core.dll'
         'SQLitePCLRaw.provider.e_sqlite3.dll'
         'SQLitePCLRaw.batteries_v2.dll'
@@ -136,7 +140,20 @@ function Initialize-HHSqliteProvider {
     }
 
     if ($null -eq $AssemblyLoader) {
-        $AssemblyLoader = { param($Path) [System.Reflection.Assembly]::LoadFrom($Path) }
+        # PowerShell 7.6 hosts .NET in a custom load context. JsonSchema.Net's
+        # strongly named graph must use LoadFile to avoid LoadFrom rebinding;
+        # SQLite keeps LoadFrom so its provider dependencies resolve normally.
+        $AssemblyLoader = {
+            param($Path)
+            if ([System.IO.Path]::GetFileName($Path) -in @(
+                    'Humanizer.dll', 'Json.More.dll', 'JsonPointer.Net.dll', 'JsonSchema.Net.dll'
+                )) {
+                [System.Reflection.Assembly]::LoadFile($Path)
+            }
+            else {
+                [System.Reflection.Assembly]::LoadFrom($Path)
+            }
+        }
     }
     foreach ($managedAsset in @($assets | Where-Object { $_.EndsWith('.dll') -and $_ -ne 'e_sqlite3.dll' })) {
         $null = & $AssemblyLoader (Join-Path $ridRoot $managedAsset)

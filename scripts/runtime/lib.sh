@@ -6,6 +6,7 @@ runtime_script_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 runtime_repo_root="$(cd -- "$runtime_script_root/../.." && pwd -P)"
 readonly runtime_script_root runtime_repo_root
 readonly runtime_compose_file="$runtime_repo_root/compose.runtime.yml"
+readonly runtime_visualizer_compose_file="$runtime_repo_root/compose.visualizer.yml"
 # shellcheck disable=SC2034
 readonly runtime_project_label='com.hosthunter.runtime.project'
 # shellcheck disable=SC2034
@@ -24,13 +25,23 @@ HH_RUNTIME_ANCHOR_VOLUME="${HH_RUNTIME_PROJECT}-anchors"
 HH_RUNTIME_SSH_VOLUME="${HH_RUNTIME_PROJECT}-ssh"
 HH_RUNTIME_EVIDENCE_VOLUME="${HH_RUNTIME_PROJECT}-evidence"
 HH_RUNTIME_CONTROLLER_IMAGE="${HH_RUNTIME_PROJECT}-controller:local"
+HH_VISUALIZER_PRODUCER_NETWORK="${HH_VISUALIZER_PRODUCER_NETWORK:-hh-visualizer-producer}"
+HH_VISUALIZER_ENABLED="${HH_VISUALIZER_ENABLED:-false}"
+if [[ "$HH_VISUALIZER_ENABLED" != true && "$HH_VISUALIZER_ENABLED" != false ]]; then
+  printf 'HH_VISUALIZER_ENABLED must be true or false.\n' >&2
+  exit 64
+fi
+HH_VISUALIZER_TOKEN_SOURCE="${HH_VISUALIZER_TOKEN_SOURCE:-}"
 export HH_RUNTIME_PROJECT \
   HH_RUNTIME_DATA_VOLUME \
   HH_RUNTIME_SECRET_VOLUME \
   HH_RUNTIME_ANCHOR_VOLUME \
   HH_RUNTIME_SSH_VOLUME \
   HH_RUNTIME_EVIDENCE_VOLUME \
-  HH_RUNTIME_CONTROLLER_IMAGE
+  HH_RUNTIME_CONTROLLER_IMAGE \
+  HH_VISUALIZER_PRODUCER_NETWORK \
+  HH_VISUALIZER_ENABLED \
+  HH_VISUALIZER_TOKEN_SOURCE
 
 runtime_volume_names=(
   "$HH_RUNTIME_DATA_VOLUME"
@@ -43,10 +54,14 @@ runtime_volume_roles=(data secrets anchors ssh evidence)
 readonly runtime_volume_names runtime_volume_roles
 
 runtime_compose() {
-  docker compose \
-    --project-name "$HH_RUNTIME_PROJECT" \
-    --file "$runtime_compose_file" \
-    "$@"
+  local arguments=(
+    --project-name "$HH_RUNTIME_PROJECT"
+    --file "$runtime_compose_file"
+  )
+  if [[ "$HH_VISUALIZER_ENABLED" == true ]]; then
+    arguments+=(--file "$runtime_visualizer_compose_file")
+  fi
+  docker compose "${arguments[@]}" "$@"
 }
 
 runtime_require_docker() {

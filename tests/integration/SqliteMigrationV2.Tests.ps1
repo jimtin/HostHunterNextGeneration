@@ -11,7 +11,7 @@ if ([IO.Directory]::Exists('/opt/hosthunter-sqlite/lib')) {
     $env:HH_SQLITE_PROVIDER_ROOT = '/opt/hosthunter-sqlite/lib'
 }
 
-Describe 'SQLite v1 to v2 authenticated migration' -Tag Integration {
+Describe 'SQLite v1 to current authenticated migration' -Tag Integration {
     InModuleScope HostHunterNextGeneration {
         BeforeEach {
             $script:dataRoot = Join-Path $TestDrive ([Guid]::NewGuid().ToString('N'))
@@ -90,13 +90,13 @@ VALUES(1,0,@snapshot,@state,@prior,NULL);
                 -MasterKeyProvider $provider `
                 -AllowAnchorAdvance
             try {
-                $context.Schema.SchemaVersion | Should -Be 2
+            $context.Schema.SchemaVersion | Should -Be 3
                 $context.Anchor.ConfigurationGeneration | Should -Be 0
                 (Get-HHAuthenticatedEscalationPreference -Context $context).Source |
                     Should -BeExactly BuiltIn
                 @(Invoke-HHSqliteQuery -Connection $context.Connection `
                         -Sql 'SELECT version,name FROM schema_migrations ORDER BY version;').Count |
-                    Should -Be 2
+                        Should -Be 3
                 $operationSql = [string](Invoke-HHSqliteScalar -Connection $context.Connection `
                         -Sql "SELECT sql FROM sqlite_schema WHERE name='operation_batches';")
                 $operationSql | Should -Match 'SetWindowsProcessAuditPolicy'
@@ -119,7 +119,7 @@ VALUES(1,0,@snapshot,@state,@prior,NULL);
             try {
                 (Test-HHSqliteDatabaseSchema -Connection $connection `
                         -MigrationPath $script:persistence.MigrationPath).SchemaVersion |
-                    Should -Be 2
+                        Should -Be 3
             }
             finally { $connection.Dispose() }
             (Read-HHFilePersistenceAnchor -Path $script:persistence.AnchorPath `
@@ -132,7 +132,7 @@ VALUES(1,0,@snapshot,@state,@prior,NULL);
                 -AllowAnchorAdvance
             try {
                 $recovered.Anchor.ConfigurationGeneration | Should -Be 0
-                $recovered.Anchor.Artifact.Length | Should -Be 236
+                $recovered.Anchor.Artifact.Length | Should -Be 276
             }
             finally { Close-HHAuthenticatedPersistence -Context $recovered }
         }

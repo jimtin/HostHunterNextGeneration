@@ -5,6 +5,10 @@ third-party components:
 
 | Package | Version | Licence |
 | --- | --- | --- |
+| JsonSchema.Net | 9.4.0 | MIT |
+| JsonPointer.Net | 7.0.2 | MIT |
+| Json.More.Net | 3.0.1 | MIT |
+| Humanizer.Core | 2.14.1 | MIT |
 | Microsoft.Data.Sqlite.Core | 10.0.11 | MIT |
 | SQLitePCLRaw.bundle_e_sqlite3 | 3.0.5 | Apache-2.0 |
 | SQLitePCLRaw.config.e_sqlite3 | 3.0.5 | Apache-2.0 |

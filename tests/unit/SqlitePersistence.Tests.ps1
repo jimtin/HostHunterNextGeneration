@@ -271,7 +271,7 @@ Describe 'SQLite persistence foundation' -Tag Unit {
             } | Should -Throw -ErrorId 'LegacyPersistenceMigrationRequired*'
         }
 
-        It 'creates and reopens an exact schema-v2 database using parameterized blobs' {
+    It 'creates and reopens an exact schema-v3 database using parameterized blobs' {
             $root = Join-Path $TestDrive 'database'
             $context = Get-HHPersistenceContext -DataRoot $root
             $masterKey = [byte[]](0..31)
@@ -287,8 +287,8 @@ Describe 'SQLite persistence foundation' -Tag Unit {
                 -MasterKey $masterKey `
                 -AnchorWriter $anchorWriter `
                 -Clock { [DateTimeOffset]'2026-08-24T00:00:00Z' }
-            $created.SchemaVersion | Should -Be 2
-            $script:writtenAnchor.Length | Should -Be 236
+        $created.SchemaVersion | Should -Be 3
+        $script:writtenAnchor.Length | Should -Be 276
 
             $connection = New-HHSqliteConnection -DatabasePath $context.DatabasePath
             try {
@@ -302,7 +302,7 @@ Describe 'SQLite persistence foundation' -Tag Unit {
                 $verified = Test-HHSqliteDatabaseSchema `
                     -Connection $connection `
                     -MigrationPath $context.MigrationPath
-                $verified.SchemaVersion | Should -Be 2
+                $verified.SchemaVersion | Should -Be 3
             }
             finally {
                 $connection.Dispose()
@@ -541,13 +541,13 @@ VALUES(-1,@event,'Test',@at,NULL,@mutation,@projection,@related,@previous,@mac);
             } | Should -Throw -ErrorId 'PersistenceSchemaUnsupported*'
         }
 
-        It 'rejects an upgrade request that is not exactly authenticated schema v1' {
+    It 'rejects an upgrade request that is already at the latest schema' {
             {
                 Update-HHSqliteDatabaseToLatest `
                     -Connection ([pscustomobject]@{ DataSource = 'mock.db' }) `
                     -PersistenceContext ([pscustomobject]@{}) `
                     -MasterKey ([byte[]]::new(32)) `
-                    -ExistingSchema ([pscustomobject]@{ SchemaVersion = 2 }) `
+                -ExistingSchema ([pscustomobject]@{ SchemaVersion = 3 }) `
                     -ExistingAnchor ([pscustomobject]@{})
             } | Should -Throw -ErrorId 'PersistenceSchemaUnsupported*'
         }
@@ -696,7 +696,13 @@ INSERT INTO remote_operation_events(
             $loader = {
                 param($Path)
                 $loaderState.Count++
-                [Reflection.Assembly]::LoadFrom($Path)
+                if ([IO.Path]::GetFileName($Path) -in @(
+                        'Humanizer.dll', 'Json.More.dll',
+                        'JsonPointer.Net.dll', 'JsonSchema.Net.dll'
+                    )) {
+                    [Reflection.Assembly]::LoadFile($Path)
+                }
+                else { [Reflection.Assembly]::LoadFrom($Path) }
             }.GetNewClosure()
             $batteryState = [pscustomobject]@{ Count = 0 }
             $batteries = {
@@ -705,7 +711,7 @@ INSERT INTO remote_operation_events(
             }.GetNewClosure()
             Initialize-HHSqliteProvider -ProviderRoot '/opt/hosthunter-sqlite/lib' `
                 -AssemblyLoader $loader -BatteriesInitializer $batteries
-            $loaderState.Count | Should -Be 4
+            $loaderState.Count | Should -Be 8
             $batteryState.Count | Should -Be 1
             $script:HHSqliteProviderInitialized | Should -BeTrue
         }

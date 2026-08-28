@@ -24,16 +24,21 @@ Describe 'SQLite provider packaging contract' -Tag Unit {
         foreach ($reference in $project.Project.ItemGroup.PackageReference) {
             $directPackages[[string] $reference.Include] = [string] $reference.Version
         }
-        $directPackages.Keys.Count | Should -Be 2
+        $directPackages.Keys.Count | Should -Be 3
         $directPackages['Microsoft.Data.Sqlite.Core'] | Should -BeExactly '10.0.11'
         $directPackages['SQLitePCLRaw.bundle_e_sqlite3'] | Should -BeExactly '3.0.5'
+        $directPackages['JsonSchema.Net'] | Should -BeExactly '9.4.0'
     }
 
-    It 'locks exactly the approved six-package dependency graph' {
+    It 'locks exactly the approved ten-package dependency graph' {
         $lock = Get-Content -LiteralPath $script:lockPath -Raw |
             ConvertFrom-Json -Depth 20
         $dependencies = $lock.dependencies.'net8.0'
         @($dependencies.PSObject.Properties.Name | Sort-Object) | Should -Be @(
+            'Humanizer.Core'
+            'Json.More.Net'
+            'JsonPointer.Net'
+            'JsonSchema.Net'
             'Microsoft.Data.Sqlite.Core'
             'SQLite'
             'SQLitePCLRaw.bundle_e_sqlite3'
@@ -68,7 +73,7 @@ Describe 'SQLite provider packaging contract' -Tag Unit {
             }
         ) | Sort-Object
         @($sbom.components.purl | Sort-Object) | Should -Be $lockedPurls
-        @($sbom.components.purl | Select-Object -Unique).Count | Should -Be 6
+        @($sbom.components.purl | Select-Object -Unique).Count | Should -Be 10
     }
 
     It 'defines a dependency-free locked AnyCPU durability helper' {
@@ -85,9 +90,9 @@ Describe 'SQLite provider packaging contract' -Tag Unit {
         @($lock.dependencies.'net8.0'.PSObject.Properties).Count | Should -Be 0
     }
 
-    It 'declares the exact 0.3.0-preview1 package identity' {
+    It 'declares the exact 0.4.0-preview1 package identity' {
         $manifest = Test-ModuleManifest -Path $script:moduleManifestPath -ErrorAction Stop
-        $manifest.Version.ToString() | Should -BeExactly '0.3.0'
+        $manifest.Version.ToString() | Should -BeExactly '0.4.0'
         [string]$manifest.PrivateData.PSData.Prerelease |
             Should -BeExactly 'preview1'
     }

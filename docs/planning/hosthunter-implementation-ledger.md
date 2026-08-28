@@ -6,7 +6,9 @@ This ledger implements `hosthunter-simplification-plan.md` from commit
 `b7e53b86f49d497f661953c921e2c31e5b9c5fe2` on branch
 `codex/hosthunter-simplification`.
 
-The product surface is exactly eleven exported cmdlets. Linux Docker with
+The product surface is twelve exported framework cmdlets: the simplified
+original eleven plus `Get-TargetHostDetails`. The native macOS client separately
+provides `Start-HHVisualization` and `Stop-HHVisualization`. Linux Docker with
 PowerShell 7 is the only controller. SSH/OpenSSH is the only managed-host
 transport. Authenticated SQLite, encryption, anchors, `.hhout` evidence,
 tamper/rollback detection, and crash recovery remain required.
@@ -19,13 +21,13 @@ SQLite/files/volumes, and test-fixture setup are outside that boundary.
 
 | ID | Requirement | Intended change | Focused proof | Status | Non-goal/deferred |
 | --- | --- | --- | --- | --- | --- |
-| R1 | Exactly 11 public cmdlets | Keep the manifest/export allowlist and remove every unrelated product surface | package import asserts exact names | verified | no new public cmdlets |
-| R2 | One managed-host engine | Route Set/Test/Invoke/Enable/Policy through one private closed-operation facade | AST boundary guard plus five delegation tests | verified | user commands may initiate downstream traffic on the host |
+| R1 | Exactly 12 public framework cmdlets plus two client-local lifecycle commands | Keep the manifest/export allowlist and remove every unrelated product surface | package import asserts exact names and client contract asserts local commands | verified | future framework additions must use generic client sync and boundary contracts |
+| R2 | One managed-host engine | Route Set/Test/Invoke/Details/Enable/Policy through one private closed-operation facade | AST boundary guard plus six delegation tests | verified | user commands may initiate downstream traffic on the host |
 | R3 | Identical accountable logging | Engine owns intent, phase arming, dispatch, output and terminalization with semantic operation labels | one intent and one terminal result per target; authenticated `.hhout` where applicable | verified | do not relabel every operation `InvokeCommand` |
 | R4 | Real SQLite read/write proof | Run one ordered journey against a fresh store and inspect it read-only after every step | public fresh-process reads plus SQL integrity/count/generation deltas | verified | tests never write directly with SQL |
 | R5 | Preserve security guarantees | Retain authenticated DB, keys, anchors, encrypted output and recovery | focused tamper/rollback/recovery integration | implemented | clean exact-SHA release proof remains pending |
-| R6 | Fast container flow | Use one production-derived verifier and one disposable SSH target | `verify-cmdlets.sh` emits an 11-row receipt with no retry | verified | no unit/coverage/scans/build in cmdlet verdict |
-| R7 | Windows works | Exercise all five host-facing cmdlets through the engine against Windows PS7/OpenSSH | separate production-image live-Windows receipt; all 11 rows combined | verified for working tree | clean exact-SHA release receipt remains pending until commit |
+| R6 | Fast container flow | Use one production-derived verifier and one disposable SSH target | `verify-cmdlets.sh` emits a 12-row receipt with no retry | implemented; final working-tree run pending | no unit/coverage/scans/build in cmdlet verdict |
+| R7 | Windows works | Exercise all six host-facing cmdlets through the engine against Windows PS7/OpenSSH | separate production-image live-Windows receipt; all 12 framework rows combined | previous 11-command working-tree proof only | new details operation requires next exact-SHA qualification |
 | R8 | Prune obsolete scope | Remove Forensics/parser/ECS/outbox/API, WinRM, PS5.1, native controllers and redundant runners | deleted-surface sweep and import/runtime checks | verified | compatibility fields remain only for historical DB records |
 | R9 | Simple production container | One Linux controller and five separated trust-domain volumes | production image/runtime contract | verified | no parser sidecar or idle compatibility services |
 | R10 | No repeated release loops | Atomically claim an exact SHA once and always write immutable terminal receipts | interrupted/fail/pass duplicate-claim tests | verified | fixes require a new SHA |
@@ -37,8 +39,9 @@ SQLite/files/volumes, and test-fixture setup are outside that boundary.
 
 | Production area | Focused unit/contract proof | Integration/E2E proof | Status |
 | --- | --- | --- | --- |
-| Public export contract | exact 11 names; engine remains private | fresh package import | verified |
-| Managed-host gateway | closed operation values; no direct transport/audit calls from Public | engine marker and DB lifecycle for five host-facing cmdlets | verified |
+| Public export contract | exact 12 framework names; engine remains private; two client lifecycle commands local | fresh package import | verified focused |
+| Managed-host gateway | closed operation values; no direct transport/audit calls from Public | engine marker and DB lifecycle for six host-facing cmdlets | verified |
+| Mission and host details | bounded producer, schema validation, partial-field projection, stable opaque identity | authenticated schema-v3 persistence and 12-row journey | focused unit/integration verified; final journey pending exact-SHA proof |
 | Target persistence | validation, CAS, add/remove semantics | Set/Get/Test/Remove with fresh-process reads and SQL deltas | verified |
 | Command evidence | stream capture, finite failure, terminalization | Invoke, Get-AuditRecord and Get-AuditOutput round trip | verified |
 | SSH key transition | install/proof/commit/uncertain handling | password to key transition and post-key command | verified |

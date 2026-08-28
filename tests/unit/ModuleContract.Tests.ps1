@@ -20,6 +20,7 @@ Describe 'HostHunter module contract' -Tag Unit {
             'Get-HHAuditRecord'
             'Get-HHEscalationPreference'
             'Get-HHTarget'
+            'Get-TargetHostDetails'
             'Invoke-HHCommand'
             'Remove-HHTarget'
             'Set-HHEscalationPreference'

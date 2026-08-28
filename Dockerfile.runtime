@@ -12,6 +12,10 @@ RUN dotnet restore HostHunter.Sqlite.Dependencies.csproj --locked-mode --package
         /nuget/packages/sqlitepclraw.config.e_sqlite3/3.0.5/lib/net8.0/SQLitePCLRaw.batteries_v2.dll \
         /nuget/packages/sqlitepclraw.core/3.0.5/lib/net8.0/SQLitePCLRaw.core.dll \
         /nuget/packages/sqlitepclraw.provider.e_sqlite3/3.0.5/lib/net8.0/SQLitePCLRaw.provider.e_sqlite3.dll \
+        /nuget/packages/humanizer.core/2.14.1/lib/netstandard2.0/Humanizer.dll \
+        /nuget/packages/json.more.net/3.0.1/lib/net9.0/Json.More.dll \
+        /nuget/packages/jsonpointer.net/7.0.2/lib/net9.0/JsonPointer.Net.dll \
+        /nuget/packages/jsonschema.net/9.4.0/lib/net9.0/JsonSchema.Net.dll \
     ) \
     && for rid in linux-arm64 linux-x64; do \
         install -d -m 0755 "/out/lib/${rid}" \
@@ -20,7 +24,7 @@ RUN dotnet restore HostHunter.Sqlite.Dependencies.csproj --locked-mode --package
     && install -m 0644 /nuget/packages/sqlite/3.53.4/runtimes/linux-arm64/native/libe_sqlite3.so /out/lib/linux-arm64/libe_sqlite3.so \
     && install -m 0644 /nuget/packages/sqlite/3.53.4/runtimes/linux-x64/native/libe_sqlite3.so /out/lib/linux-x64/libe_sqlite3.so \
     && find /out/lib -type f -print0 | sort -z | xargs -0 sha256sum > /out/asset-sha256.txt \
-    && test "$(find /out/lib -mindepth 2 -maxdepth 2 -type f | wc -l)" -eq 10
+    && test "$(find /out/lib -mindepth 2 -maxdepth 2 -type f | wc -l)" -eq 18
 
 FROM mcr.microsoft.com/dotnet/sdk:10.0.400-noble@sha256:e1ffd2a92ae84c1291bc1b6887501f8af98e6331e7af6d4c8d37168c5e87a64c AS durability-helper
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
@@ -108,6 +112,7 @@ COPY --chmod=0755 scripts/runtime/controller-entrypoint.sh /usr/local/bin/hosthu
 COPY --chmod=0555 scripts/runtime/Invoke-HHCmdlet.ps1 /opt/hosthunter/runtime/Invoke-HHCmdlet.ps1
 COPY --chmod=0555 scripts/runtime/Get-HHClientCommandMetadata.ps1 /opt/hosthunter/runtime/Get-HHClientCommandMetadata.ps1
 COPY --chmod=0555 scripts/runtime/Invoke-HHClientProtocol.ps1 /opt/hosthunter/runtime/Invoke-HHClientProtocol.ps1
+COPY --chmod=0555 scripts/runtime/Invoke-HHVisualizationLifecycle.ps1 /opt/hosthunter/runtime/Invoke-HHVisualizationLifecycle.ps1
 COPY --chmod=0555 scripts/runtime/client-askpass.sh /opt/hosthunter/runtime/client-askpass.sh
 COPY --chmod=0555 scripts/runtime/client-confirm.sh /opt/hosthunter/runtime/client-confirm.sh
 COPY --chmod=0555 scripts/runtime/client-credential.sh /opt/hosthunter/runtime/client-credential.sh

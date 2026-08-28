@@ -43,9 +43,13 @@ Describe 'Docker-volume persistence provider' -Tag Unit -Skip:(!$IsLinux) {
                     '',
                     Justification = 'Creates an in-memory test fixture only.'
                 )]
-                param([long]$Generation = 0, [byte]$Offset = 0)
+                param(
+                    [long]$Generation = 0,
+                    [byte]$Offset = 0,
+                    [switch]$WithVisualizer
+                )
 
-                return [pscustomobject]@{
+                $anchor = [pscustomobject]@{
                     DatabaseId = [byte[]](0..15 | ForEach-Object {
                             [byte]($_ + $Offset)
                         })
@@ -69,6 +73,15 @@ Describe 'Docker-volume persistence provider' -Tag Unit -Skip:(!$IsLinux) {
                             [byte]($_ + $Offset)
                         })
                 }
+                if ($WithVisualizer) {
+                    $anchor | Add-Member -NotePropertyName VisualizerGeneration `
+                        -NotePropertyValue $Generation
+                    $anchor | Add-Member -NotePropertyName VisualizerStateMac `
+                        -NotePropertyValue ([byte[]](160..191 | ForEach-Object {
+                                [byte]($_ + $Offset)
+                            }))
+                }
+                return $anchor
             }
 
             function New-HHTestDockerProvider {
@@ -133,6 +146,25 @@ Describe 'Docker-volume persistence provider' -Tag Unit -Skip:(!$IsLinux) {
                 [Array]::Clear($key, 0, $key.Length)
                 [Array]::Clear($initialArtifact, 0, $initialArtifact.Length)
                 [Array]::Clear($advancedArtifact, 0, $advancedArtifact.Length)
+            }
+        }
+
+        It 'round-trips the visualizer-bound v3 core anchor' {
+            $fixture = New-HHTestDockerProvider -Prefix 'v3-core-anchor'
+            $context = [pscustomobject]@{ DataRoot = $fixture.Roots.Data }
+            $key = & $fixture.Provider.CoreMasterKeyProvider $context $false
+            $artifact = ConvertTo-HHPersistenceAnchorArtifact `
+                -Anchor (New-HHTestCoreAnchor -WithVisualizer) -MasterKey $key
+            try {
+                $artifact.Length | Should -Be 276
+                & $fixture.Provider.CoreAnchorWriter $context $null $artifact $key
+                $read = & $fixture.Provider.CoreAnchorReader $context $key
+                $read.VisualizerGeneration | Should -Be 0
+                $read.Artifact.Length | Should -Be 276
+            }
+            finally {
+                [Array]::Clear($artifact, 0, $artifact.Length)
+                [Array]::Clear($key, 0, $key.Length)
             }
         }
 

@@ -4,6 +4,8 @@ $script:HHPersistenceAnchorV1Length = 196
 $script:HHPersistenceAnchorV1BodyLength = 164
 $script:HHPersistenceAnchorV2Length = 236
 $script:HHPersistenceAnchorV2BodyLength = 204
+$script:HHPersistenceAnchorV3Length = 276
+$script:HHPersistenceAnchorV3BodyLength = 244
 
 function Write-HHInt64BigEndian {
     [CmdletBinding()]
@@ -58,6 +60,13 @@ function ConvertTo-HHPersistenceAnchorArtifact {
             $null -eq $Anchor.PSObject.Properties['ConfigurationStateMac'])) {
         throw [System.ArgumentException]::new('Anchor configuration fields are incomplete.', 'Anchor')
     }
+    $hasVisualizerHead = $null -ne $Anchor.PSObject.Properties['VisualizerGeneration'] -or
+        $null -ne $Anchor.PSObject.Properties['VisualizerStateMac']
+    if ($hasVisualizerHead -and (-not $hasConfigurationHead -or
+        $null -eq $Anchor.PSObject.Properties['VisualizerGeneration'] -or
+        $null -eq $Anchor.PSObject.Properties['VisualizerStateMac'])) {
+        throw [System.ArgumentException]::new('Anchor visualizer fields are incomplete.', 'Anchor')
+    }
     if (($Anchor.DatabaseId -isnot [byte[]]) -or $Anchor.DatabaseId.Length -ne 16 -or
         ($Anchor.LedgerId -isnot [byte[]]) -or $Anchor.LedgerId.Length -ne 16 -or
         ($Anchor.AuditMac -isnot [byte[]]) -or $Anchor.AuditMac.Length -ne 32 -or
@@ -68,24 +77,29 @@ function ConvertTo-HHPersistenceAnchorArtifact {
         ($hasConfigurationHead -and
             ([long]$Anchor.ConfigurationGeneration -lt 0 -or
                 $Anchor.ConfigurationStateMac -isnot [byte[]] -or
-                $Anchor.ConfigurationStateMac.Length -ne 32))) {
+                $Anchor.ConfigurationStateMac.Length -ne 32)) -or
+        ($hasVisualizerHead -and ([long]$Anchor.VisualizerGeneration -lt 0 -or
+                $Anchor.VisualizerStateMac -isnot [byte[]] -or
+                $Anchor.VisualizerStateMac.Length -ne 32))) {
         throw [System.ArgumentException]::new('Anchor fields are invalid.', 'Anchor')
     }
 
-    $artifactLength = if ($hasConfigurationHead) {
+    $artifactLength = if ($hasVisualizerHead) { $script:HHPersistenceAnchorV3Length }
+    elseif ($hasConfigurationHead) {
         $script:HHPersistenceAnchorV2Length
     }
     else { $script:HHPersistenceAnchorV1Length }
-    $bodyLength = if ($hasConfigurationHead) {
+    $bodyLength = if ($hasVisualizerHead) { $script:HHPersistenceAnchorV3BodyLength }
+    elseif ($hasConfigurationHead) {
         $script:HHPersistenceAnchorV2BodyLength
     }
     else { $script:HHPersistenceAnchorV1BodyLength }
     $artifact = [byte[]]::new($artifactLength)
     $magic = [System.Text.Encoding]::ASCII.GetBytes(
-        $(if ($hasConfigurationHead) { 'HHANCH02' } else { 'HHANCH01' })
+        $(if ($hasVisualizerHead) { 'HHANCH03' } elseif ($hasConfigurationHead) { 'HHANCH02' } else { 'HHANCH01' })
     )
     [Array]::Copy($magic, 0, $artifact, 0, 8)
-    $artifact[8] = if ($hasConfigurationHead) { 2 } else { 1 }
+    $artifact[8] = if ($hasVisualizerHead) { 3 } elseif ($hasConfigurationHead) { 2 } else { 1 }
     [Array]::Copy($Anchor.DatabaseId, 0, $artifact, 16, 16)
     [Array]::Copy($Anchor.LedgerId, 0, $artifact, 32, 16)
     $artifact[48] = 0
@@ -101,6 +115,10 @@ function ConvertTo-HHPersistenceAnchorArtifact {
         Write-HHInt64BigEndian -Buffer $artifact -Offset 164 `
             -Value ([long]$Anchor.ConfigurationGeneration)
         [Array]::Copy($Anchor.ConfigurationStateMac, 0, $artifact, 172, 32)
+    }
+    if ($hasVisualizerHead) {
+        Write-HHInt64BigEndian -Buffer $artifact -Offset 204 -Value ([long]$Anchor.VisualizerGeneration)
+        [Array]::Copy($Anchor.VisualizerStateMac, 0, $artifact, 212, 32)
     }
     $anchorKey = Get-HHPersistenceDerivedKey -MasterKey $MasterKey -Purpose Anchor
     $body = [byte[]]::new($bodyLength)
@@ -137,14 +155,17 @@ function ConvertFrom-HHPersistenceAnchorArtifact {
         $magic -ceq 'HHANCH01' -and $Artifact[8] -eq 1
     $isV2 = $Artifact.Length -eq $script:HHPersistenceAnchorV2Length -and
         $magic -ceq 'HHANCH02' -and $Artifact[8] -eq 2
-    if (-not $isV1 -and -not $isV2) {
+    $isV3 = $Artifact.Length -eq $script:HHPersistenceAnchorV3Length -and
+        $magic -ceq 'HHANCH03' -and $Artifact[8] -eq 3
+    if (-not $isV1 -and -not $isV2 -and -not $isV3) {
         Stop-HHPersistenceOperation `
             -ErrorId 'AuditIntegrityFailed' `
             -Message 'The persistence anchor has an invalid format.' `
             -Category ([System.Management.Automation.ErrorCategory]::InvalidData) `
             -TargetObject $null
     }
-    $bodyLength = if ($isV2) {
+    $bodyLength = if ($isV3) { $script:HHPersistenceAnchorV3BodyLength }
+    elseif ($isV2) {
         $script:HHPersistenceAnchorV2BodyLength
     }
     else { $script:HHPersistenceAnchorV1BodyLength }
@@ -195,13 +216,21 @@ function ConvertFrom-HHPersistenceAnchorArtifact {
         SchemaFingerprint = $schemaFingerprint
         Artifact = [byte[]]$Artifact.Clone()
     }
-    if ($isV2) {
+    if ($isV2 -or $isV3) {
         $configurationStateMac = [byte[]]::new(32)
         [Array]::Copy($Artifact, 172, $configurationStateMac, 0, 32)
         $anchor | Add-Member -NotePropertyName ConfigurationGeneration `
             -NotePropertyValue (Get-HHInt64BigEndian -Buffer $Artifact -Offset 164)
         $anchor | Add-Member -NotePropertyName ConfigurationStateMac `
             -NotePropertyValue $configurationStateMac
+    }
+    if ($isV3) {
+        $visualizerStateMac = [byte[]]::new(32)
+        [Array]::Copy($Artifact, 212, $visualizerStateMac, 0, 32)
+        $anchor | Add-Member -NotePropertyName VisualizerGeneration `
+            -NotePropertyValue (Get-HHInt64BigEndian -Buffer $Artifact -Offset 204)
+        $anchor | Add-Member -NotePropertyName VisualizerStateMac `
+            -NotePropertyValue $visualizerStateMac
     }
     return $anchor
 }

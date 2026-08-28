@@ -421,12 +421,14 @@ SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name='rollback_probe';
                 $targetStateMac = [byte[]]::new(32)
                 $schemaFingerprint = [byte[]]::new(32)
                 $configurationStateMac = [byte[]]::new(32)
+                $visualizerStateMac = [byte[]]::new(32)
                 [Array]::Copy($artifactState.Artifact, 16, $databaseId, 0, 16)
                 [Array]::Copy($artifactState.Artifact, 32, $ledgerId, 0, 16)
                 [Array]::Copy($artifactState.Artifact, 60, $auditMac, 0, 32)
                 [Array]::Copy($artifactState.Artifact, 100, $targetStateMac, 0, 32)
                 [Array]::Copy($artifactState.Artifact, 132, $schemaFingerprint, 0, 32)
                 [Array]::Copy($artifactState.Artifact, 172, $configurationStateMac, 0, 32)
+                [Array]::Copy($artifactState.Artifact, 212, $visualizerStateMac, 0, 32)
                 [pscustomobject]@{
                     DatabaseId = $databaseId
                     LedgerId = $ledgerId
@@ -438,6 +440,8 @@ SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name='rollback_probe';
                     SchemaFingerprint = $schemaFingerprint
                     ConfigurationGeneration = 0L
                     ConfigurationStateMac = $configurationStateMac
+                    VisualizerGeneration = 0L
+                    VisualizerStateMac = $visualizerStateMac
                     Artifact = [byte[]]$artifactState.Artifact.Clone()
                 }
             }.GetNewClosure()
@@ -449,7 +453,7 @@ SELECT COUNT(*) FROM sqlite_schema WHERE type='table' AND name='rollback_probe';
                 -AnchorReader $anchorReader
             try {
                 $artifactState.KeyCalls | Should -Be 1
-                $artifactState.Artifact.Length | Should -Be 236
+                $artifactState.Artifact.Length | Should -Be 276
                 Test-Path -LiteralPath (Join-Path $script:stateRoot 'audit/audit.key') |
                     Should -BeFalse
             }

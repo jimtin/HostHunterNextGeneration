@@ -1,0 +1,264 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hosthunter.dev/schemas/process-lifecycle-event.v1.schema.json",
+  "title": "HostHunter process lifecycle event v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "@timestamp",
+    "ecs",
+    "event",
+    "agent",
+    "host",
+    "process",
+    "hosthunter"
+  ],
+  "properties": {
+    "@timestamp": { "$ref": "#/$defs/dateTime" },
+    "ecs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version"],
+      "properties": {
+        "version": { "const": "9.5.0" }
+      }
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "category",
+        "type",
+        "action",
+        "dataset",
+        "module",
+        "provider",
+        "created",
+        "hash"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "kind": { "const": "event" },
+        "category": { "const": ["process"] },
+        "type": {
+          "oneOf": [
+            { "const": ["start"] },
+            { "const": ["end"] }
+          ]
+        },
+        "action": {
+          "enum": ["process-started", "process-stopped"]
+        },
+        "dataset": { "const": "hosthunter.process_lifecycle" },
+        "module": { "const": "hosthunter" },
+        "provider": { "const": "HostHunter" },
+        "created": { "$ref": "#/$defs/dateTime" },
+        "hash": { "$ref": "#/$defs/sha256" },
+        "outcome": {
+          "enum": ["success", "failure", "unknown"]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "action": { "const": "process-started" } },
+            "required": ["action"]
+          },
+          "then": {
+            "properties": { "type": { "const": ["start"] } }
+          }
+        },
+        {
+          "if": {
+            "properties": { "action": { "const": "process-stopped" } },
+            "required": ["action"]
+          },
+          "then": {
+            "properties": { "type": { "const": ["end"] } }
+          }
+        }
+      ]
+    },
+    "agent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "type", "version"],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "name": { "$ref": "#/$defs/shortText" },
+        "type": { "const": "hosthunter" },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      }
+    },
+    "host": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^hh_[a-z2-7]{52}$"
+        },
+        "hostname": { "$ref": "#/$defs/shortText" },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        }
+      }
+    },
+    "process": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pid"],
+      "properties": {
+        "pid": { "$ref": "#/$defs/pid" },
+        "entity_id": { "$ref": "#/$defs/identifier" },
+        "name": { "$ref": "#/$defs/shortText" },
+        "executable": { "$ref": "#/$defs/pathText" },
+        "command_line": {
+          "type": "string",
+          "maxLength": 32768
+        },
+        "args": {
+          "type": "array",
+          "maxItems": 256,
+          "items": {
+            "type": "string",
+            "maxLength": 4096
+          }
+        },
+        "exit_code": {
+          "type": "integer",
+          "minimum": -2147483648,
+          "maximum": 4294967295
+        },
+        "parent": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "pid": { "$ref": "#/$defs/pid" },
+            "entity_id": { "$ref": "#/$defs/identifier" },
+            "name": { "$ref": "#/$defs/shortText" }
+          },
+          "minProperties": 1
+        }
+      }
+    },
+    "user": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "name": { "$ref": "#/$defs/shortText" },
+        "domain": { "$ref": "#/$defs/shortText" }
+      },
+      "minProperties": 1
+    },
+    "hosthunter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "collection_run",
+        "source",
+        "process",
+        "provenance"
+      ],
+      "properties": {
+        "collection_run": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id"],
+          "properties": {
+            "id": { "$ref": "#/$defs/uuid" }
+          }
+        },
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "provider",
+            "channel",
+            "event_code",
+            "record_id"
+          ],
+          "properties": {
+            "provider": { "$ref": "#/$defs/shortText" },
+            "channel": { "$ref": "#/$defs/pathText" },
+            "event_code": { "$ref": "#/$defs/identifier" },
+            "record_id": { "$ref": "#/$defs/identifier" },
+            "computer": { "$ref": "#/$defs/shortText" }
+          }
+        },
+        "process": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "boot_id": { "$ref": "#/$defs/identifier" },
+            "source_instance_id": { "$ref": "#/$defs/identifier" },
+            "source_parent_instance_id": { "$ref": "#/$defs/identifier" }
+          }
+        },
+        "provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["transport", "collected_at"],
+          "properties": {
+            "transport": { "$ref": "#/$defs/shortText" },
+            "collected_at": { "$ref": "#/$defs/dateTime" },
+            "source_file_sha256": { "$ref": "#/$defs/sha256" }
+          }
+        },
+        "audit": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "batch_id": { "$ref": "#/$defs/uuid" },
+            "invocation_id": { "$ref": "#/$defs/uuid" }
+          },
+          "minProperties": 1
+        }
+      }
+    }
+  },
+  "$defs": {
+    "dateTime": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "pid": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "shortText": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "pathText": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    }
+  }
+}

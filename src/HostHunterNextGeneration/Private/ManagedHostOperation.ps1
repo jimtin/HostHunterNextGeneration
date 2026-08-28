@@ -9,6 +9,7 @@ function Invoke-HHManagedHostOperation {
             'ValidateTarget',
             'TestTarget',
             'InvokeCommand',
+            'GetHostDetails',
             'EnableSshKeyAuthentication',
             'SetWindowsProcessAuditPolicy'
         )]
@@ -27,6 +28,9 @@ function Invoke-HHManagedHostOperation {
         }
         'InvokeCommand' {
             return Invoke-HHManagedHostInvokeCommandOperation @Arguments
+        }
+        'GetHostDetails' {
+            return Invoke-HHManagedHostGetHostDetailsOperation @Arguments
         }
         'EnableSshKeyAuthentication' {
             return Invoke-HHManagedHostEnableSshKeyAuthenticationOperation @Arguments
@@ -456,11 +460,12 @@ function Invoke-HHManagedHostValidateTargetOperation {
             Close-HHAuthenticatedPersistence -Context $context
         }
         try {
+            $onboardedTargets = [Collections.Generic.List[object]]::new()
             foreach ($savedTarget in @($savedTargets)) {
                 if ($keyOnboarding.Contains($savedTarget.Name)) {
                     try {
-                        Invoke-HHManagedHostEnableSshKeyAuthenticationOperation `
-                            -Name $savedTarget.Name -Confirm:$false -Reason $Reason -CaseId $CaseId
+                        $onboardedTargets.Add((Invoke-HHManagedHostEnableSshKeyAuthenticationOperation `
+                            -Name $savedTarget.Name -Confirm:$false -Reason $Reason -CaseId $CaseId))
                     }
                     catch {
                         $failure = $_.Exception
@@ -478,9 +483,9 @@ function Invoke-HHManagedHostValidateTargetOperation {
                             )
                         }
                         if (Request-HHPasswordStorageConsent -TargetLabel $savedTarget.Name) {
-                            Save-HHOnboardingPasswordFallback -Runtime $runtime `
+                            $onboardedTargets.Add((Save-HHOnboardingPasswordFallback -Runtime $runtime `
                                 -Target $savedTarget `
-                                -PasswordBytes $passwordByName[$savedTarget.Name]
+                                -PasswordBytes $passwordByName[$savedTarget.Name]))
                         }
                         else {
                             Remove-HHIncompleteOnboardingTarget -Runtime $runtime `
@@ -492,8 +497,16 @@ function Invoke-HHManagedHostValidateTargetOperation {
                         }
                     }
                 }
-                else { $savedTarget }
+                else { $onboardedTargets.Add($savedTarget) }
             }
+            try {
+                Invoke-HHManagedHostGetHostDetailsOperation `
+                    -Name @($onboardedTargets.Name) -Reason $Reason -CaseId $CaseId | Out-Null
+            }
+            catch {
+                Write-Warning "Target saved, but initial host-details collection was incomplete: $($_.Exception.Message)"
+            }
+            @($onboardedTargets)
         }
         finally {
             foreach ($password in $passwordByName.Values) {
@@ -616,7 +629,7 @@ function Invoke-HHManagedHostCommandCoordinator {
         [string]$Reason,
         [string]$CaseId,
 
-        [ValidateSet('InvokeCommand', 'SetWindowsProcessAuditPolicy')]
+        [ValidateSet('InvokeCommand', 'GetHostDetails', 'SetWindowsProcessAuditPolicy')]
         [string]$Operation = 'InvokeCommand',
 
         [scriptblock]$RemoteScriptBlock,
@@ -1019,6 +1032,11 @@ function Invoke-HHManagedHostCommandCoordinator {
                 $publicResult | Add-Member -NotePropertyName PolicyOutcome `
                     -NotePropertyValue $policyOutcomeProperty.Value
             }
+            $hostDetailsProperty = $transportResult.PSObject.Properties['HostDetailsRaw']
+            if ($null -ne $hostDetailsProperty) {
+                $publicResult | Add-Member -NotePropertyName HostDetailsRaw `
+                    -NotePropertyValue $hostDetailsProperty.Value
+            }
             $recovery = Get-HHStoredCredentialRecoveryAction -Target $selectedTarget `
                 -FailureKind $transportResult.FailureKind
             if ($null -ne $recovery) {
@@ -1084,6 +1102,152 @@ function Invoke-HHManagedHostInvokeCommandOperation {
     }
     if ($PSBoundParameters.ContainsKey('Target')) { $parameters.Target = $Target }
     Invoke-HHManagedHostCommandCoordinator @parameters
+}
+
+function Invoke-HHManagedHostGetHostDetailsOperation {
+    [CmdletBinding()]
+    param(
+        [ValidateCount(1,8)][string[]]$Name,
+        [ValidateRange(1,8)][int]$ThrottleLimit=8,
+        [string]$Reason,
+        [string]$CaseId,
+        [scriptblock]$ProducerSender
+    )
+    $missionId=Get-HHCurrentMissionId
+    $remote=Get-HHHostDetailsRemoteScriptBlock
+    $augmenter={
+        param($SelectedTarget,$TransportResult,$CommandResult)
+        if($TransportResult.Succeeded){
+            $values=@($CommandResult.StreamEvents | Where-Object { $_.Phase -ceq 'Command' -and $_.Stream -ceq 'Output' } | ForEach-Object Value)
+            if($values.Count -ne 1){throw "Host details collection for '$($SelectedTarget.Name)' returned an invalid finite result."}
+            $TransportResult | Add-Member -NotePropertyName HostDetailsRaw -NotePropertyValue $values[0]
+        }
+        $TransportResult
+    }
+    $parameters=@{
+        Command='Collect finite target host details';ThrottleLimit=$ThrottleLimit;Reason=$Reason;CaseId=$CaseId
+        Operation='GetHostDetails';RemoteScriptBlock=$remote;RemoteArgumentList=@();TransportResultAugmenter=$augmenter
+    }
+    if($PSBoundParameters.ContainsKey('Name')){$parameters.Target=$Name}
+    $transportResults=@(Invoke-HHManagedHostCommandCoordinator @parameters)
+    if ($null -eq $missionId) {
+        return @($transportResults | ForEach-Object {
+                if (-not $_.Succeeded) { $_ }
+                else {
+                    $details = $_.HostDetailsRaw
+                    $details | Add-Member -NotePropertyName VisualizerDelivered -NotePropertyValue $false
+                    $details | Add-Member -NotePropertyName VisualizerPublishingState -NotePropertyValue Paused
+                    $details
+                }
+            })
+    }
+    $runtime = Get-HHRuntimeContext
+    $output = [Collections.Generic.List[object]]::new()
+    foreach ($transport in $transportResults) {
+        if (-not $transport.Succeeded) {
+            $output.Add($transport)
+            continue
+        }
+        $write = Open-HHAuthenticatedPersistence -PersistenceContext $runtime `
+            -OperationLock -AllowAnchorAdvance
+        try {
+            $eventBytes = [Guid]::NewGuid().ToByteArray()
+            $data = [pscustomobject]@{
+                Transport = $transport
+                MissionId = $missionId.ToByteArray()
+                EventId = $eventBytes
+                Observed = [DateTimeOffset]::Parse(
+                    [string]$transport.HostDetailsRaw.ObservedAtUtc
+                )
+            }
+            $stored = Invoke-HHAnchoredPersistenceTransaction -Context $write `
+                -ArgumentList @($data) -Action {
+                param($Connection,$Transaction,$WriterContext,$ArgumentList)
+                $d = $ArgumentList[0]
+                $snapshotParameters = @{
+                    Connection = $Connection
+                    Transaction = $Transaction
+                    MasterKey = $WriterContext.MasterKey
+                    Name = @([string]$d.Transport.Target)
+                }
+                $targets = @(
+                    (Read-HHTargetRepositorySnapshot @snapshotParameters).Targets
+                )
+                if ($targets.Count -ne 1) {
+                    throw 'The target disappeared before host details could be recorded.'
+                }
+                $identityParameters = @{
+                    Connection = $Connection
+                    Transaction = $Transaction
+                    MasterKey = $WriterContext.MasterKey
+                    TargetName = $targets[0].Name
+                    NativeIdentityDigest = [string](
+                        $d.Transport.HostDetailsRaw.NativeIdentityDigest
+                    )
+                    ObservedAtUtc = $d.Observed
+                }
+                $identity = Resolve-HHVisualizerEndpointIdentity @identityParameters
+                $payloadParameters = @{
+                    Raw = $d.Transport.HostDetailsRaw
+                    Target = $targets[0]
+                    MissionId = [Guid]::new([byte[]]$d.MissionId)
+                    EventId = [Guid]::new([byte[]]$d.EventId)
+                    EndpointId = $identity.EndpointId
+                    IdentityStrategy = $identity.Strategy
+                    BatchId = [byte[]]$d.Transport.BatchId
+                    InvocationId = [byte[]]$d.Transport.InvocationId
+                    DatabaseId = [byte[]]$WriterContext.Anchor.DatabaseId
+                }
+                $payload = ConvertTo-HHHostDetailsPayload @payloadParameters
+                $payloadJson = $payload | ConvertTo-Json -Compress -Depth 15
+                $bytes = [Text.UTF8Encoding]::new($false).GetBytes($payloadJson)
+                Assert-HHHostDetailsPayloadSchema -PayloadBytes $bytes | Out-Null
+                $observationParameters = @{
+                    Connection = $Connection
+                    Transaction = $Transaction
+                    MasterKey = $WriterContext.MasterKey
+                    CurrentSnapshot = $WriterContext.VisualizerSnapshot
+                    EventId = [byte[]]$d.EventId
+                    MissionId = [byte[]]$d.MissionId
+                    TargetNameKey = $identity.TargetNameKey
+                    EndpointId = $identity.EndpointId
+                    ObservedAtUtc = $d.Observed
+                    PayloadBytes = $bytes
+                }
+                $receipt = Add-HHVisualizerHostObservation @observationParameters
+                $receipt | Add-Member -NotePropertyName Payload -NotePropertyValue $payload
+                $receipt
+            }
+        }
+        finally { Close-HHAuthenticatedPersistence -Context $write }
+        $delivery = Send-HHVisualizerObservation -MissionId $missionId `
+            -EventId ([Guid]::new($eventBytes)) `
+            -PayloadBytes ([byte[]]$stored.PayloadBytes) -Sender $ProducerSender
+        $deliveryWrite = Open-HHAuthenticatedPersistence `
+            -PersistenceContext $runtime -OperationLock -AllowAnchorAdvance
+        try {
+            $deliveryData = [pscustomobject]@{
+                Id = $eventBytes
+                Delivery = $delivery
+                At = [DateTimeOffset]::UtcNow
+            }
+            Invoke-HHAnchoredPersistenceTransaction -Context $deliveryWrite `
+                -ArgumentList @($deliveryData) -Action {
+                param($Connection,$Transaction,$WriterContext,$ArgumentList)
+                $d = $ArgumentList[0]
+                Set-HHVisualizerDeliveryResult -Connection $Connection `
+                    -Transaction $Transaction -MasterKey $WriterContext.MasterKey `
+                    -CurrentSnapshot $WriterContext.VisualizerSnapshot `
+                    -Kind Observation -Id $d.Id `
+                    -Delivered ([bool]$d.Delivery.Delivered) `
+                    -StatusCode $d.Delivery.StatusCode -AttemptedAtUtc $d.At
+            } | Out-Null
+        }
+        finally { Close-HHAuthenticatedPersistence -Context $deliveryWrite }
+        $stored.Payload | Add-Member -NotePropertyName VisualizerDelivered -NotePropertyValue ([bool]$delivery.Delivered)
+        $output.Add($stored.Payload)
+    }
+    @($output)
 }
 
 function Invoke-HHManagedHostEnableSshKeyAuthenticationOperation {

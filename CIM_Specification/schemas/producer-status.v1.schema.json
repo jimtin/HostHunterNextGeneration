@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hosthunter.dev/schemas/producer-status.v1.schema.json",
+  "title": "HostHunter Visualizer producer status v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "service",
+    "api_version",
+    "collection_run_schema_version",
+    "host_observation_schema_version",
+    "process_event_schema_version",
+    "active_collection_run_id"
+  ],
+  "properties": {
+    "status": { "const": "ready" },
+    "service": { "const": "hosthunter-visualizer" },
+    "api_version": { "const": "1.0.0" },
+    "collection_run_schema_version": { "const": "1.0.0" },
+    "host_observation_schema_version": { "const": "1.0.0" },
+    "process_event_schema_version": {
+      "oneOf": [
+        { "const": "1.0.0" },
+        { "type": "null" }
+      ]
+    },
+    "active_collection_run_id": {
+      "oneOf": [
+        { "$ref": "#/$defs/uuid" },
+        { "type": "null" }
+      ]
+    }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    }
+  }
+}

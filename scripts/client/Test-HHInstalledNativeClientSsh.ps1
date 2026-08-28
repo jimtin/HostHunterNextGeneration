@@ -15,12 +15,21 @@ $temporaryHome = Join-Path ([IO.Path]::GetTempPath()) (
 $configurationRoot = Join-Path $temporaryHome '.config'
 $profilePath = Join-Path $configurationRoot 'powershell/profile.ps1'
 $previousConfigurationRoot = $env:XDG_CONFIG_HOME
+$previousRuntimeProject = $env:HH_RUNTIME_PROJECT
+$runtimeProject = 'hosthunter-native-runtime-' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
+$fixtureProject = 'hosthunter-native-fixture-' + [Guid]::NewGuid().ToString('N').Substring(0, 8)
+$composeFile = Join-Path $repo 'compose.test.yml'
+$runtimeScript = Join-Path $repo 'scripts/runtime/hosthunter.sh'
+$testHelpers = Join-Path $repo 'scripts/client/NativeClientTestHelpers.ps1'
+. $testHelpers
 $dockerConfigurationRoot = if (-not [string]::IsNullOrWhiteSpace($env:DOCKER_CONFIG)) {
     $env:DOCKER_CONFIG
 }
 else { Join-Path $HOME '.docker' }
 
 try {
+    & docker compose --project-name $fixtureProject -f $composeFile up --detach --wait ssh-target
+    if ($LASTEXITCODE -ne 0) { throw 'The disposable native-client SSH fixture failed to start.' }
     [IO.Directory]::CreateDirectory($temporaryHome) | Out-Null
     $env:XDG_CONFIG_HOME = $configurationRoot
     $null = & $installer -RepoRoot $repo -UserHome $temporaryHome `
@@ -31,8 +40,17 @@ try {
 
     $escapedJourney = $journey.Replace("'", "''")
     $escapedRepo = $repo.Replace("'", "''")
+    $escapedHelpers = $testHelpers.Replace("'", "''")
     $workerCommand = @"
-`$result = & '$escapedJourney' -RepoRoot '$escapedRepo' -RequireProfileLoadedClient
+. '$escapedHelpers'
+`$journeyParameters = @{
+    RepoRoot = '$escapedRepo'
+    RequireProfileLoadedClient = `$true
+    RuntimeProject = '$runtimeProject'
+    FixtureProject = '$fixtureProject'
+}
+`$items = @(& '$escapedJourney' @journeyParameters)
+`$result = Select-HHNativeClientTerminalResult -InputObject `$items
 'HH_NATIVE_CLIENT_RESULT=' + (`$result | ConvertTo-Json -Compress -Depth 8)
 "@
     $encodedCommand = [Convert]::ToBase64String(
@@ -49,6 +67,7 @@ try {
     $startInfo.Environment['HOME'] = $temporaryHome
     $startInfo.Environment['XDG_CONFIG_HOME'] = $configurationRoot
     $startInfo.Environment['HH_CLIENT_REPO_ROOT'] = $repo
+    $startInfo.Environment['HH_RUNTIME_PROJECT'] = $runtimeProject
     $startInfo.Environment['DOCKER_CONFIG'] = $dockerConfigurationRoot
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $startInfo
@@ -65,7 +84,9 @@ try {
         $stdout = $stdoutTask.GetAwaiter().GetResult()
         $stderr = $stderrTask.GetAwaiter().GetResult()
         if ($process.ExitCode -ne 0) {
-            throw "The installed-client macOS journey failed. $stderr $stdout".Trim()
+            $failure = Format-HHNativeClientFailure -StandardError $stderr `
+                -StandardOutput $stdout
+            throw "The installed-client macOS journey failed. $failure".Trim()
         }
     }
     finally { $process.Dispose() }
@@ -80,13 +101,20 @@ try {
         ConvertFrom-Json -Depth 8
     if ($result.Status -cne 'passed' -or
         $result.ClientLoad -cne 'fresh-process-installed-profile' -or
-        [int]$result.InvokedUniqueCommandCount -ne 11) {
+        [int]$result.InvokedUniqueCommandCount -ne 12) {
         throw 'The installed-client macOS journey returned an invalid terminal result.'
     }
     $result
 }
 finally {
     $env:XDG_CONFIG_HOME = $previousConfigurationRoot
+    $previousErrorAction = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    $env:HH_RUNTIME_PROJECT = $runtimeProject
+    & /usr/bin/env bash $runtimeScript destroy --confirm-project $runtimeProject --destroy-volumes | Out-Null
+    & docker compose --project-name $fixtureProject -f $composeFile down --volumes --remove-orphans | Out-Null
+    $env:HH_RUNTIME_PROJECT = $previousRuntimeProject
+    $ErrorActionPreference = $previousErrorAction
     if ([IO.Directory]::Exists($temporaryHome)) {
         [IO.Directory]::Delete($temporaryHome, $true)
     }

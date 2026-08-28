@@ -1,0 +1,20 @@
+services:
+  controller:
+    environment:
+      HH_VISUALIZER_BASE_URI: http://hosthunter-visualizer:3000
+      HH_VISUALIZER_TOKEN_FILE: /run/secrets/hosthunter_visualizer_producer_token
+    labels:
+      com.hosthunter.visualizer-enabled: "true"
+    networks:
+      - visualizer-producer
+    secrets:
+      - hosthunter_visualizer_producer_token
+
+networks:
+  visualizer-producer:
+    external: true
+    name: ${HH_VISUALIZER_PRODUCER_NETWORK:-hh-visualizer-producer}
+
+secrets:
+  hosthunter_visualizer_producer_token:
+    file: ${HH_VISUALIZER_TOKEN_SOURCE:?HH_VISUALIZER_TOKEN_SOURCE is required}

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hosthunter.dev/schemas/collection-run.v1.schema.json",
+  "title": "HostHunter collection run activation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "collection_run_id", "started_at", "producer"],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "collection_run_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "started_at": { "type": "string", "format": "date-time" },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version"],
+      "properties": {
+        "name": { "const": "HostHunter" },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._+-]*$"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,253 @@
+{
+  "@timestamp": "2026-08-28T01:02:03.000Z",
+  "ecs": {
+    "version": "9.5.0"
+  },
+  "event": {
+    "id": "11111111-1111-4111-8111-111111111111",
+    "kind": "asset",
+    "category": ["host"],
+    "type": ["info"],
+    "action": "host-details-collected",
+    "dataset": "hosthunter.host_details",
+    "module": "hosthunter",
+    "provider": "HostHunter",
+    "created": "2026-08-28T01:02:03.125Z",
+    "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "agent": {
+    "id": "22222222-2222-4222-8222-222222222222",
+    "name": "hosthunter-controller",
+    "type": "hosthunter",
+    "version": "0.3.0"
+  },
+  "host": {
+    "id": "hh_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "hostname": "BESTLAPTOPEVER",
+    "name": "bestlaptopever.lab.example",
+    "domain": "LAB",
+    "architecture": "arm64",
+    "ip": ["192.0.2.10"],
+    "os": {
+      "type": "windows",
+      "family": "windows",
+      "name": "Windows 11 Pro",
+      "full": "Microsoft Windows 11 Pro 10.0.26100",
+      "version": "10.0.26100",
+      "platform": "windows"
+    }
+  },
+  "related": {
+    "ip": ["192.0.2.10"]
+  },
+  "hosthunter": {
+    "schema": {
+      "name": "host-details",
+      "version": "1.0.0"
+    },
+    "target": {
+      "name": "BESTLAPTOPEVER",
+      "connection_address": "192.0.2.10",
+      "port": 22
+    },
+    "identity": {
+      "strategy": "platform_instance_hmac_sha256",
+      "match_status": "new"
+    },
+    "membership": {
+      "type": "domain",
+      "name": "LAB",
+      "directory_role": "member_workstation"
+    },
+    "os": {
+      "build": "26100",
+      "edition": "Professional"
+    },
+    "hardware": {
+      "manufacturer": "Example Systems",
+      "model": "Example ARM64 Laptop",
+      "logical_processor_count": 8,
+      "total_memory_bytes": 17179869184
+    },
+    "network": {
+      "interfaces": [
+        {
+          "name": "Ethernet",
+          "addresses": ["192.0.2.10"]
+        }
+      ]
+    },
+    "boot": {
+      "time": "2026-08-27T22:00:00.000Z"
+    },
+    "time_zone": {
+      "id": "AUS Eastern Standard Time",
+      "utc_offset_seconds": 36000
+    },
+    "collection_run": {
+      "id": "33333333-3333-4333-8333-333333333333"
+    },
+    "collection": {
+      "status": "complete",
+      "last_successful_connection_at": "2026-08-28T01:02:03.000Z",
+      "field_results": [
+        {
+          "field": "host.hostname",
+          "status": "observed",
+          "source_method": "win32_computer_system",
+          "observed_at": "2026-08-28T01:02:03.000Z"
+        },
+        {
+          "field": "host.name",
+          "status": "observed",
+          "source_method": "win32_computer_system",
+          "observed_at": "2026-08-28T01:02:03.000Z"
+        },
+        {
+          "field": "host.domain",
+          "status": "observed",
+          "source_method": "win32_computer_system",
+          "observed_at": "2026-08-28T01:02:03.000Z"
+        },
+        {
+          "field": "host.architecture",
+          "status": "observed",
+          "source_method": "win32_operating_system",
+          "observed_at": "2026-08-28T01:02:03.000Z"
+        },
+        {
+          "field": "host.ip",
+          "status": "observed",
+          "source_method": "dotnet_network_information",
+          "observed_at": "2026-08-28T01:02:03.000Z"
+        },
+        {
+          "field": "host.os.type",
+          "status": "observed",
+          "source_method": "dotnet_runtime_information",
+          "observed_at": "2026-08-28T01:02:03.000Z"
+        },
+        {
+          "field": "host.os.family",
+          "status": "observed",
+          "source_method": "win32_operating_system",
+          "observed_at": "2026-08-28T01:02:03.000Z"
+        },
+        {
+          "field": "host.os.name",
+          "status": "observed",
+          "source_method": "win32_operating_system",
+          "observed_at": "2026-08-28T01:02:03.000Z"
+        },
+        {
+          "field": "host.os.full",
+          "status": "observed",
+          "source_method": "win32_operating_system",
+          "observed_at": "2026-08-28T01:02:03.000Z"
+        },
+        {
+          "field": "host.os.version",
+          "status": "observed",
+          "source_method": "win32_operating_system",
+          "observed_at": "2026-08-28T01:02:03.000Z"
+        },
+        {
+          "field": "hosthunter.membership.type",
+          "status": "observed",
+          "source_method": "win32_computer_system",
+          "observed_at": "2026-08-28T01:02:03.000Z"
+        },
+        {
+          "field": "hosthunter.membership.name",
+          "status": "observed",
+          "source_method": "win32_computer_system",
+          "observed_at": "2026-08-28T01:02:03.000Z"
+        },
+        {
+          "field": "hosthunter.membership.directory_role",
+          "status": "observed",
+          "source_method": "win32_computer_system",
+          "observed_at": "2026-08-28T01:02:03.000Z"
+        },
+        {
+          "field": "hosthunter.os.build",
+          "status": "observed",
+          "source_method": "win32_operating_system",
+          "observed_at": "2026-08-28T01:02:03.000Z"
+        },
+        {
+          "field": "hosthunter.os.edition",
+          "status": "observed",
+          "source_method": "win32_operating_system",
+          "observed_at": "2026-08-28T01:02:03.000Z"
+        },
+        {
+          "field": "hosthunter.hardware.manufacturer",
+          "status": "observed",
+          "source_method": "win32_computer_system",
+          "observed_at": "2026-08-28T01:02:03.000Z"
+        },
+        {
+          "field": "hosthunter.hardware.model",
+          "status": "observed",
+          "source_method": "win32_computer_system",
+          "observed_at": "2026-08-28T01:02:03.000Z"
+        },
+        {
+          "field": "hosthunter.hardware.logical_processor_count",
+          "status": "observed",
+          "source_method": "win32_computer_system",
+          "observed_at": "2026-08-28T01:02:03.000Z"
+        },
+        {
+          "field": "hosthunter.hardware.total_memory_bytes",
+          "status": "observed",
+          "source_method": "win32_computer_system",
+          "observed_at": "2026-08-28T01:02:03.000Z"
+        },
+        {
+          "field": "hosthunter.network.interfaces",
+          "status": "observed",
+          "source_method": "dotnet_network_information",
+          "observed_at": "2026-08-28T01:02:03.000Z"
+        },
+        {
+          "field": "hosthunter.boot.time",
+          "status": "observed",
+          "source_method": "win32_operating_system",
+          "observed_at": "2026-08-28T01:02:03.000Z"
+        },
+        {
+          "field": "hosthunter.time_zone.id",
+          "status": "observed",
+          "source_method": "dotnet_time_zone",
+          "observed_at": "2026-08-28T01:02:03.000Z"
+        },
+        {
+          "field": "hosthunter.time_zone.utc_offset_seconds",
+          "status": "observed",
+          "source_method": "dotnet_time_zone",
+          "observed_at": "2026-08-28T01:02:03.000Z"
+        }
+      ]
+    },
+    "provenance": {
+      "engine_operation": "ValidateTarget",
+      "transport": "powershell7_over_ssh",
+      "controller_platform": "linux_container",
+      "source_methods": [
+        "dotnet_network_information",
+        "dotnet_runtime_information",
+        "dotnet_time_zone",
+        "hosthunter_identity",
+        "hosthunter_target",
+        "win32_computer_system",
+        "win32_operating_system"
+      ]
+    },
+    "audit": {
+      "batch_id": "44444444444444444444444444444444",
+      "invocation_id": "55555555555555555555555555555555"
+    }
+  }
+}

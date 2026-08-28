@@ -1,0 +1,239 @@
+{
+  "@timestamp": "2026-08-28T02:03:04.000Z",
+  "ecs": {
+    "version": "9.5.0"
+  },
+  "event": {
+    "id": "66666666-6666-4666-8666-666666666666",
+    "kind": "asset",
+    "category": ["host"],
+    "type": ["info"],
+    "action": "host-details-collected",
+    "dataset": "hosthunter.host_details",
+    "module": "hosthunter",
+    "provider": "HostHunter",
+    "created": "2026-08-28T02:03:04.100Z",
+    "hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "agent": {
+    "id": "22222222-2222-4222-8222-222222222222",
+    "name": "hosthunter-controller",
+    "type": "hosthunter",
+    "version": "0.3.0"
+  },
+  "host": {
+    "id": "hh_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "hostname": "linux-fixture",
+    "architecture": "arm64",
+    "ip": ["198.51.100.20"],
+    "os": {
+      "type": "linux",
+      "family": "debian",
+      "name": "Ubuntu",
+      "full": "Ubuntu 24.04 LTS",
+      "version": "24.04",
+      "platform": "ubuntu",
+      "kernel": "6.8.0-example"
+    }
+  },
+  "related": {
+    "ip": ["198.51.100.20"]
+  },
+  "hosthunter": {
+    "schema": {
+      "name": "host-details",
+      "version": "1.0.0"
+    },
+    "target": {
+      "name": "linux-fixture",
+      "connection_address": "198.51.100.20",
+      "port": 22
+    },
+    "identity": {
+      "strategy": "platform_instance_hmac_sha256",
+      "match_status": "exact"
+    },
+    "membership": {
+      "type": "none"
+    },
+    "os": {
+      "edition": "LTS"
+    },
+    "hardware": {
+      "logical_processor_count": 4,
+      "total_memory_bytes": 8589934592
+    },
+    "network": {
+      "interfaces": [
+        {
+          "name": "eth0",
+          "addresses": ["198.51.100.20"]
+        }
+      ]
+    },
+    "boot": {
+      "time": "2026-08-28T00:00:00.000Z"
+    },
+    "time_zone": {
+      "id": "Australia/Sydney",
+      "utc_offset_seconds": 36000
+    },
+    "collection_run": {
+      "id": "33333333-3333-4333-8333-333333333333"
+    },
+    "collection": {
+      "status": "partial",
+      "last_successful_connection_at": "2026-08-28T02:03:04.000Z",
+      "field_results": [
+        {
+          "field": "host.hostname",
+          "status": "observed",
+          "source_method": "dotnet_environment",
+          "observed_at": "2026-08-28T02:03:04.000Z"
+        },
+        {
+          "field": "host.name",
+          "status": "not_reported",
+          "source_method": "dotnet_network_information",
+          "detail": "No explicit FQDN was reported."
+        },
+        { "field": "host.domain", "status": "not_applicable", "source_method": "linux_os_release" },
+        {
+          "field": "host.architecture",
+          "status": "observed",
+          "source_method": "dotnet_runtime_information",
+          "observed_at": "2026-08-28T02:03:04.000Z"
+        },
+        {
+          "field": "host.ip",
+          "status": "observed",
+          "source_method": "dotnet_network_information",
+          "observed_at": "2026-08-28T02:03:04.000Z"
+        },
+        {
+          "field": "host.os.type",
+          "status": "observed",
+          "source_method": "dotnet_runtime_information",
+          "observed_at": "2026-08-28T02:03:04.000Z"
+        },
+        {
+          "field": "host.os.family",
+          "status": "observed",
+          "source_method": "linux_os_release",
+          "observed_at": "2026-08-28T02:03:04.000Z"
+        },
+        {
+          "field": "host.os.name",
+          "status": "observed",
+          "source_method": "linux_os_release",
+          "observed_at": "2026-08-28T02:03:04.000Z"
+        },
+        {
+          "field": "host.os.full",
+          "status": "observed",
+          "source_method": "linux_os_release",
+          "observed_at": "2026-08-28T02:03:04.000Z"
+        },
+        {
+          "field": "host.os.version",
+          "status": "observed",
+          "source_method": "linux_os_release",
+          "observed_at": "2026-08-28T02:03:04.000Z"
+        },
+        {
+          "field": "hosthunter.membership.type",
+          "status": "observed",
+          "source_method": "linux_os_release",
+          "observed_at": "2026-08-28T02:03:04.000Z"
+        },
+        {
+          "field": "hosthunter.membership.name",
+          "status": "not_applicable",
+          "source_method": "linux_os_release"
+        },
+        {
+          "field": "hosthunter.membership.directory_role",
+          "status": "not_applicable",
+          "source_method": "linux_os_release"
+        },
+        {
+          "field": "hosthunter.os.build",
+          "status": "not_reported",
+          "source_method": "linux_os_release"
+        },
+        {
+          "field": "hosthunter.os.edition",
+          "status": "observed",
+          "source_method": "linux_os_release",
+          "observed_at": "2026-08-28T02:03:04.000Z"
+        },
+        {
+          "field": "hosthunter.hardware.manufacturer",
+          "status": "not_reported",
+          "source_method": "linux_sysfs"
+        },
+        {
+          "field": "hosthunter.hardware.model",
+          "status": "not_reported",
+          "source_method": "linux_sysfs"
+        },
+        {
+          "field": "hosthunter.hardware.logical_processor_count",
+          "status": "observed",
+          "source_method": "dotnet_environment",
+          "observed_at": "2026-08-28T02:03:04.000Z"
+        },
+        {
+          "field": "hosthunter.hardware.total_memory_bytes",
+          "status": "observed",
+          "source_method": "linux_procfs",
+          "observed_at": "2026-08-28T02:03:04.000Z"
+        },
+        {
+          "field": "hosthunter.network.interfaces",
+          "status": "observed",
+          "source_method": "dotnet_network_information",
+          "observed_at": "2026-08-28T02:03:04.000Z"
+        },
+        {
+          "field": "hosthunter.boot.time",
+          "status": "observed",
+          "source_method": "linux_procfs",
+          "observed_at": "2026-08-28T02:03:04.000Z"
+        },
+        {
+          "field": "hosthunter.time_zone.id",
+          "status": "observed",
+          "source_method": "dotnet_time_zone",
+          "observed_at": "2026-08-28T02:03:04.000Z"
+        },
+        {
+          "field": "hosthunter.time_zone.utc_offset_seconds",
+          "status": "observed",
+          "source_method": "dotnet_time_zone",
+          "observed_at": "2026-08-28T02:03:04.000Z"
+        }
+      ]
+    },
+    "provenance": {
+      "engine_operation": "GetHostDetails",
+      "transport": "powershell7_over_ssh",
+      "controller_platform": "linux_container",
+      "source_methods": [
+        "dotnet_environment",
+        "dotnet_network_information",
+        "dotnet_runtime_information",
+        "dotnet_time_zone",
+        "hosthunter_identity",
+        "hosthunter_target",
+        "linux_os_release",
+        "linux_procfs",
+        "linux_sysfs"
+      ]
+    },
+    "audit": {
+      "batch_id": "77777777777777777777777777777777",
+      "invocation_id": "88888888888888888888888888888888"
+    }
+  }
+}

@@ -88,8 +88,8 @@ jq -e --arg sha "$candidate_sha" --arg image "$image_id" '
   .targetPlatform=="Windows" and .targetRuntime=="PowerShell7" and
   .noAutomaticRetries==true and .policyRestored==true and
   .remoteQualificationKeyRemoved==true and .windowsAuditEventVerified==true and
-  (.rows|length)==11 and
-  ([.rows[].cmdlet]|unique|length)==11 and ([.rows[].status]|unique)==["passed"]
+  (.rows|length)==12 and
+  ([.rows[].cmdlet]|unique|length)==12 and ([.rows[].status]|unique)==["passed"]
 ' "$receipt.tmp" >/dev/null
 chmod 0400 "$receipt.tmp"
 mv -- "$receipt.tmp" "$receipt"

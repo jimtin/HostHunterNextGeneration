@@ -51,6 +51,10 @@ if ($durabilityAssembly.Name -cne 'HostHunter.Persistence.Durability' -or
 }
 
 $managedAssets = @(
+    'Humanizer.dll'
+    'Json.More.dll'
+    'JsonPointer.Net.dll'
+    'JsonSchema.Net.dll'
     'Microsoft.Data.Sqlite.dll'
     'SQLitePCLRaw.batteries_v2.dll'
     'SQLitePCLRaw.core.dll'
@@ -112,6 +116,7 @@ $expected = @(
     'Get-HHAuditRecord'
     'Get-HHEscalationPreference'
     'Get-HHTarget'
+    'Get-TargetHostDetails'
     'Invoke-HHCommand'
     'Remove-HHTarget'
     'Set-HHEscalationPreference'
@@ -134,7 +139,10 @@ foreach ($commandName in $expected) {
 
 $loadedSqliteAssemblies = @(
     [AppDomain]::CurrentDomain.GetAssemblies() |
-        Where-Object { $_.GetName().Name -in @('Microsoft.Data.Sqlite', 'SQLitePCLRaw.core') }
+        Where-Object { $_.GetName().Name -in @(
+                'Microsoft.Data.Sqlite', 'SQLitePCLRaw.core',
+                'SQLitePCLRaw.provider.e_sqlite3', 'SQLitePCLRaw.batteries_v2'
+            ) }
 )
 if ($loadedSqliteAssemblies.Count -ne 0) {
     throw 'Module import or help eagerly loaded the SQLite provider.'
@@ -147,6 +155,10 @@ $lockedDependencies = @(
     $lock.dependencies.'net8.0'.PSObject.Properties.Name | Sort-Object
 )
 $expectedDependencies = @(
+    'Humanizer.Core'
+    'Json.More.Net'
+    'JsonPointer.Net'
+    'JsonSchema.Net'
     'Microsoft.Data.Sqlite.Core'
     'SQLite'
     'SQLitePCLRaw.bundle_e_sqlite3'
@@ -155,7 +167,7 @@ $expectedDependencies = @(
     'SQLitePCLRaw.provider.e_sqlite3'
 ) | Sort-Object
 if (($lockedDependencies -join "`n") -cne ($expectedDependencies -join "`n")) {
-    throw 'Locked SQLite package graph drifted from the approved six-package graph.'
+    throw 'Locked persistence and schema-validation package graph drifted from the approved graph.'
 }
 
 $assetHashes = [ordered]@{}

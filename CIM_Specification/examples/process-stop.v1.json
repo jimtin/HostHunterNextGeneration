@@ -1,0 +1,62 @@
+{
+  "@timestamp": "2026-08-28T10:04:30Z",
+  "ecs": {
+    "version": "9.5.0"
+  },
+  "event": {
+    "id": "55555555-5555-4555-8555-555555555555",
+    "kind": "event",
+    "category": [
+      "process"
+    ],
+    "type": [
+      "end"
+    ],
+    "action": "process-stopped",
+    "dataset": "hosthunter.process_lifecycle",
+    "module": "hosthunter",
+    "provider": "HostHunter",
+    "created": "2026-08-28T10:04:32Z",
+    "hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "agent": {
+    "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "name": "hosthunter-controller",
+    "type": "hosthunter",
+    "version": "0.5.0"
+  },
+  "host": {
+    "id": "hh_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "hostname": "WIN-CLIENT-01",
+    "name": "win-client-01.lab.example"
+  },
+  "process": {
+    "pid": 4120,
+    "entity_id": "{11111111-2222-4333-8444-555555555555}",
+    "exit_code": 0
+  },
+  "hosthunter": {
+    "collection_run": {
+      "id": "22222222-2222-4222-8222-222222222222"
+    },
+    "source": {
+      "provider": "Microsoft-Windows-Sysmon",
+      "channel": "Microsoft-Windows-Sysmon/Operational",
+      "event_code": "5",
+      "record_id": "12346",
+      "computer": "WIN-CLIENT-01"
+    },
+    "process": {
+      "boot_id": "boot-20260828-01",
+      "source_instance_id": "{11111111-2222-4333-8444-555555555555}"
+    },
+    "provenance": {
+      "transport": "event-log-export",
+      "collected_at": "2026-08-28T10:04:32Z"
+    },
+    "audit": {
+      "batch_id": "33333333-3333-4333-8333-333333333333",
+      "invocation_id": "44444444-4444-4444-8444-444444444444"
+    }
+  }
+}

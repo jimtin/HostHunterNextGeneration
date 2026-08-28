@@ -12,22 +12,26 @@
 - High: automatic first-use SSH trust can pin an impersonating host when
   onboarding occurs across a hostile network without an independently supplied fingerprint.
 - High: rollback of SQLite, anchors, secrets, or evidence could falsify history.
+- High: a forged or replayed visualizer observation could merge the wrong host
+  or reset a mission unless identities, body hashes, and idempotency keys stay bound.
 - High: candidate-owned coverage code could omit source or forge a passing
   percentage unless the standalone gate independently validates the receipt.
 - High: the first exact-SHA Windows qualification stopped before key bootstrap
   because key generation unexpectedly requested a passphrase; the candidate is
   terminally failed and cannot be retried.
-- Overall posture is fail-closed; focused integrity/recovery evidence and live
-  Windows proof are green, with immutable exact-SHA release proof still pending.
+- Overall posture is fail-closed; focused integrity/recovery evidence is green.
+  The prior eleven-command live-Windows proof remains historical evidence; the
+  new details operation and final twelve-command exact-SHA proof are pending.
 
 ## 2. Scope and Method
 
-In scope: production module/container, cmdlet verifier, SSH fixture, and exact-SHA
-release receipts. Out of scope: provider publication and downstream networking
+In scope: production module/container, host-details collection, visualizer
+producer, cmdlet verifier, SSH fixture, and exact-SHA release receipts. Out of
+scope: endpoint event logs, provider publication, and downstream networking
 initiated by arbitrary user PowerShell. HostHunter runs as one Linux PowerShell
-7 container; five public cmdlets contact OpenSSH hosts and six use authenticated
+7 container; six public cmdlets contact OpenSSH hosts and six use authenticated
 local state. Each entrypoint was traced through engine, transport, persistence,
-container, and release boundaries.
+container, visualizer contract, and release boundaries.
 
 Confidence: confirmed means file evidence; inferred means a reasonable
 consequence; unknown means not determined.
@@ -39,18 +43,19 @@ consequence; unknown means not determined.
 | Component | Role | Entrypoints | Evidence | Confidence |
 | --- | --- | --- | --- | --- |
 | Controller | Imports module and invokes allowed cmdlets | controller entrypoint | Dockerfile.runtime; runtime scripts | confirmed |
-| Public module | Eleven operator actions | Public scripts | module manifest | confirmed |
-| Managed-host engine | Closed five-operation coordinator | Invoke-HHManagedHostOperation | ManagedHostOperation.ps1 | confirmed |
+| Public module | Twelve framework cmdlets | Public scripts | module manifest | confirmed |
+| Managed-host engine | Closed six-operation coordinator | Invoke-HHManagedHostOperation | ManagedHostOperation.ps1 | confirmed |
 | SSH adapter | Trust, PS7 identity, streams, cleanup | engine-only calls | SshTransport.ps1; SshTrust.ps1 | confirmed |
 | Persistence | Authenticated SQLite, encrypted credential/output envelopes, anchors, recovery | local cmdlets and engine | audit, anchor, migrations | confirmed |
-| macOS client | Native generated proxies and framed Docker bridge | profile import; eleven proxy functions | HostHunter.Client | confirmed |
+| macOS client | Twelve generated framework proxies, one alias, and two local lifecycle commands | profile import | HostHunter.Client | confirmed |
+| Visualizer producer | One bounded status/read and write HTTP adapter | producer status GET; mission and observation PUT routes | VisualizerProducer.ps1; CIM_Specification | confirmed |
 | interaction broker | Command-scoped risk confirmation, credential acquisition, and SSH askpass handoff | redirected stdin and controller loopback | client protocol; confirmation/credential/askpass helpers | confirmed |
 
 ### Build and test
 
 | Component | Role | Entrypoints | Evidence | Confidence |
 | --- | --- | --- | --- | --- |
-| Cmdlet verifier | One eleven-row behavior/DB verdict | verify-cmdlets.sh | compose.cmdlets.yml; E2E journey | confirmed |
+| Cmdlet verifier | One twelve-row behavior/DB verdict | verify-cmdlets.sh | compose.cmdlets.yml; E2E journey | confirmed |
 | Release state | One immutable claim/verdict per SHA | verify-candidate.sh | release-receipt-state.py | confirmed |
 | Candidate build | Builds four exact-SHA images once and binds immutable IDs | build-candidate.sh | build receipt | confirmed |
 | Coverage proof | One process, two unit-only passes, four independent metrics | unit.sh | coverage runner and summary | confirmed |
@@ -70,6 +75,9 @@ consequence; unknown means not determined.
 | B8 | candidate source → coverage container → release verdict | read-only source; exact inventory/hash; four thresholds; external receipt validator | candidate owns the collector under test | coverage scripts; standalone gate; AP-9, AP-10, AP-11 |
 | B6 | Docker lifecycle/health → controller | local orchestration | dismissed: no host data and parser/API removed | compose.runtime.yml |
 | B7 | remote command → downstream systems | request/outcome audited | prevention dismissed: user code controls activity | Invoke-HHCommand; AP-5 |
+| B9 | controller → private visualizer producer API | file-only token; private Docker network; bounded status GET; exact write-body SHA-256; UUID idempotency keys; bounded body/time | bearer token compromise permits forged producer reads/writes until rotation | VisualizerProducer.ps1; compose.runtime.yml; AP-16 |
+| B11 | macOS lifecycle client → local Docker/Visualizer repositories | configured absolute paths; fixed allowlisted scripts/actions; loopback browser URL; bounded/redacted diagnostics | trusted local repository or Docker administrator can still replace executed lifecycle code | HostHunter.Client/Private/VisualizationLifecycle.ps1; installer; AP-19 |
+| B10 | managed host identity → controller observation | remote native identity is SHA-256 digested, then controller HMACs it into an opaque endpoint ID | compromised endpoint can lie about its inventory | HostDetails.ps1; VisualizerRepository.ps1; AP-17 |
 
 ## 5. Assets
 
@@ -85,6 +93,9 @@ consequence; unknown means not determined.
 | Coverage denominator and receipt | exact tree and heavy receipt | prevents omitted code or stale proof from authorizing release |
 | Interactive password | SecureString and command-scoped broker memory | grants initial managed-host access |
 | Stored password envelope | SQLite ciphertext; key material in separate secret root | enables invisible privileged host authentication |
+| Host observations | encrypted SQLite payload and authenticated visualizer state | drives endpoint identity and visualization |
+| Mission identity/state | authenticated SQLite and visualizer API | controls visualization reset and observation grouping |
+| Visualizer producer token | owner-private runtime secret file | authorizes write-only mission/observation ingestion |
 
 ## 6. Attacker Profile
 
@@ -122,6 +133,10 @@ Non-capabilities:
 | AP-13 | disclose or replay a password | malicious frame/process → B0 → credential | access / exfiltration | medium | high | high | local secure prompt; one request; stdin; random broker token; loopback only; no args/env/files/logs; buffer clearing | client protocol qualification |
 | AP-14 | pin an impersonating host on first contact | network interception → B3 → host trust/password | access / exfiltration | medium | high | high | deterministic supported-key selection; fingerprint announcement; pin before credential; optional supplied fingerprint; changed-key hard failure | SshTrust.ps1; trust and native-client tests |
 | AP-15 | recover or silently use a saved remote password | controller compromise or combined data/secret access → B0/B4 → stored credential/managed host | access / exfiltration | medium | high | high | trusted-operator model; separate roots; AEAD endpoint/revision binding; no reveal/export surface; explicit storage warning; purge on key conversion/removal | credential repository, engine, and persistence tests |
+| AP-16 | forge or replay visualization state | token theft or payload replay → B9 → mission/observation state | integrity | low | high | medium | private network; file secret; UUID resource IDs; exact body digest; PUT idempotency; one attempt | producer, Compose, visualizer contract |
+| AP-17 | merge or expose endpoint identity | hostile endpoint data → B10 → endpoint graph | privacy / integrity | medium | high | high | raw identity hashed remotely; controller HMAC; raw value is not output, logged, persisted, or sent; target data remains attributed and partial | collector/repository/security tests |
+| AP-18 | turn inventory into continuous surveillance | feature expansion → collector/API → endpoint telemetry | privacy / availability | low | high | medium | fixed on-demand/first-connect operation only; no event-log fields, polling, subscription, or retry worker | public surface, docs, deleted-surface sweep |
+| AP-19 | execute or disclose through visualizer startup | replaced local repo/script or hostile diagnostic → B11 → operator shell/output | execution / disclosure | low | high | medium | trusted local-operator model; configured absolute repo; fixed `up.sh`/`down.sh`; fixed controller actions; loopback-only URL; diagnostic redaction and size bounds; no automatic retry | client lifecycle and native-client contract tests |
 
 AP-1 through AP-6 are medium likelihood because realistic untrusted inputs must
 also defeat an evidenced control. AP-7 is low because exclusive writes directly
@@ -151,6 +166,10 @@ stake.
 | AP-13 | Keep one-prompt protocol, frame bounds, token-bound loopback, memory clearing, and fixture leakage assertions | native client/credential broker | preventative/detective |
 | AP-14 | Keep changed-key rejection fail-closed and document supplying an independently verified fingerprint for onboarding across untrusted networks | managed-host engine/native client/docs | preventative/governance |
 | AP-15 | Keep endpoint/revision-bound ciphertext, separate keys, no reveal/export path, explicit warning, atomic purge, and plaintext-leakage tests | credential repository/engine/broker/native client | preventative/detective |
+| AP-16 | Keep producer token file-only, network-private, body-hash-bound, idempotent, bounded, and rotated with the visualizer deployment | producer/Compose/visualizer | preventative/detective |
+| AP-17 | Keep remote digest plus controller HMAC, encrypted local payload, per-field provenance, and raw-identifier negative tests | collector/repository/contract | preventative/detective |
+| AP-18 | Retain negative surface assertions for event logs, polling, subscriptions, and retry workers | module/runtime/testing docs | preventative/governance |
+| AP-19 | Keep lifecycle scripts/actions closed, browser URL loopback-only, diagnostics bounded/redacted, startup failures isolated, and animation suppressed in automation | native client/installer | preventative/detective |
 | AP-2, AP-6, AP-8 | Repeat the green live-Windows journey against the packaged exact-SHA image | Windows release qualification | detective |
 
 ## 9. Assumptions and Open Questions
@@ -179,6 +198,14 @@ stake.
   and separately confirmed. Uncertain key outcomes never fall back or retry.
 - user-confirmed: stored passwords are permanently deleted after proven key
   conversion and target removal.
+- user-confirmed: only client-local `Start-HHVisualization` can create or
+  continue a mission after authenticated producer status; controller and shell
+  startup never create or reset one. `Stop-HHVisualization` pauses publishing.
+- user-confirmed: host details are collected after target onboarding and on
+  demand through the same audited engine; missing fields are acceptable.
+- user-confirmed: only initial/on-demand host information is in scope. Windows
+  event logs, process activity, polling, subscriptions, and automatic retries
+  are excluded.
 - unvalidated: minimum Windows and PowerShell versions remain to be fixed.
 - terminal exact-SHA evidence: candidate `652157af4a3ab21702b9895d3efffb3f946b8e5f`
   passed the eleven-cmdlet container journey, then the live-Windows phase stopped

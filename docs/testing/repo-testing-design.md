@@ -4,7 +4,7 @@ Status: confirmed.
 
 ## Product boundary
 
-The package exports exactly eleven PowerShell cmdlets. The canonical controller
+The package exports exactly twelve PowerShell cmdlets. The canonical controller
 is the production Linux container. Managed-host behavior uses PowerShell 7 over
 OpenSSH through the single private managed-host engine. Authenticated SQLite,
 encrypted evidence, anchors, tamper/rollback detection, and recovery are part of
@@ -28,7 +28,7 @@ atomically. Uncertain key outcomes never retry or fall back.
 
 `./scripts/verify-cmdlets.sh` is the only development acceptance command. It
 runs once with no retries or shards, using a production-derived verifier and one
-disposable SSH fixture. One ordered stateful journey calls all eleven cmdlets,
+disposable SSH fixture. One ordered stateful journey calls all twelve framework cmdlets,
 performs real public writes, fresh-process public reads, and read-only SQLite
 integrity/count/generation checks. Its independent receipt is authoritative for
 cmdlet behavior.
@@ -46,7 +46,7 @@ component receipt independently. The release graph is:
 
 1. exact-SHA preflight and claim;
 2. build the exact production images once;
-3. run the eleven-cmdlet verifier once;
+3. run the twelve-cmdlet verifier once;
 4. run positive live-Windows qualification against that exact image;
 5. run the bounded release-only coverage command;
 6. run critical SQLite, recovery, SSH, and persistence integration;
@@ -57,7 +57,7 @@ Every independent phase runs at most once even when another independent phase
 fails. A real dependency failure records `not_run_due_to_<dependency>` instead
 of a false test failure. Every terminal condition writes an immutable receipt,
 and the aggregator reads receipts only. Coverage, integration, or scan failures
-cannot alter or hide the eleven-row cmdlet or Windows verdict.
+cannot alter or hide the twelve-row cmdlet or Windows verdict.
 
 Positive Windows support requires one bounded live-Windows PowerShell 7/OpenSSH
 qualification immediately after the cmdlet verifier and before coverage. It
@@ -75,7 +75,7 @@ fixed, sequential unit-test passes; these are collectors, not retries:
   branch outcomes in memory, flushing once when the run completes.
 
 Every shipped production source file is included. Integration, SSH fixtures,
-live Windows, and the eleven-cmdlet journey never contribute to the coverage
+live Windows, and the twelve-cmdlet journey never contribute to the coverage
 numerator. Statements, branches, functions, and lines must each be at least 90
 percent, with 92 percent as the engineering target. Unsupported decision syntax,
 zero denominators, test failures, malformed results, and missing source files

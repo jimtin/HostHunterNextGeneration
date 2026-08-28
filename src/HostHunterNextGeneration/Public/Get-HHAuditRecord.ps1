@@ -11,6 +11,7 @@ function Get-HHAuditRecord {
             'ValidateTarget',
             'TestTarget',
             'InvokeCommand',
+            'GetHostDetails',
             'EnableSshKeyAuthentication',
             'SetWindowsProcessAuditPolicy'
         )]

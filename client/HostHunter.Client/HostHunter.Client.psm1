@@ -3,11 +3,14 @@ $ErrorActionPreference = 'Stop'
 
 $script:HHClientProtocolVersion = 1
 $script:HHClientGeneratedCommands = @()
+$script:HHClientLocalCommands = @('Start-HHVisualization', 'Stop-HHVisualization')
 $script:HHClientGeneratedAliases = @()
 $script:HHClientMetadata = $null
 $script:HHClientRepoRoot = $null
 $script:HHClientSourceFingerprint = $null
 $script:HHClientControllerId = $null
+$script:HHClientVisualizerRepoRoot = $null
+$script:HHClientVisualizerUrl = 'http://127.0.0.1:4310'
 $script:HHClientMaximumMetadataBytes = 8MB
 $script:HHClientMaximumRequestBytes = 16MB
 $script:HHClientMaximumFrameBytes = 32MB
@@ -65,20 +68,57 @@ function Get-HHClientConfigurationPath {
 }
 
 function Get-HHClientRepositoryRoot {
+    (Get-HHClientConfiguration).RepoRoot
+}
+
+function Get-HHClientConfiguration {
+    $configuration = $null
     if (-not [string]::IsNullOrWhiteSpace($env:HH_CLIENT_REPO_ROOT)) {
-        return (Resolve-Path -LiteralPath $env:HH_CLIENT_REPO_ROOT).Path
+        $repoRoot = (Resolve-Path -LiteralPath $env:HH_CLIENT_REPO_ROOT).Path
     }
-    $configurationPath = Get-HHClientConfigurationPath
-    if (-not [IO.File]::Exists($configurationPath)) {
-        throw "HostHunter.Client is not configured. Re-run Install-HHClient.ps1."
+    else {
+        $configurationPath = Get-HHClientConfigurationPath
+        if (-not [IO.File]::Exists($configurationPath)) {
+            throw "HostHunter.Client is not configured. Re-run Install-HHClient.ps1."
+        }
+        $configuration = Get-Content -LiteralPath $configurationPath -Raw |
+            ConvertFrom-Json -AsHashtable
+        if ([string]$configuration.schema -cne 'HostHunter.ClientConfiguration.v2') {
+            throw 'HostHunter.Client configuration version is unsupported. Re-run Install-HHClient.ps1.'
+        }
+        if ([string]::IsNullOrWhiteSpace([string]$configuration.repoRoot)) {
+            throw 'HostHunter.Client configuration does not contain a repository root.'
+        }
+        try { $repoRoot = (Resolve-Path -LiteralPath ([string]$configuration.repoRoot)).Path }
+        catch { throw 'The configured HostHunter repository moved. Re-run Install-HHClient.ps1.' }
     }
-    $configuration = Get-Content -LiteralPath $configurationPath -Raw |
-        ConvertFrom-Json -AsHashtable
-    if ([string]::IsNullOrWhiteSpace([string]$configuration.repoRoot)) {
-        throw 'HostHunter.Client configuration does not contain a repository root.'
+    $visualizerPath = if (-not [string]::IsNullOrWhiteSpace($env:HH_VISUALIZER_REPO_ROOT)) {
+        $env:HH_VISUALIZER_REPO_ROOT
     }
-    try { (Resolve-Path -LiteralPath ([string]$configuration.repoRoot)).Path }
-    catch { throw 'The configured HostHunter repository moved. Re-run Install-HHClient.ps1.' }
+    elseif ($null -ne $configuration -and
+        -not [string]::IsNullOrWhiteSpace([string]$configuration.visualizerRepoRoot)) {
+        [string]$configuration.visualizerRepoRoot
+    }
+    else { $null }
+    $visualizerRoot = $null
+    if ($null -ne $visualizerPath) {
+        try { $visualizerRoot = (Resolve-Path -LiteralPath $visualizerPath).Path }
+        catch { throw 'The configured HostHunter visualizer repository moved. Re-run Install-HHClient.ps1.' }
+    }
+    $url = if ($null -ne $configuration -and
+        -not [string]::IsNullOrWhiteSpace([string]$configuration.visualizerUrl)) {
+        [string]$configuration.visualizerUrl
+    } else { 'http://127.0.0.1:4310' }
+    $parsedUrl = $null
+    if (-not [Uri]::TryCreate($url,[UriKind]::Absolute,[ref]$parsedUrl) -or
+        $parsedUrl.Scheme -cne 'http' -or $parsedUrl.Host -cne '127.0.0.1' -or
+        -not [string]::IsNullOrWhiteSpace($parsedUrl.UserInfo) -or
+        $parsedUrl.AbsolutePath -cne '/' -or -not [string]::IsNullOrWhiteSpace($parsedUrl.Query) -or
+        -not [string]::IsNullOrWhiteSpace($parsedUrl.Fragment)) {
+        throw 'The configured visualizer URL must be an uncredentialed loopback HTTP origin.'
+    }
+    $url = $parsedUrl.GetLeftPart([UriPartial]::Authority)
+    [pscustomobject]@{ RepoRoot=$repoRoot; VisualizerRepoRoot=$visualizerRoot; VisualizerUrl=$url }
 }
 
 function Use-HHClientLock {
@@ -117,10 +157,22 @@ function Invoke-HHClientDockerCapture {
     $output
 }
 
+function Get-HHClientRuntimeProject {
+    $project = if ([string]::IsNullOrWhiteSpace($env:HH_RUNTIME_PROJECT)) {
+        'hosthunter-next-generation-runtime'
+    }
+    else { $env:HH_RUNTIME_PROJECT }
+    if ($project -cnotmatch '^[a-z0-9][a-z0-9_-]{2,47}$') {
+        throw 'HH_RUNTIME_PROJECT contains an invalid Docker Compose project name.'
+    }
+    $project
+}
+
 function Get-HHClientControllerId {
+    $runtimeProject = Get-HHClientRuntimeProject
     $ids = @(Invoke-HHClientDockerCapture -Arguments @(
             'ps', '--filter',
-            'label=com.docker.compose.project=hosthunter-next-generation-runtime',
+            "label=com.docker.compose.project=$runtimeProject",
             '--filter', 'label=com.docker.compose.service=controller',
             '--format', '{{.ID}}'
         ) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
@@ -161,17 +213,19 @@ function Connect-HHClientDocker {
     }
     Open-HHClientDockerDesktop
     $deadline = [DateTime]::UtcNow.AddSeconds($MaximumWaitSeconds)
-    do {
+    while ([DateTime]::UtcNow -lt $deadline) {
         Start-Sleep -Milliseconds 500
         if (Test-HHClientDockerReady) { return }
-    } while ([DateTime]::UtcNow -lt $deadline)
+    }
     throw "Docker Desktop did not become ready within $MaximumWaitSeconds seconds."
 }
 
 function Connect-HHClientRuntime {
     param(
         [Parameter(Mandatory)][string]$RepoRoot,
-        [Parameter(Mandatory)][string]$SourceFingerprint
+        [Parameter(Mandatory)][string]$SourceFingerprint,
+        [ValidateSet('Preserve','Enable','Disable')][string]$VisualizationMode = 'Preserve',
+        [AllowNull()][string]$VisualizerRepoRoot
     )
 
     if ($null -eq (Get-Command docker -ErrorAction SilentlyContinue)) {
@@ -180,20 +234,42 @@ function Connect-HHClientRuntime {
     Connect-HHClientDocker
 
     $controllerId = Get-HHClientControllerId
+    if ($VisualizationMode -ceq 'Enable' -and
+        [string]::IsNullOrWhiteSpace($VisualizerRepoRoot)) {
+        throw 'A visualizer repository is required when visualization is enabled.'
+    }
     if ($null -ne $controllerId) {
         $actual = [string](Invoke-HHClientDockerCapture -Arguments @(
                 'inspect', '--format',
                 '{{ index .Config.Labels "com.hosthunter.source-fingerprint" }}',
                 $controllerId
             ) | Select-Object -First 1)
-        if ($actual -ceq $SourceFingerprint) { return $controllerId }
+        $actualVisualizer = [string](Invoke-HHClientDockerCapture -Arguments @(
+                'inspect', '--format',
+                '{{ index .Config.Labels "com.hosthunter.visualizer-enabled" }}',
+                $controllerId
+            ) | Select-Object -First 1)
+        $modeMatches = $VisualizationMode -ceq 'Preserve' -or
+            ($VisualizationMode -ceq 'Enable' -and $actualVisualizer -ceq 'true') -or
+            ($VisualizationMode -ceq 'Disable' -and $actualVisualizer -cne 'true')
+        if ($actual -ceq $SourceFingerprint -and $modeMatches) {
+            return $controllerId
+        }
     }
+
+    $visualizerEnabled = $VisualizationMode -ceq 'Enable'
 
     $startScript = Join-Path $RepoRoot 'scripts/runtime/hosthunter.sh'
     if (-not [IO.File]::Exists($startScript)) { throw 'HostHunter runtime start script is missing.' }
     $previousFingerprint = $env:HH_SOURCE_FINGERPRINT
+    $previousVisualizerEnabled = $env:HH_VISUALIZER_ENABLED
+    $previousVisualizerToken = $env:HH_VISUALIZER_TOKEN_SOURCE
     try {
         $env:HH_SOURCE_FINGERPRINT = $SourceFingerprint
+        $env:HH_VISUALIZER_ENABLED = if ($visualizerEnabled) { 'true' } else { 'false' }
+        $env:HH_VISUALIZER_TOKEN_SOURCE = if ($visualizerEnabled) {
+            Join-Path $VisualizerRepoRoot '.secrets/producer_token'
+        } else { $null }
         $startOutput = @(& /usr/bin/env bash $startScript start 2>&1)
         if ($LASTEXITCODE -ne 0) {
             throw "HostHunter runtime failed to start: $([string]::Join([Environment]::NewLine, $startOutput))"
@@ -202,7 +278,11 @@ function Connect-HHClientRuntime {
             Write-Information $line -Tags HostHunterRuntime -InformationAction Continue
         }
     }
-    finally { $env:HH_SOURCE_FINGERPRINT = $previousFingerprint }
+    finally {
+        $env:HH_SOURCE_FINGERPRINT = $previousFingerprint
+        $env:HH_VISUALIZER_ENABLED = $previousVisualizerEnabled
+        $env:HH_VISUALIZER_TOKEN_SOURCE = $previousVisualizerToken
+    }
 
     $controllerId = Get-HHClientControllerId
     if ($null -eq $controllerId) { throw 'HostHunter runtime started without a controller container.' }
@@ -279,7 +359,8 @@ function Invoke-HHClientCommand {
 
     Use-HHClientLock {
         $controllerId = Connect-HHClientRuntime -RepoRoot $script:HHClientRepoRoot `
-            -SourceFingerprint $script:HHClientSourceFingerprint
+            -SourceFingerprint $script:HHClientSourceFingerprint `
+            -VisualizationMode Preserve
         $request = [pscustomobject][ordered]@{
             CommandName = $CommandName
             Parameters = $Parameters
@@ -518,22 +599,33 @@ end {
         $generatedAliases.Add([string]$alias.name)
     }
     $script:HHClientGeneratedAliases = $generatedAliases.ToArray()
-    Export-ModuleMember -Function $script:HHClientGeneratedCommands `
+    Export-ModuleMember -Function @($script:HHClientGeneratedCommands + $script:HHClientLocalCommands) `
         -Alias $script:HHClientGeneratedAliases
 }
 
+$visualizationLifecyclePath = Join-Path $PSScriptRoot 'Private/VisualizationLifecycle.ps1'
+if (-not [IO.File]::Exists($visualizationLifecyclePath)) {
+    throw 'HostHunter visualization lifecycle component is missing.'
+}
+. $visualizationLifecyclePath
+
 if ($env:HH_CLIENT_SKIP_AUTO_START -cne '1') {
     Use-HHClientLock {
-        $script:HHClientRepoRoot = Get-HHClientRepositoryRoot
+        $configuration = Get-HHClientConfiguration
+        $script:HHClientRepoRoot = $configuration.RepoRoot
+        $script:HHClientVisualizerRepoRoot = $configuration.VisualizerRepoRoot
+        $script:HHClientVisualizerUrl = $configuration.VisualizerUrl
         $script:HHClientSourceFingerprint = Get-HHClientSourceFingerprint $script:HHClientRepoRoot
         $script:HHClientControllerId = Connect-HHClientRuntime `
             -RepoRoot $script:HHClientRepoRoot `
-            -SourceFingerprint $script:HHClientSourceFingerprint
+            -SourceFingerprint $script:HHClientSourceFingerprint `
+            -VisualizationMode Preserve
         $script:HHClientMetadata = Get-HHClientDefinition $script:HHClientControllerId
         Sync-HHClientCommand $script:HHClientMetadata
         Show-HHClientStartupAnimation -CommandCount @($script:HHClientMetadata.commands).Count
     }
+    Show-HHVisualizationStartupPrompt
 }
 else {
-    Export-ModuleMember -Function @()
+    Export-ModuleMember -Function $script:HHClientLocalCommands
 }

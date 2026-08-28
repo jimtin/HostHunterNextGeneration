@@ -29,4 +29,5 @@ Export-ModuleMember -Function @(
     'Set-HHWindowsProcessAuditPolicy'
     'Set-HHEscalationPreference'
     'Get-HHEscalationPreference'
+    'Get-TargetHostDetails'
 ) -Alias @('Get-HHTargets')

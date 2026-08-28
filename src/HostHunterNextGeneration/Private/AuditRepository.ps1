@@ -253,6 +253,7 @@ function Register-HHSqliteAuditBatch {
             'ValidateTarget',
             'TestTarget',
             'InvokeCommand',
+            'GetHostDetails',
             'EnableSshKeyAuthentication',
             'SetWindowsProcessAuditPolicy'
         )]

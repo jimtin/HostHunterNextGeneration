@@ -5,12 +5,44 @@
   "metadata": {
     "component": {
       "type": "application",
-      "bom-ref": "pkg:generic/HostHunterNextGeneration@0.3.0-preview1",
+      "bom-ref": "pkg:generic/HostHunterNextGeneration@0.4.0-preview1",
       "name": "HostHunterNextGeneration",
-      "version": "0.3.0-preview1"
+      "version": "0.4.0-preview1"
     }
   },
   "components": [
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/JsonSchema.Net@9.4.0",
+      "name": "JsonSchema.Net",
+      "version": "9.4.0",
+      "licenses": [{ "license": { "id": "MIT" } }],
+      "purl": "pkg:nuget/JsonSchema.Net@9.4.0"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/JsonPointer.Net@7.0.2",
+      "name": "JsonPointer.Net",
+      "version": "7.0.2",
+      "licenses": [{ "license": { "id": "MIT" } }],
+      "purl": "pkg:nuget/JsonPointer.Net@7.0.2"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/Json.More.Net@3.0.1",
+      "name": "Json.More.Net",
+      "version": "3.0.1",
+      "licenses": [{ "license": { "id": "MIT" } }],
+      "purl": "pkg:nuget/Json.More.Net@3.0.1"
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:nuget/Humanizer.Core@2.14.1",
+      "name": "Humanizer.Core",
+      "version": "2.14.1",
+      "licenses": [{ "license": { "id": "MIT" } }],
+      "purl": "pkg:nuget/Humanizer.Core@2.14.1"
+    },
     {
       "type": "library",
       "bom-ref": "pkg:nuget/Microsoft.Data.Sqlite.Core@10.0.11",
@@ -62,12 +94,26 @@
   ],
   "dependencies": [
     {
-      "ref": "pkg:generic/HostHunterNextGeneration@0.3.0-preview1",
+      "ref": "pkg:generic/HostHunterNextGeneration@0.4.0-preview1",
       "dependsOn": [
         "pkg:nuget/Microsoft.Data.Sqlite.Core@10.0.11",
-        "pkg:nuget/SQLitePCLRaw.bundle_e_sqlite3@3.0.5"
+        "pkg:nuget/SQLitePCLRaw.bundle_e_sqlite3@3.0.5",
+        "pkg:nuget/JsonSchema.Net@9.4.0"
       ]
     },
+    {
+      "ref": "pkg:nuget/JsonSchema.Net@9.4.0",
+      "dependsOn": ["pkg:nuget/JsonPointer.Net@7.0.2"]
+    },
+    {
+      "ref": "pkg:nuget/JsonPointer.Net@7.0.2",
+      "dependsOn": [
+        "pkg:nuget/Humanizer.Core@2.14.1",
+        "pkg:nuget/Json.More.Net@3.0.1"
+      ]
+    },
+    { "ref": "pkg:nuget/Json.More.Net@3.0.1", "dependsOn": [] },
+    { "ref": "pkg:nuget/Humanizer.Core@2.14.1", "dependsOn": [] },
     {
       "ref": "pkg:nuget/Microsoft.Data.Sqlite.Core@10.0.11",
       "dependsOn": ["pkg:nuget/SQLitePCLRaw.core@3.0.5"]

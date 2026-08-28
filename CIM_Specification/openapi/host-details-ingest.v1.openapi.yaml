@@ -1,0 +1,393 @@
+openapi: 3.1.0
+info:
+  title: HostHunter Visualizer Host Details Ingest API
+  version: 1.0.0-draft.1
+  description: >-
+    Private, authenticated producer boundary for compatibility status,
+    idempotent collection-run activation, and immutable HostHunter ECS
+    target-host observations. This contract does not expose managed-host
+    control, HostHunter persistence, investigation reads, or PostgreSQL.
+servers:
+  - url: http://hosthunter-visualizer:3000
+    description: Docker-private producer network service alias
+security:
+  - producerToken: []
+paths:
+  /api/v1/producer/status:
+    get:
+      operationId: getProducerStatus
+      summary: Verify producer authentication, compatibility, and active-run state
+      description: >-
+        Performs no mission or observation mutation. This bounded status view is
+        available only to the producer credential and grants no investigation,
+        operator-session, host-detail, or database access.
+      responses:
+        '200':
+          description: Producer authentication and persistence readiness are confirmed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProducerStatus'
+        '401':
+          description: Missing or invalid producer credential.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '429':
+          description: Producer request capacity is exhausted.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+                minimum: 1
+                maximum: 300
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '503':
+          description: Visualizer persistence is unavailable.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/collection-runs/{collection_run_id}:
+    put:
+      operationId: putCollectionRunV1
+      summary: Create or replay an active HostHunter collection run
+      description: >-
+        The path ID must equal collection_run_id in the body. A new run is
+        established as the empty active visualizer investigation before its
+        host observations arrive. Establishing a different run and deleting
+        every older visualizer-derived run is one atomic transaction. A new
+        run returns 201, a byte-identical replay returns 200, and a reused run
+        ID with different bytes returns 409. A failed activation preserves the
+        previously active run and never modifies HostHunter evidence. Request
+        bodies larger than 262144 bytes are rejected before JSON parsing.
+      parameters:
+        - name: collection_run_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: X-HostHunter-Content-SHA256
+          in: header
+          required: true
+          description: Lower-case SHA-256 hex of the exact UTF-8 request bytes.
+          schema:
+            type: string
+            pattern: '^[0-9a-f]{64}$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../schemas/collection-run.v1.schema.json
+      responses:
+        '200':
+          description: Identical collection-run activation already exists.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CollectionRunReceipt'
+        '201':
+          description: Collection run created and atomically activated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CollectionRunReceipt'
+        '400':
+          description: Malformed request, JSON, digest, or path/body identity.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          description: Missing or invalid producer credential.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '403':
+          description: Credential is valid but lacks collection-run write scope.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: Collection run ID already exists with different request bytes.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '413':
+          description: Request exceeds 262144 bytes.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: Well-formed JSON violates schema or semantic invariants.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '429':
+          description: Bounded ingest capacity is temporarily exhausted.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+                minimum: 1
+                maximum: 300
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '503':
+          description: Visualizer persistence is unavailable; no partial transition occurred.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+  /api/v1/collection-runs/{collection_run_id}/host-observations/{event_id}:
+    put:
+      operationId: putHostDetailsObservationV1
+      summary: Create or replay one immutable target-host observation
+      description: >-
+        The path IDs must equal hosthunter.collection_run.id and event.id in
+        the body. A new event returns 201, a byte-identical replay returns 200,
+        and a reused event ID with different bytes returns 409. Request bodies
+        larger than 262144 bytes are rejected before JSON parsing.
+      parameters:
+        - name: collection_run_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: event_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: X-HostHunter-Content-SHA256
+          in: header
+          required: true
+          description: Lower-case SHA-256 hex of the exact UTF-8 request bytes.
+          schema:
+            type: string
+            pattern: '^[0-9a-f]{64}$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: ../schemas/host-details-observation.v1.schema.json
+      responses:
+        '200':
+          description: Identical immutable observation already exists.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestReceipt'
+        '201':
+          description: Observation created and atomically activated.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IngestReceipt'
+        '400':
+          description: Malformed request, JSON, digest, or path/body identity.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          description: Missing or invalid producer credential.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '403':
+          description: Credential is valid but lacks host-observation write scope.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: Event ID already exists with different request bytes.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '413':
+          description: Request exceeds 262144 bytes.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: Well-formed JSON violates schema or semantic invariants.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '429':
+          description: Bounded ingest capacity is temporarily exhausted.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+                minimum: 1
+                maximum: 300
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '503':
+          description: Visualizer persistence is unavailable; no partial write occurred.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+components:
+  securitySchemes:
+    producerToken:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque-producer-token
+      description: >-
+        Docker-secret credential scoped only to bounded producer status,
+        collection-run activation, and host-observation writes. It grants no
+        investigation, operator-session, host-detail, or database access.
+  schemas:
+    Uuid:
+      type: string
+      pattern: '^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+    ProducerStatus:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - service
+        - api_version
+        - collection_run_schema_version
+        - host_observation_schema_version
+        - process_event_schema_version
+        - active_collection_run_id
+      properties:
+        status:
+          const: ready
+        service:
+          const: hosthunter-visualizer
+        api_version:
+          const: 1.0.0
+        collection_run_schema_version:
+          const: 1.0.0
+        host_observation_schema_version:
+          const: 1.0.0
+        process_event_schema_version:
+          description: Null until the separately specified Phase 2 process ingest is enabled.
+          oneOf:
+            - const: 1.0.0
+            - type: 'null'
+        active_collection_run_id:
+          oneOf:
+            - $ref: '#/components/schemas/Uuid'
+            - type: 'null'
+    IngestReceipt:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - collection_run_id
+        - event_id
+        - host_id
+        - content_sha256
+        - received_at
+      properties:
+        status:
+          enum:
+            - created
+            - replayed
+        collection_run_id:
+          $ref: '#/components/schemas/Uuid'
+        event_id:
+          $ref: '#/components/schemas/Uuid'
+        host_id:
+          type: string
+          pattern: '^hh_[a-z2-7]{52}$'
+        content_sha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+        received_at:
+          type: string
+          format: date-time
+    CollectionRunReceipt:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - collection_run_id
+        - content_sha256
+        - activated_at
+        - pruned_run_count
+      properties:
+        status:
+          enum:
+            - activated
+            - replayed
+        collection_run_id:
+          $ref: '#/components/schemas/Uuid'
+        content_sha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+        activated_at:
+          type: string
+          format: date-time
+        pruned_run_count:
+          type: integer
+          minimum: 0
+    Problem:
+      type: object
+      additionalProperties: false
+      required:
+        - type
+        - title
+        - status
+        - code
+        - correlation_id
+      properties:
+        type:
+          type: string
+          format: uri-reference
+        title:
+          type: string
+          minLength: 1
+          maxLength: 128
+        status:
+          type: integer
+          minimum: 400
+          maximum: 599
+        code:
+          enum:
+            - malformed_request
+            - digest_mismatch
+            - identity_mismatch
+            - unauthorized
+            - forbidden
+            - idempotency_conflict
+            - stale_collection_run
+            - inactive_collection_run
+            - payload_too_large
+            - schema_invalid
+            - semantic_invalid
+            - capacity_exhausted
+            - persistence_unavailable
+        correlation_id:
+          $ref: '#/components/schemas/Uuid'
+        detail:
+          type: string
+          minLength: 1
+          maxLength: 512
