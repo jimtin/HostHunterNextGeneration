@@ -49,7 +49,7 @@ component receipt independently. The release graph is:
 3. run the twelve-cmdlet verifier once;
 4. run positive live-Windows qualification against that exact image;
 5. run the bounded release-only coverage command;
-6. run critical SQLite, recovery, SSH, and persistence integration;
+6. run the focused authenticated-SQLite fault and recovery integration;
 7. run dependency, filesystem, secret, and image scans; and
 8. aggregate existing receipts without invoking work.
 
@@ -66,33 +66,32 @@ restoration, and never automatically retries.
 
 ## Release-only coverage contract
 
-Coverage runs in one container through one PowerShell process. It performs two
-fixed, sequential unit-test passes; these are collectors, not retries:
+Coverage runs in one networkless container using the standard Pester profiler.
+Every shipped production source file under the authoritative module and native
+client roots is included. Integration, SSH fixtures, live Windows, and the
+twelve-cmdlet journey never contribute to the coverage numerator. Statements,
+executable lines, and invoked functions must each be at least 90 percent, with
+92 percent as the engineering target. Zero denominators, test failures,
+malformed results, and missing source files fail closed.
 
-1. Untouched production source under Pester native coverage measures statements,
-  executable lines, and AST-owned functions.
-2. An ephemeral instrumented copy runs the same unit suite and records genuine
-  branch outcomes in memory, flushing once when the run completes.
+Branch confidence is behavioral rather than synthetic. Named unit and focused
+integration tests must cover public validation, key/password/fallback choices,
+managed-host pre-dispatch/completed/uncertain/cleanup outcomes, and SQLite
+empty/save/replace/delete/tamper/rollback/recovery states. There is no custom
+AST transformer or numerical branch-percentage gate.
 
-Every shipped production source file is included. Integration, SSH fixtures,
-live Windows, and the twelve-cmdlet journey never contribute to the coverage
-numerator. Statements, branches, functions, and lines must each be at least 90
-percent, with 92 percent as the engineering target. Unsupported decision syntax,
-zero denominators, test failures, malformed results, and missing source files
-fail closed.
-
-The normal target is 180 seconds or less and the hard timeout is 300 seconds.
-There are no retries, shards, nested runners, worker processes, per-hit files,
-or network/database services. A single atomic summary always records all four
-metrics, their deficits, and every uncovered location so failure diagnosis never
-requires a second coverage run.
-
-"Every shipped production source file" includes both the authoritative module
-and `client/HostHunter.Client`; the collector accepts the client as an explicit
-additional source root and instruments it only in its ephemeral second pass.
+The coverage command has one timeout owner, one terminal summary, and no
+retries, shards, nested runners, worker processes, instrumented source copies,
+per-hit files, or network/database services. A failure lists uncovered native
+locations so diagnosis proceeds through focused tests rather than another broad
+coverage run.
 
 ## Hooks
 
-Pre-commit remains a fast containerized static/import/unit smoke. Pre-push is a
-slim local secret/dependency/static/critical-integration gate; it must not repeat
-the full exact-SHA release proof. GitHub does not execute the test suite.
+Pre-commit runs the secret scan, static/governance checks, and changed/focused
+tests only, with a 45-second hard bound. Pre-push runs secret/dependency scans,
+static/governance checks, one ordinary unit smoke, and one twelve-cmdlet/SQLite
+journey, with a two-minute normal target. The native macOS journey is selected
+only when its owned surface changes. Neither hook runs release coverage,
+production builds, image scans, live Windows, or broad persistence matrices.
+GitHub does not execute the test suite.

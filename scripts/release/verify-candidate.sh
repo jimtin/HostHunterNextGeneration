@@ -83,20 +83,26 @@ record_synthetic() {
 
 record_result() {
   local kind="$1" source="$2" exit_code="$3" missing_reason="$4"
+  local enforce_process_exit="${5:-true}"
+  local source_root="${6:-}"
+  local -a source_root_arguments=()
   if [[ -f "$source" ]]; then
     local source_status
     source_status="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("status", ""))' "$source")"
-    if [[ "$exit_code" -ne 0 && "$source_status" == passed ]]; then
+    if [[ "$enforce_process_exit" == true && "$exit_code" -ne 0 && "$source_status" == passed ]]; then
       record_synthetic "$kind" failed \
         "$kind exited $exit_code but emitted a contradictory passing receipt"
       return
     fi
-    python3 "$state" record --root "$artifact_root" --sha "$candidate_sha" \
-      --kind "$kind" --source "$source" >/dev/null
+    if [[ -n "$source_root" ]]; then
+      source_root_arguments=(--source-root "$source_root")
+    fi
+    if ! python3 "$state" record --root "$artifact_root" --sha "$candidate_sha" \
+      --kind "$kind" --source "$source" "${source_root_arguments[@]}" >/dev/null; then
+      record_synthetic "$kind" failed "$kind emitted an invalid terminal receipt"
+    fi
   else
-    local status=failed
-    [[ "$exit_code" -eq 0 ]] && status=blocked
-    record_synthetic "$kind" "$status" "$missing_reason"
+    record_synthetic "$kind" failed "$missing_reason"
   fi
 }
 
@@ -209,21 +215,47 @@ if [[ "$build_status" == passed ]]; then
   heavy_exit=$?
   set -e
   heavy_source="${HH_RELEASE_PROOF_RECEIPT_PATH:-$checkout_root/.artifacts/summary/verify-local.json}"
-  record_result heavy "$heavy_source" "$heavy_exit" \
-    "Release proof exit $heavy_exit did not produce its terminal receipt"
+  record_result orchestration "$heavy_source" "$heavy_exit" \
+    "Release proof exit $heavy_exit produced no terminal orchestration receipt"
+  coverage_source="${HH_RELEASE_COVERAGE_RECEIPT_PATH:-$checkout_root/.artifacts/summary/coverage.json}"
+  persistence_source="${HH_RELEASE_PERSISTENCE_RECEIPT_PATH:-$checkout_root/.artifacts/summary/persistence.json}"
+  security_source="${HH_RELEASE_SECURITY_RECEIPT_PATH:-$checkout_root/.artifacts/summary/security.json}"
+  record_result coverage "$coverage_source" "$heavy_exit" \
+    "Release proof exit $heavy_exit produced no coverage receipt" false "$checkout_root"
+  record_result persistence "$persistence_source" "$heavy_exit" \
+    "Release proof exit $heavy_exit produced no persistence receipt" false
+  record_result security "$security_source" "$heavy_exit" \
+    "Release proof exit $heavy_exit produced no security receipt" false
 else
   heavy_exit=0
-  record_synthetic heavy not-run not_run_due_to_build
+  record_synthetic coverage not-run not_run_due_to_build
+  record_synthetic persistence not-run not_run_due_to_build
+  record_synthetic security not-run not_run_due_to_build
+  record_synthetic orchestration not-run not_run_due_to_build
 fi
-heavy_status="$(component_status "$artifact_root/heavy-receipt.json")"
+coverage_status="$(component_status "$artifact_root/coverage-receipt.json")"
+persistence_status="$(component_status "$artifact_root/persistence-receipt.json")"
+security_status="$(component_status "$artifact_root/security-receipt.json")"
+orchestration_status="$(component_status "$artifact_root/orchestration-receipt.json")"
 
 terminal_phase=aggregation
-statuses=("$build_status" "$cmdlet_status" "$windows_status" "$heavy_status")
+statuses=(
+  "$build_status"
+  "$cmdlet_status"
+  "$windows_status"
+  "$coverage_status"
+  "$persistence_status"
+  "$security_status"
+  "$orchestration_status"
+)
 terminal_status=passed
 terminal_exit_code=0
-terminal_reason='Build, cmdlets, Windows qualification, coverage, integration, and security passed'
+terminal_reason='Build, cmdlets, Windows qualification, coverage, persistence, and security passed'
 for status in "${statuses[@]}"; do
-  if [[ "$status" == failed || "$status" == aborted ]]; then
+  if [[ "$status" == aborted ]]; then
+    terminal_status=aborted
+    terminal_exit_code=130
+  elif [[ "$status" == failed && "$terminal_status" != aborted ]]; then
     terminal_status=failed
     terminal_exit_code=1
   elif [[ "$status" != passed && "$terminal_status" == passed ]]; then
@@ -232,7 +264,10 @@ for status in "${statuses[@]}"; do
   fi
 done
 if [[ "$terminal_status" != passed ]]; then
-  terminal_reason="Release terminal; build=$build_status cmdlets=$cmdlet_status windows=$windows_status proof=$heavy_status"
+  terminal_reason="Release terminal; build=$build_status cmdlets=$cmdlet_status"
+  terminal_reason+=" windows=$windows_status coverage=$coverage_status"
+  terminal_reason+=" persistence=$persistence_status security=$security_status"
+  terminal_reason+=" orchestration=$orchestration_status"
 fi
 
 seal_terminal "$terminal_exit_code"

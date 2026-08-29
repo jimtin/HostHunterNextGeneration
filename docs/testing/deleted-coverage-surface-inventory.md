@@ -1,7 +1,7 @@
 # Deleted coverage surface inventory
 
-Status: cutover checklist for the release coverage simplification authorized on
-2026-08-26.
+Status: confirmed cutover checklist for the fast test contract authorized on
+2026-08-29.
 
 This inventory records the superseded coverage machinery and the required
 post-cutover sweep. It is not permission to remove product source or to exclude
@@ -11,14 +11,15 @@ active source from the coverage denominator.
 
 | Path | Required replacement |
 | --- | --- |
-| `scripts/coverage/Invoke-HHUnitCoverage.ps1` | Sole coverage entrypoint: one process, two fixed unit passes, one terminal summary |
-| `scripts/coverage/Instrument-HHBranches.ps1` | Ephemeral transformer and in-memory outcome collector with one final flush |
-| `scripts/lanes/unit.sh` | Thin one-container wrapper with a 300-second hard timeout |
+| `scripts/coverage/Invoke-HHUnitCoverage.ps1` | Sole standard-profiler entrypoint with one terminal summary |
+| `scripts/lanes/unit.sh` | Thin release-only wrapper; no orchestration or retry |
 
 ## Remove after replacement contract passes
 
 | Superseded surface | Incoming references observed before cutover |
 | --- | --- |
+| `scripts/coverage/Instrument-HHBranches.ps1` | custom AST branch collector and its contract test |
+| `tests/coverage/fixtures/BranchFixture.ps1` | custom AST collector fixture |
 | `scripts/coverage/Prepare-HHInstrumentedModule.ps1` | `tests/coverage/Invoke-ProductCoverage.ps1` |
 | `scripts/coverage/Test-HHBranchCoverage.ps1` | branch spike, integrity self-test, and product coverage scripts |
 | `scripts/coverage/Test-HHCoverageThresholds.ps1` | old unit coverage and threshold self-test scripts |
@@ -44,8 +45,9 @@ The cutover is incomplete while an active script, test, hook, container file, or
 environment example still relies on any of these:
 
 - `HH_BRANCH_LOG`;
+- `Invoke-HHBranchProbe` or `HH_BRANCH_COVERAGE`;
 - compact branch shards, marker files, per-shard checksums, or shard merging;
-- coverage workers or child `pwsh` processes;
+- coverage workers or custom child collectors;
 - per-hit mutex acquisition, artifact-directory scans, JSON rewrites, hashing,
   or atomic moves;
 - `coverage-spike` artifacts or entrypoints;
@@ -53,7 +55,8 @@ environment example still relies on any of these:
 - the migration integration test contributing to the unit-coverage numerator;
 - any SSH, Windows, SQLite service, or eleven-cmdlet journey dependency in the
   coverage command; or
-- any retry or second diagnostic coverage invocation for one SHA.
+- any custom AST source rewrite, numerical synthetic branch threshold, retry,
+  or second diagnostic coverage invocation for one SHA.
 
 Historical planning text may name the removed machinery when it clearly explains
 why it was replaced. The confirmed release coverage plan may retain the deleted
@@ -65,7 +68,7 @@ Run a repository-wide search and classify every match:
 
 ```sh
 rg -n --hidden --glob '!.git/**' \
-  'HH_BRANCH_LOG|compact branch shard|coverage[-_ ]?worker|coverage-spike|Invoke-ProductCoverage|Prepare-HHInstrumentedModule|Test-HHBranchCoverage|Test-HHCoverageThresholds'
+  'HH_BRANCH_LOG|Invoke-HHBranchProbe|HH_BRANCH_COVERAGE|Instrument-HHBranches|compact branch shard|coverage[-_ ]?worker|coverage-spike|Invoke-ProductCoverage|Prepare-HHInstrumentedModule|Test-HHBranchCoverage|Test-HHCoverageThresholds'
 ```
 
 Permitted results are limited to:

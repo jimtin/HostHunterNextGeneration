@@ -11,7 +11,7 @@
 | Configuration | Escalation preference generation/mutation and fresh-process read | Set/Get rows and SQLite deltas |
 | Evidence integrity | encrypted .hhout, anchors, tamper/rollback detection | release-only focused integration |
 | Crash recovery | armed incomplete work becomes Unknown and is never redispatched | recovery integration |
-| Coverage integrity | every shipped source file; genuine four-metric unit-only result; no production instrumentation | fixed two-pass release coverage receipt and packaged-image probe-token check |
+| Coverage integrity | every shipped source file; native statement/line/invoked-function result; explicit behavioral branch tests; no production instrumentation | release coverage receipt, branch-family contracts, and packaged-image probe-token check |
 | Release finality | exact SHA consumed once; component and terminal receipts immutable | receipt contract tests |
 
 The six local-only framework cmdlets must have negative no-managed-host-contact coverage.

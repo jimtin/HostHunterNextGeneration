@@ -7,8 +7,10 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import math
 import os
 import pathlib
+import re
 import socket
 import sys
 from typing import Any
@@ -16,7 +18,15 @@ from typing import Any
 
 TERMINAL_STATUSES = {"passed", "failed", "blocked", "aborted"}
 VERDICT_STATUSES = TERMINAL_STATUSES | {"not-run"}
-COMPONENT_KINDS = ("build", "cmdlet", "windows", "heavy")
+COMPONENT_KINDS = (
+    "build",
+    "cmdlet",
+    "windows",
+    "coverage",
+    "persistence",
+    "security",
+    "orchestration",
+)
 
 
 class ReceiptError(RuntimeError):
@@ -80,6 +90,125 @@ def ensure_root_matches(root: pathlib.Path, sha: str) -> None:
         raise ReceiptError("Release receipt directory must be named for the exact candidate SHA")
 
 
+def validate_coverage_source(value: dict[str, Any], claim_value: dict[str, Any], sha: str) -> None:
+    """Fail closed on incoherent evidence presented as passing native coverage."""
+    tree = claim_value.get("candidateTree")
+    if value.get("candidateSha") != sha or value.get("candidateTree") != tree:
+        raise ReceiptError("Coverage receipt is not bound to the exact candidate SHA and tree")
+    if value.get("status") != "passed":
+        return
+    coverage = value.get("coverage")
+    if not isinstance(coverage, dict) or coverage.get("status") != "passed":
+        raise ReceiptError("Passing coverage component has no passing coverage summary")
+    if coverage.get("candidateSha") != sha or coverage.get("candidateTree") != tree:
+        raise ReceiptError("Coverage summary is not bound to the exact candidate SHA and tree")
+    if coverage.get("invocationCount") != 1 or isinstance(
+        coverage.get("invocationCount"), bool
+    ):
+        raise ReceiptError("Passing coverage must contain exactly one invocation")
+    test_count = coverage.get("testCount")
+    if not isinstance(test_count, int) or isinstance(test_count, bool) or test_count <= 0:
+        raise ReceiptError("Passing coverage must contain at least one test")
+    minimum = coverage.get("minimum")
+    if (
+        not isinstance(minimum, (int, float))
+        or isinstance(minimum, bool)
+        or not math.isfinite(minimum)
+        or minimum < 90
+        or minimum > 100
+    ):
+        raise ReceiptError("Passing coverage minimum must be between 90 and 100")
+    metrics = coverage.get("metrics")
+    required_metrics = {"statements", "lines", "functions"}
+    if not isinstance(metrics, dict) or set(metrics) != required_metrics:
+        raise ReceiptError("Coverage metrics must be exactly statements, lines, and functions")
+    for name in sorted(required_metrics):
+        metric = metrics[name]
+        if not isinstance(metric, dict):
+            raise ReceiptError(f"Coverage metric {name} must be an object")
+        covered = metric.get("covered")
+        total = metric.get("total")
+        if (
+            not isinstance(covered, int)
+            or isinstance(covered, bool)
+            or not isinstance(total, int)
+            or isinstance(total, bool)
+            or total <= 0
+            or covered < 0
+            or covered > total
+        ):
+            raise ReceiptError(f"Coverage metric {name} has invalid counts")
+        if covered * 100 < minimum * total:
+            raise ReceiptError(f"Coverage metric {name} is below the exact threshold")
+    inventory = coverage.get("sourceInventory")
+    source_file_count = coverage.get("sourceFileCount")
+    if (
+        not isinstance(inventory, list)
+        or not inventory
+        or not isinstance(source_file_count, int)
+        or isinstance(source_file_count, bool)
+        or source_file_count != len(inventory)
+    ):
+        raise ReceiptError("Coverage source inventory count is incoherent")
+    normalized_inventory: list[dict[str, str]] = []
+    seen_paths: set[str] = set()
+    for item in inventory:
+        if not isinstance(item, dict) or set(item) != {"path", "sha256"}:
+            raise ReceiptError("Coverage source inventory entries must contain path and sha256")
+        path = item.get("path")
+        digest = item.get("sha256")
+        if (
+            not isinstance(path, str)
+            or not re.fullmatch(r"[A-Za-z0-9._/-]+", path)
+            or path.startswith("/")
+            or path.startswith("./")
+            or path.endswith("/")
+            or "//" in path
+            or any(part in {"", ".", ".."} for part in path.split("/"))
+            or path in seen_paths
+        ):
+            raise ReceiptError("Coverage source inventory contains an unsafe or duplicate path")
+        if not isinstance(digest, str) or not re.fullmatch(r"[a-f0-9]{64}", digest):
+            raise ReceiptError("Coverage source inventory contains an invalid SHA-256")
+        seen_paths.add(path)
+        normalized_inventory.append({"path": path, "sha256": digest})
+    encoded_inventory = json.dumps(
+        normalized_inventory, ensure_ascii=False, separators=(",", ":")
+    ).encode("utf-8")
+    expected_source_hash = hashlib.sha256(encoded_inventory).hexdigest()
+    source_hash = coverage.get("sourceHash")
+    if (
+        not isinstance(source_hash, str)
+        or not re.fullmatch(r"[a-f0-9]{64}", source_hash)
+        or source_hash != expected_source_hash
+    ):
+        raise ReceiptError("Coverage source hash does not match its ordered inventory")
+
+
+def discover_coverage_inventory(source_root: pathlib.Path) -> list[dict[str, str]]:
+    if source_root.is_symlink() or not source_root.is_dir():
+        raise ReceiptError("Coverage source root is missing or unsafe")
+    source_root = source_root.resolve(strict=True)
+    inventory: list[dict[str, str]] = []
+    for relative_root in (
+        pathlib.Path("src/HostHunterNextGeneration"),
+        pathlib.Path("client/HostHunter.Client"),
+    ):
+        owned_root = source_root / relative_root
+        if owned_root.is_symlink() or not owned_root.is_dir():
+            raise ReceiptError(f"Coverage-owned source root is missing or unsafe: {relative_root}")
+        for path in owned_root.rglob("*"):
+            if (
+                path.suffix.lower() not in {".ps1", ".psm1"}
+                or path.is_symlink()
+                or not path.is_file()
+            ):
+                continue
+            relative_path = path.relative_to(source_root).as_posix()
+            inventory.append({"path": relative_path, "sha256": sha256_file(path)})
+    return sorted(inventory, key=lambda item: item["path"])
+
+
 def verdict_summary(value: dict[str, Any] | None) -> dict[str, Any]:
     if value is None:
         return {"status": "not-run", "receipt": None}
@@ -125,7 +254,7 @@ def record(args: argparse.Namespace) -> int:
     root = pathlib.Path(args.root)
     sha = validate_sha(args.sha)
     ensure_root_matches(root, sha)
-    load_json(root / "claim.json")
+    claim_value = load_json(root / "claim.json")
     if (root / "receipt.json").exists():
         raise ReceiptError("Cannot add a component verdict after terminal sealing")
     destination = root / f"{args.kind}-receipt.json"
@@ -134,11 +263,24 @@ def record(args: argparse.Namespace) -> int:
         if source.is_symlink() or not source.is_file():
             raise ReceiptError(f"Component receipt is missing or unsafe: {source}")
         value = load_json(source)
+        safe_dependency_reason = value.get("reason")
         source_sha = value.get("candidateSha")
         if source_sha not in (None, sha):
             raise ReceiptError("Component receipt belongs to a different candidate SHA")
         if value.get("status") not in VERDICT_STATUSES:
             raise ReceiptError("Component receipt has an invalid or missing status")
+        if args.kind == "coverage":
+            validate_coverage_source(value, claim_value, sha)
+            if value.get("status") == "passed" and args.source_root:
+                expected_inventory = discover_coverage_inventory(
+                    pathlib.Path(args.source_root)
+                )
+                if value["coverage"]["sourceInventory"] != expected_inventory:
+                    raise ReceiptError(
+                        "Coverage inventory does not exactly match the candidate source tree"
+                    )
+        elif args.source_root:
+            raise ReceiptError("--source-root is valid only for a coverage receipt")
         # Retain verdict evidence, never raw output, environment data, credentials,
         # or arbitrary provider payloads.
         allowed = {
@@ -148,6 +290,11 @@ def record(args: argparse.Namespace) -> int:
             "failedPhase", "exitCode",
         }
         value = {key: item for key, item in value.items() if key in allowed}
+        if (
+            isinstance(safe_dependency_reason, str)
+            and re.fullmatch(r"not_run_due_to_[a-z0-9_-]+", safe_dependency_reason)
+        ):
+            value["reason"] = safe_dependency_reason
         if isinstance(value.get("rows"), list):
             row_allowed = {
                 "cmdlet", "status", "expected", "category", "errorCode",
@@ -172,7 +319,7 @@ def record(args: argparse.Namespace) -> int:
                         "id": image_id if isinstance(image_id, str) else None,
                     }
             value["images"] = image_value
-        if args.kind == "heavy":
+        if args.kind in {"coverage", "persistence", "security", "orchestration"}:
             if isinstance(value.get("phases"), list):
                 phase_allowed = {"name", "status", "exitCode", "reason"}
                 value["phases"] = [
@@ -210,6 +357,8 @@ def record(args: argparse.Namespace) -> int:
     else:
         if args.status not in VERDICT_STATUSES:
             raise ReceiptError(f"Invalid component status: {args.status!r}")
+        if args.kind == "coverage" and args.status == "passed":
+            raise ReceiptError("Passing coverage must come from a validated source receipt")
         value = {
             "schemaVersion": 1,
             "candidateSha": sha,
@@ -248,7 +397,10 @@ def seal_value(root: pathlib.Path, sha: str, status: str, phase: str, exit_code:
         "buildVerdict": verdict_summary(components["build"]),
         "cmdletVerdict": verdict_summary(components["cmdlet"]),
         "windowsQualificationVerdict": verdict_summary(components["windows"]),
-        "heavyProofVerdict": verdict_summary(components["heavy"]),
+        "coverageVerdict": verdict_summary(components["coverage"]),
+        "persistenceVerdict": verdict_summary(components["persistence"]),
+        "securityVerdict": verdict_summary(components["security"]),
+        "releaseProofOrchestrationVerdict": verdict_summary(components["orchestration"]),
     }
 
 
@@ -318,8 +470,17 @@ def aggregate(args: argparse.Namespace) -> int:
         "windowsQualificationVerdict": verdict_summary(
             load_json(paths["windows"]) if paths["windows"].exists() else None
         ),
-        "heavyProofVerdict": verdict_summary(
-            load_json(paths["heavy"]) if paths["heavy"].exists() else None
+        "coverageVerdict": verdict_summary(
+            load_json(paths["coverage"]) if paths["coverage"].exists() else None
+        ),
+        "persistenceVerdict": verdict_summary(
+            load_json(paths["persistence"]) if paths["persistence"].exists() else None
+        ),
+        "securityVerdict": verdict_summary(
+            load_json(paths["security"]) if paths["security"].exists() else None
+        ),
+        "releaseProofOrchestrationVerdict": verdict_summary(
+            load_json(paths["orchestration"]) if paths["orchestration"].exists() else None
         ),
         "terminalReceipt": "receipt.json",
         "receiptSha256": {
@@ -327,7 +488,13 @@ def aggregate(args: argparse.Namespace) -> int:
             "build": sha256_file(paths["build"]) if paths["build"].exists() else None,
             "cmdlet": sha256_file(paths["cmdlet"]) if paths["cmdlet"].exists() else None,
             "windowsQualification": sha256_file(paths["windows"]) if paths["windows"].exists() else None,
-            "heavyProof": sha256_file(paths["heavy"]) if paths["heavy"].exists() else None,
+            "coverage": sha256_file(paths["coverage"]) if paths["coverage"].exists() else None,
+            "persistence": sha256_file(paths["persistence"]) if paths["persistence"].exists() else None,
+            "security": sha256_file(paths["security"]) if paths["security"].exists() else None,
+            "releaseProofOrchestration": (
+                sha256_file(paths["orchestration"])
+                if paths["orchestration"].exists() else None
+            ),
         },
     }
     print(json.dumps(value, indent=2, sort_keys=True))
@@ -351,6 +518,7 @@ def build_parser() -> argparse.ArgumentParser:
     item.add_argument("--source")
     item.add_argument("--status")
     item.add_argument("--reason", default="")
+    item.add_argument("--source-root")
     item.set_defaults(action=record)
     item = commands.add_parser("seal")
     item.add_argument("--root", required=True)

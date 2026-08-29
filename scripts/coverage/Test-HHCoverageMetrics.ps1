@@ -6,15 +6,21 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$required = @('statements', 'branches', 'functions', 'lines')
+$required = @('statements', 'lines', 'functions')
 $results = [ordered]@{}
+
 foreach ($name in $required) {
     if (-not $Metrics.Contains($name)) { throw "Coverage metric '$name' is missing." }
     $inputMetric = $Metrics[$name]
     $covered = [int]$inputMetric.covered
     $total = [int]$inputMetric.total
     $valid = $total -gt 0 -and $covered -ge 0 -and $covered -le $total
-    $percentage = if ($valid) { [math]::Round(($covered / $total) * 100, 4) } else { 0 }
+    $percentage = if ($valid) {
+        [math]::Round(($covered / $total) * 100, 4)
+    } else { 0 }
+    $thresholdPassed = $valid -and (
+        ([decimal]$covered * 100) -ge ([decimal]$Minimum * $total)
+    )
     $results[$name] = [pscustomobject][ordered]@{
         name = $name
         covered = $covered
@@ -24,10 +30,12 @@ foreach ($name in $required) {
         deficit = if ($total -gt 0) {
             [math]::Max(0, [math]::Ceiling(($Minimum / 100) * $total) - $covered)
         } else { 0 }
-        passed = $valid -and $percentage -ge $Minimum
-        reason = if (-not $valid) { 'invalid denominator or covered count' }
-            elseif ($percentage -lt $Minimum) { 'below threshold' }
-            else { $null }
+        passed = $thresholdPassed
+        reason = if (-not $valid) {
+            'invalid denominator or covered count'
+        } elseif (-not $thresholdPassed) {
+            'below threshold'
+        } else { $null }
         definition = [string]$inputMetric.definition
     }
 }

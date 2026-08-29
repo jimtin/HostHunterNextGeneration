@@ -8,13 +8,15 @@
 | Native macOS qualification | fresh installed-profile client + production controller + disposable SSH fixture | macOS orchestration; product execution remains containerized | `scripts/client/Test-HHInstalledNativeClientSsh.ps1` | terminal 12-framework-command summary |
 | Credential migration/persistence | Pester + fresh SQLite from committed migrations | test image | focused `SqlitePersistence.Tests.ps1` and `CredentialPersistence.Tests.ps1` | terminal result; hard limits 15s/30s |
 | Credential leakage | ciphertext/root/process/broker-frame assertions | test image | focused credential and native-protocol files | terminal result; hard limit 30s |
-| Release-only unit coverage | Pester native profiler + in-memory branch-outcome collector | one test container / one `pwsh` process | `scripts/lanes/unit.sh` | `.artifacts/release-proof/unit/{unit-tests.xml,coverage.xml,coverage-summary.json,coverage.log}` |
-| Critical integration | Pester + disposable SSH/SQLite | test image + SSH fixture | `scripts/lanes/integration.sh` | `.artifacts/release-proof/integration/` |
+| Fast unit smoke | Pester without coverage | one test container / one invocation | `scripts/lanes/unit-smoke.sh` | `.artifacts/unit-smoke/{unit-smoke.xml,unit-smoke.log}` |
+| Release-only unit coverage | Standard Pester profiler | one networkless test container | `scripts/lanes/unit.sh` | `.artifacts/release-proof/unit/{unit-tests.xml,coverage.xml,coverage-summary.json,coverage.log}` |
 | SQLite fault proof | Docker Compose fault workers | purpose-built containers | `scripts/lanes/sqlite-integration.sh` | integration logs/results |
 | Production build | Docker BuildKit | runtime image | `docker compose -f compose.runtime.yml build controller` | immutable image ID |
 | Secrets | gitleaks wrapper | security container | `scripts/security/scan-secrets.sh` | security receipt |
 | Dependencies/files/images | OSV/Trivy wrappers | security containers | `scripts/lanes/security.sh <images...>` | `.artifacts/security/` |
 | Exact-SHA state | Python immutable receipt state machine | host orchestration only | `scripts/release/verify-candidate.sh <sha>` | `.artifacts/release/<sha>/` |
+| Pre-commit | Gitleaks + static + focused unit selection | host orchestration, container execution | `.githooks/pre-commit` | `.artifacts/logs/precommit.log`; 45s hard limit |
+| Pre-push | Gitleaks + dependency + static + unit smoke + cmdlet journey | host orchestration, container execution | `.githooks/pre-push` | `.artifacts/logs/prepush.log`; 180s hard limit / 120s normal target |
 
 Host orchestration may invoke Docker and aggregate receipts. Canonical validation
 runs inside containers. The cmdlet lane has one timeout owner, no worker fanout,
@@ -25,12 +27,11 @@ coverage numerator. It retrieves fixture credentials only into test-process
 memory and never prints them. Its one ordered journey covers key-first and
 warned stored-password onboarding, invisible stored-password invocation,
 credential purge after key conversion, and all twelve public framework cmdlets. It has a
-120-second hard timeout and no retries or shards.
+90-second hard timeout and no retries or shards.
 
-The unit coverage command has one timeout owner and exactly two fixed sequential
-passes over the same unit suite: untouched source for native statement/line and
-AST-owned function coverage, then an ephemeral branch-instrumented copy. It has
-no network dependency, integration numerator, nested runner, worker fanout,
-shards, retries, or per-hit disk writes. All shipped production files are in
-scope; each of statements, branches, functions, and lines must be at least 90
-percent, with a 92 percent engineering target and a 300-second hard timeout.
+The unit coverage command has one timeout owner and uses only standard native
+coverage evidence. It has no network dependency, integration numerator,
+instrumented source copy, nested runner, worker fanout, shards, retries, or
+per-hit disk writes. All shipped production files are in scope; statements,
+executable lines, and invoked functions must each be at least 90 percent, with a
+92 percent engineering target. Explicit behavioral tests own branch confidence.

@@ -14,8 +14,8 @@
 - High: rollback of SQLite, anchors, secrets, or evidence could falsify history.
 - High: a forged or replayed visualizer observation could merge the wrong host
   or reset a mission unless identities, body hashes, and idempotency keys stay bound.
-- High: candidate-owned coverage code could omit source or forge a passing
-  percentage unless the standalone gate independently validates the receipt.
+- High: candidate-owned coverage code could omit source or forge passing native
+  metrics unless the standalone gate independently validates the receipt.
 - High: copying live authentication state for Windows qualification would widen
   secret exposure or create an inconsistent snapshot unless the source is
   paused, mounted read-only, copied only into labeled disposable volumes, and
@@ -60,7 +60,7 @@ consequence; unknown means not determined.
 | Cmdlet verifier | One twelve-row behavior/DB verdict | verify-cmdlets.sh | compose.cmdlets.yml; E2E journey | confirmed |
 | Release state | One immutable claim/verdict per SHA | verify-candidate.sh | release-receipt-state.py | confirmed |
 | Candidate build | Builds four exact-SHA images once and binds immutable IDs | build-candidate.sh | build receipt | confirmed |
-| Coverage proof | One process, two unit-only passes, four independent metrics | unit.sh | coverage runner and summary | confirmed |
+| Coverage proof | One networkless standard-profiler unit pass with three independent native metrics | unit.sh | coverage runner and summary | confirmed implementation; exact-SHA result pending |
 | Remaining release proof | Critical integration and source/image scans | verify-local.sh | terminal phase receipt | confirmed |
 | Windows qualifier | Disposable clone of the five operator trust roots, public-cmdlet saved-key proof, Event 4688 proof, and restoration | windows-cmdlets.sh; Test-HHWindowsCmdlets.ps1 | qualification scripts and exact-image receipt | confirmed implementation; new exact-SHA result pending |
 
@@ -74,7 +74,7 @@ consequence; unknown means not determined.
 | B3 | engine → SSH adapter → host | intent/arm; fingerprint; PS7 identity; bounds | host controls content/timing | transport/audit; AP-2, AP-4, AP-6 |
 | B4 | controller → five state roots | separate data/secret/anchor/key/evidence mounts; AEAD; authenticated state generations | combined controller/data/secret access can use or decrypt saved passwords by accepted design | compose.runtime.yml; AP-3, AP-4, AP-15 |
 | B5 | checkout → exact-SHA gate → receipts | read-only preflight; atomic claim; exclusive writes; terminal seal | operator trusted | release scripts; AP-7 |
-| B8 | candidate source → coverage container → release verdict | read-only source; exact inventory/hash; four thresholds; external receipt validator | candidate owns the collector under test | coverage scripts; standalone gate; AP-9, AP-10, AP-11 |
+| B8 | candidate source → coverage container → release verdict | read-only source; exact inventory/hash; three native thresholds; explicit behavioral branch contracts; external receipt validator | candidate owns the collector under test | coverage scripts; standalone gate; AP-9, AP-10, AP-11 |
 | B6 | Docker lifecycle/health → controller | local orchestration | dismissed: no host data and parser/API removed | compose.runtime.yml |
 | B7 | remote command → downstream systems | request/outcome audited | prevention dismissed: user code controls activity | Invoke-HHCommand; AP-5 |
 | B9 | controller → private visualizer producer API | file-only token; private Docker network; bounded status GET; exact write-body SHA-256; UUID idempotency keys; bounded body/time | bearer token compromise permits forged producer reads/writes until rotation | VisualizerProducer.ps1; compose.runtime.yml; AP-16 |
@@ -93,7 +93,7 @@ consequence; unknown means not determined.
 | Anchors/generations | anchor root and chains | detects rollback/tamper |
 | Policy/authorized keys | managed hosts | partial mutation can persist privilege |
 | Release verdicts | .artifacts/release/SHA | determines ship eligibility |
-| Coverage denominator and receipt | exact tree and heavy receipt | prevents omitted code or stale proof from authorizing release |
+| Native coverage denominator and receipt | exact tree and independent coverage receipt | prevents omitted code, weakened thresholds, or stale proof from authorizing release |
 | Interactive password | SecureString and command-scoped broker memory | grants initial managed-host access |
 | Stored password envelope | SQLite ciphertext; key material in separate secret root | enables invisible privileged host authentication |
 | Host observations | encrypted SQLite payload and authenticated visualizer state | drives endpoint identity and visualization |
@@ -130,9 +130,9 @@ Non-capabilities:
 | AP-6 | spoof identity/exhaust | hostile endpoint → B3 → trust/availability | access | medium | high | high | fingerprint; PS7 marker; limits | transport/Compose |
 | AP-7 | overwrite/rerun verdict | failed process → B5 → receipts | integrity | low | high | medium | atomic claim; O_EXCL; seal | release scripts |
 | AP-8 | misread Windows policy state | native `AUDIT_NONE` representation → B3 → restoration verdict | integrity | low | high | medium | effective-bit normalization; Event 4688 proof; exact restoration | policy implementation/tests/qualification |
-| AP-9 | forge a coverage pass | candidate collector → B8 → release verdict | integrity / detection-evasion | medium | high | high | external gate recomputes inventory/hash and enforces all four metrics | coverage receipt validator |
-| AP-10 | ship instrumented runtime code | ephemeral branch rewrite → B8 → production image | integrity / execution | low | high | medium | separate untouched build; production image probe-token rejection | build-candidate.sh |
-| AP-11 | exhaust or loop the gate | branch hit → B8 → local compute/storage | availability | low | medium | low | in-memory hit set; two fixed invocations; 300-second bound; no retries | coverage runner; verify-local.sh |
+| AP-9 | forge a coverage pass | candidate collector → B8 → release verdict | integrity / detection-evasion | medium | high | high | external gate recomputes inventory/hash and enforces three native metrics | coverage receipt validator |
+| AP-10 | omit shipped source or weaken a threshold | candidate coverage configuration → B8 → release verdict | integrity / detection-evasion | medium | high | high | exact source inventory/hash and fixed external threshold contract | coverage receipt validator |
+| AP-11 | exhaust or loop the gate | native profiler → B8 → local compute | availability | medium | medium | medium | one root timeout; terminal receipt; no retry or diagnostic rerun | coverage runner; verify-local.sh |
 | AP-12 | execute injected local proxy code | forged metadata → B0 → macOS session | execution | low | high | medium | exact image fingerprint; unique names; declaration AST allows parameter metadata only; size caps | client metadata synchronization |
 | AP-13 | disclose or replay a password | malicious frame/process → B0 → credential | access / exfiltration | medium | high | high | local secure prompt; one request; stdin; random broker token; loopback only; no args/env/files/logs; buffer clearing | client protocol qualification |
 | AP-14 | pin an impersonating host on first contact | network interception → B3 → host trust/password | access / exfiltration | medium | high | high | deterministic supported-key selection; fingerprint announcement; pin before credential; optional supplied fingerprint; changed-key hard failure | SshTrust.ps1; trust and native-client tests |
@@ -145,12 +145,11 @@ Non-capabilities:
 
 AP-1 through AP-6 are medium likelihood because realistic untrusted inputs must
 also defeat an evidenced control. AP-7 is low because exclusive writes directly
-prevent overwrite. AP-9 remains high priority because a contributor can change
-candidate-owned test code, but the independently maintained validator prevents
-that code from silently omitting shipped source or lowering a metric. AP-10 and
-AP-11 are lower likelihood after the production-token check and bounded
-in-memory collector. Impact is high where privilege or release integrity is at
-stake.
+prevent overwrite. AP-9 and AP-10 remain high priority because a contributor
+can change candidate-owned test code, but the independently maintained validator
+prevents that code from silently omitting shipped source or lowering a metric.
+AP-11 remains bounded by one terminal attempt and cannot trigger a retry loop.
+Impact is high where privilege or release integrity is at stake.
 
 ## 8. Recommended Mitigations
 
@@ -164,9 +163,9 @@ stake.
 | AP-6 | Keep fingerprint/PS7 and output/stall limits | SSH/container | preventative |
 | AP-7 | Preserve consumed-SHA markers and require a new SHA | release cleanup | preventative |
 | AP-8 | Preserve effective success/failure-bit comparison and restoration tests | Windows policy implementation | preventative/detective |
-| AP-9 | Keep exact-tree inventory/hash and four-metric validation outside the candidate repository | standalone laptop gate | preventative |
-| AP-10 | Reject branch-probe tokens in the production image before qualification | exact-SHA build phase | preventative |
-| AP-11 | Keep one process, two fixed invocations, terminal timeout receipt, and zero retries | coverage/release runner | preventative/detective |
+| AP-9 | Keep exact-tree inventory/hash and three-native-metric validation outside the candidate repository | standalone laptop gate | preventative |
+| AP-10 | Require the exact shipped-source inventory and fixed 90-percent thresholds in the independent receipt validator | exact-SHA receipt state | preventative |
+| AP-11 | Keep one root timeout, terminal timeout/aborted receipt, and zero retries | coverage/release runner | preventative/detective |
 | AP-12 | Keep metadata schema/fingerprint/AST/duplicate checks and static no-transport client guard | native client | preventative |
 | AP-13 | Keep one-prompt protocol, frame bounds, token-bound loopback, memory clearing, and fixture leakage assertions | native client/credential broker | preventative/detective |
 | AP-14 | Keep changed-key rejection fail-closed and document supplying an independently verified fingerprint for onboarding across untrusted networks | managed-host engine/native client/docs | preventative/governance |
@@ -185,7 +184,9 @@ stake.
 - user-confirmed: internal Docker traffic is outside the host boundary.
 - user-corrected: all controller-to-host behavior uses the audited engine.
 - user-confirmed: coverage includes every shipped source file, remains unit-only,
-  and preserves four independent 90-percent thresholds.
+  and preserves independent 90-percent statement, executable-line, and invoked-
+  function thresholds; branch confidence is provided by explicit behavioral
+  tests rather than custom AST instrumentation.
 - user-confirmed: independent release phases run once, Windows precedes
   coverage, and no failed exact SHA is retried.
 - user-confirmed: macOS PowerShell auto-starts Docker, synchronizes exports, and

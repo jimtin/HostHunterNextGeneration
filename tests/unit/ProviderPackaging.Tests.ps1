@@ -12,6 +12,8 @@ Describe 'SQLite provider packaging contract' -Tag Unit {
             $script:repoRoot 'eng/durability/packages.lock.json'
         $script:moduleManifestPath = Join-Path `
             $script:repoRoot 'src/HostHunterNextGeneration/HostHunterNextGeneration.psd1'
+        $script:restoreScriptPath = Join-Path `
+            $script:repoRoot 'scripts/dependencies/restore-sqlite.sh'
     }
 
     It 'pins the net8 provider graph and two Linux container RIDs' {
@@ -57,6 +59,50 @@ Describe 'SQLite provider packaging contract' -Tag Unit {
             'net8.0/linux-arm64'
             'net8.0/linux-x64'
         )
+    }
+
+    It 'exports exactly the approved nine SQLite assets for each qualified RID' {
+        $restoreSource = Get-Content -LiteralPath $script:restoreScriptPath -Raw
+        $ridMatch = [regex]::Match(
+            $restoreSource,
+            '(?ms)expected_rids=\((?<body>.*?)\)'
+        )
+        $assetMatch = [regex]::Match(
+            $restoreSource,
+            '(?ms)expected_assets=\((?<body>.*?)\)'
+        )
+        $ridMatch.Success | Should -BeTrue
+        $assetMatch.Success | Should -BeTrue
+
+        $rids = @($ridMatch.Groups['body'].Value -split '\s+' |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        $assets = @($assetMatch.Groups['body'].Value -split '\s+' |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+
+        $rids | Should -Be @('linux-arm64', 'linux-x64')
+        $assets | Should -Be @(
+            'Humanizer.dll'
+            'Json.More.dll'
+            'JsonPointer.Net.dll'
+            'JsonSchema.Net.dll'
+            'Microsoft.Data.Sqlite.dll'
+            'SQLitePCLRaw.batteries_v2.dll'
+            'SQLitePCLRaw.core.dll'
+            'SQLitePCLRaw.provider.e_sqlite3.dll'
+            'libe_sqlite3.so'
+        )
+        $assets.Count | Should -Be 9
+        @($assets | Select-Object -Unique).Count | Should -Be 9
+
+        $restoreSource | Should -Match 'actual_rids=\(\)'
+        $restoreSource | Should -Match (
+            [regex]::Escape('[[ "${actual_rids[*]}" == "${expected_rids[*]}" ]]')
+        )
+        $restoreSource | Should -Match (
+            [regex]::Escape('[[ "$(find "$rid_root" -maxdepth 1 -type f | wc -l)" -eq "${#expected_assets[@]}" ]]')
+        )
+        $restoreSource | Should -Match 'for asset in "\$\{expected_assets\[@\]\}"'
+        $restoreSource | Should -Match '\[\[ -f "\$rid_root/\$asset" \]\]'
     }
 
     It 'ships an SBOM entry for every locked package' {

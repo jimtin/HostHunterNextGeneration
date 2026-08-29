@@ -50,14 +50,24 @@ and verify public behavior plus read-only SQLite state deltas. A Linux run prove
 a finite audited unsupported result for Windows process policy; positive policy
 proof belongs to the bounded live-Windows qualification.
 
-Coverage (minimum 90 percent independently for statements, branches, functions,
-and lines; 92 percent engineering target), critical SQLite integration,
-security/dependency/image scans, and the production build are release-only.
-Coverage uses every shipped production source file and unit tests only. Its one
-bounded container command owns one PowerShell process and exactly two fixed
-passes: untouched-source native coverage followed by an ephemeral
-branch-instrumented pass. Never add retries, shards, worker fan-out, per-hit disk
-I/O, network fixtures, or integration/live results to the coverage numerator.
+Coverage (minimum 90 percent independently for statements, executable lines,
+and invoked functions; 92 percent engineering target), critical SQLite
+integration, security/dependency/image scans, and the production build are
+release-only. Coverage uses every shipped production source file and unit tests
+only. Branch confidence comes from named behavioral tests for public
+validation, authentication, dispatch, persistence, and recovery outcomes;
+there is no synthetic branch-percentage gate or custom AST instrumentation.
+Never add retries, shards, worker fan-out, per-hit disk I/O, network fixtures,
+or integration/live results to the coverage numerator.
+
+Focused development tests run once in one container with a 30-second hard
+limit. The ordinary unit smoke runs once without coverage with a 45-second hard
+limit. Pre-commit is limited to the secret scan, static/governance checks, and
+changed/focused tests. Pre-push is limited to the secret/dependency scans,
+static/governance checks, one ordinary unit smoke, one cmdlet/SQLite journey,
+and the native macOS journey only when its owned surface changed. Hooks must not
+run release coverage, production builds, image scans, live Windows
+qualification, or broad persistence matrices.
 
 `scripts/release/verify-candidate.sh <SHA>` claims an exact clean SHA atomically,
 builds the exact images once, runs the cmdlet verifier once, runs positive

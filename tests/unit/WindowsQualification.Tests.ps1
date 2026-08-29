@@ -63,12 +63,46 @@ Describe 'Live Windows cmdlet qualification contract' -Tag Unit {
         $script:wrapper | Should -Match 'docker pause "\$source_controller"'
         $script:wrapper | Should -Match 'docker unpause "\$source_controller"'
         $script:wrapper | Should -Match '\$\{source_volumes\[\$index\]\}:/source:ro'
+        $script:wrapper | Should -Match '--workdir / --user 0:0'
+        $script:wrapper | Should -Match '--cap-drop ALL --cap-add CHOWN'
+        $script:wrapper | Should -Match 'chown 10001:10001 /destination'
+        $script:wrapper | Should -Match '--workdir / --user 10001:10001'
         $script:wrapper | Should -Match 'cp -a /source/\. /destination/'
         $script:wrapper | Should -Match 'docker volume rm "\$\{volumes\[@\]\}"'
         $script:wrapper | Should -Match 'Get-HHTarget \| Where-Object'
         $script:wrapper | Should -Match 'eligible_count'
         $script:wrapper | Should -Not -Match '--interactive|--tty'
         $script:wrapper | Should -Not -Match '\b(?:ssh|scp|sftp)\b\s+-'
+    }
+
+    It 'uses a least-privilege two-step initializer for protected volume copies' {
+        $initializer = [regex]::Match(
+            $script:wrapper,
+            '(?ms)docker run --rm --network none --read-only --workdir / --user 0:0 \\\r?\n' +
+            '\s+--cap-drop ALL --cap-add CHOWN \\\r?\n' +
+            '\s+--security-opt no-new-privileges:true \\\r?\n' +
+            '\s+--volume "\$\{volumes\[\$index\]\}:/destination" \\\r?\n' +
+            '\s+--entrypoint sh "\$image_id" -ceu ''(?<body>.*?)'''
+        )
+        $initializer.Success | Should -BeTrue
+        $initializer.Groups['body'].Value | Should -Match 'chmod 0700 /destination'
+        $initializer.Groups['body'].Value | Should -Match 'chown 10001:10001 /destination'
+        $initializer.Value | Should -Not -Match '/source'
+
+        $copy = [regex]::Match(
+            $script:wrapper,
+            '(?ms)docker run --rm --network none --read-only --workdir / --user 10001:10001 \\\r?\n' +
+            '\s+--cap-drop ALL \\\r?\n' +
+            '\s+--security-opt no-new-privileges:true \\\r?\n' +
+            '\s+--volume "\$\{source_volumes\[\$index\]\}:/source:ro" \\\r?\n' +
+            '\s+--volume "\$\{volumes\[\$index\]\}:/destination" \\\r?\n' +
+            '\s+--entrypoint sh "\$image_id" -ceu ''(?<body>.*?)'''
+        )
+        $copy.Success | Should -BeTrue
+        $copy.Groups['body'].Value |
+            Should -Match 'test -z "\$\(find /destination -mindepth 1 -print -quit\)"'
+        $copy.Groups['body'].Value | Should -Match 'cp -a /source/\. /destination/'
+        $copy.Value | Should -Not -Match '--cap-add|\bchown\b|\bchmod\b'
     }
 
     It 'binds Windows proof to the exact build image and not the coverage verdict' {
@@ -78,5 +112,15 @@ Describe 'Live Windows cmdlet qualification contract' -Tag Unit {
         $script:wrapper | Should -Match 'authenticationMode=="existing-public-key"'
         $script:wrapper | Should -Match 'cloneMissionPaused==true'
         $script:wrapper | Should -Not -Match 'verify-local\.json|Heavy-proof receipt'
+    }
+
+    It 'preserves a coherent terminal failure receipt for exact-SHA aggregation' {
+        $script:wrapper | Should -Match (
+            '\(\.status=="failed" or \.status=="blocked" or \.status=="aborted"\)'
+        )
+        $script:wrapper | Should -Match 'chmod 0400 "\$receipt\.tmp"'
+        $script:wrapper | Should -Match 'mv -- "\$receipt\.tmp" "\$receipt"'
+        $script:wrapper | Should -Match 'candidateSha==\$sha'
+        $script:wrapper | Should -Match 'controllerImageId==\$image'
     }
 }

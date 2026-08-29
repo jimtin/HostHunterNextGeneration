@@ -76,7 +76,9 @@ if [[ -d "$artifact_root/release" ]]; then
       # deleting them would make an already-consumed exact SHA runnable again.
       while IFS= read -r -d '' payload; do
         case "$(basename -- "$payload")" in
-          claim.json|receipt.json|build-receipt.json|cmdlet-receipt.json|heavy-receipt.json|windows-receipt.json) ;;
+          claim.json|receipt.json|build-receipt.json|cmdlet-receipt.json|\
+          windows-receipt.json|coverage-receipt.json|persistence-receipt.json|\
+          security-receipt.json|orchestration-receipt.json) ;;
           *) add_target "$payload" superseded \
             'non-receipt payload belongs to a terminal non-active release candidate' ;;
         esac

@@ -14,6 +14,7 @@ x-verifier-environment: &verifier-environment
   HH_CMDLET_RECEIPT: /artifacts/cmdlets/receipt.json
   HH_SOURCE_SHA: ${HH_SOURCE_SHA:?HH_SOURCE_SHA is required}
   HH_VERIFIER_IMAGE_ID: ${HH_VERIFIER_IMAGE_ID:?HH_VERIFIER_IMAGE_ID is required}
+  HH_CMDLET_ASKPASS: /workspace/tests/fixtures/ssh/fixture-askpass.sh
 
 services:
   verifier:
@@ -39,14 +40,21 @@ services:
       - ssh:/var/lib/hosthunter-data/keys
       - evidence:/var/lib/hosthunter-evidence
       - fixture-runtime:/run/hosthunter-ssh-fixture:ro
+      - ${HH_CMDLET_REPO_ROOT:?HH_CMDLET_REPO_ROOT is required}:/workspace:ro
       - ${HH_CMDLET_ARTIFACT_ROOT:?HH_CMDLET_ARTIFACT_ROOT is required}:/artifacts
     networks:
       - cmdlets
     depends_on:
       ssh-target:
         condition: service_healthy
+    entrypoint:
+      - pwsh
+      - -NoLogo
+      - -NoProfile
+      - -NonInteractive
+      - -File
     command:
-      - /opt/hosthunter-cmdlet-tests/TargetAndCommandJourneys.Tests.ps1
+      - /workspace/tests/e2e/TargetAndCommandJourneys.Tests.ps1
 
   ssh-target:
     image: ${HH_CMDLET_SSH_IMAGE:?HH_CMDLET_SSH_IMAGE is required}

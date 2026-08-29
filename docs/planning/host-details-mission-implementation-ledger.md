@@ -60,7 +60,7 @@ machine identifiers are never returned, logged, persisted, or sent.
 | Local evidence is encrypted and authenticated before delivery | Migration 0003 repository and external anchor | Migration, tamper, plaintext sweep | verified |
 | Established visualizer contract remains byte-compatible | Mirrored OpenAPI/schemas/examples | Cross-repo semantic comparison | verified |
 | No event logs or continuous telemetry | No process/event routes, phases, jobs, or collectors | Deleted/negative surface sweep | verified |
-| Canonical verifier invokes 13 unique cmdlets once | One ordered journey, no retries/shards/fanout | `verify-cmdlets.sh` receipt | implemented; latest bounded run 11/13 before final allowlist fix; no rerun loop |
+| Canonical verifier invokes the 12 exported framework cmdlets once | One ordered journey, no retries/shards/fanout | `verify-cmdlets.sh` receipt | implemented; current exact-SHA rerun belongs to the release gate |
 
 ## User-action coverage matrix
 

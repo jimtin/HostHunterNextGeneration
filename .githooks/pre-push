@@ -3,4 +3,7 @@
 set -Eeuo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 readonly repo_root
-exec "${repo_root}/scripts/prepush.sh"
+mkdir -p -- "${repo_root}/.artifacts/logs"
+exec "${repo_root}/scripts/lib/run-bounded.sh" \
+    prepush 180 90 "${repo_root}/.artifacts/logs/prepush.log" \
+    "${repo_root}/scripts/prepush.sh"

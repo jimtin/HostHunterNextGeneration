@@ -8,9 +8,16 @@ source_sha="$(git -C "${repo_root}" rev-parse HEAD)"
 readonly source_sha
 readonly short_sha="${source_sha:0:12}"
 readonly project="hosthunter-cmdlets-${short_sha}-$RANDOM"
-readonly controller_image="${HH_RELEASE_CONTROLLER_IMAGE:-hosthunter-controller-cmdlets:${short_sha}}"
-readonly verifier_image="${HH_RELEASE_VERIFIER_IMAGE:-hosthunter-verifier:${short_sha}}"
-readonly ssh_image="${HH_RELEASE_SSH_IMAGE:-hosthunter-ssh-fixture:${short_sha}}"
+if [[ "${HH_RELEASE_IMAGES_PREBUILT:-0}" == 1 ]]; then
+  controller_image="${HH_RELEASE_CONTROLLER_IMAGE:?Prebuilt controller image is required}"
+  verifier_image="${HH_RELEASE_VERIFIER_IMAGE:?Prebuilt verifier image is required}"
+  ssh_image="${HH_RELEASE_SSH_IMAGE:?Prebuilt SSH fixture image is required}"
+else
+  controller_image="${HH_CMDLET_CONTROLLER_IMAGE:-hosthunter-next-generation-runtime-controller:local}"
+  verifier_image="$controller_image"
+  ssh_image="${HH_CMDLET_SSH_IMAGE:-hosthunter-next-generation-ssh-fixture:local}"
+fi
+readonly controller_image verifier_image ssh_image
 readonly artifact_root="${repo_root}/.artifacts/cmdlets/${source_sha}"
 readonly receipt_path="${artifact_root}/cmdlets/receipt.json"
 
@@ -20,6 +27,7 @@ cleanup() {
   HH_VERIFIER_IMAGE_ID="unused" \
   HH_CMDLET_VERIFIER_IMAGE="${verifier_image}" \
   HH_CMDLET_SSH_IMAGE="${ssh_image}" \
+  HH_CMDLET_REPO_ROOT="${repo_root}" \
   HH_CMDLET_ARTIFACT_ROOT="${artifact_root}" \
     docker compose --file "${repo_root}/compose.cmdlets.yml" down \
       --remove-orphans --volumes >/dev/null 2>&1 || true
@@ -69,12 +77,17 @@ mkdir -p -- "${artifact_root}/cmdlets"
 rm -f -- "${receipt_path}"
 
 if [[ "${HH_RELEASE_IMAGES_PREBUILT:-0}" != 1 ]]; then
-  docker build --file "${repo_root}/Dockerfile.runtime" --target production \
-    --tag "${controller_image}" "${repo_root}"
-  docker build --build-arg "HH_CONTROLLER_IMAGE=${controller_image}" \
-    --file "${repo_root}/Dockerfile.cmdlets" --tag "${verifier_image}" "${repo_root}"
-  docker build --file "${repo_root}/tests/fixtures/ssh/Dockerfile" \
-    --tag "${ssh_image}" "${repo_root}/tests/fixtures/ssh"
+  expected_fingerprint="$(pwsh -NoLogo -NoProfile -NonInteractive \
+    -File "${repo_root}/scripts/client/Get-HHSourceFingerprint.ps1" \
+    -RepoRoot "${repo_root}")"
+  actual_fingerprint="$(docker image inspect --format \
+    '{{ index .Config.Labels "com.hosthunter.source-fingerprint" }}' \
+    "${controller_image}")"
+  if [[ "${actual_fingerprint}" != "${expected_fingerprint}" ]]; then
+    printf 'The cached HostHunter controller is stale; load HostHunter once to synchronize it before testing.\n' >&2
+    exit 2
+  fi
+  docker image inspect "${ssh_image}" >/dev/null
 fi
 
 verifier_image_id="$(docker image inspect --format '{{.Id}}' "${verifier_image}")"
@@ -92,8 +105,9 @@ HH_SOURCE_SHA="${source_sha}" \
 HH_VERIFIER_IMAGE_ID="${verifier_image_id}" \
 HH_CMDLET_VERIFIER_IMAGE="${verifier_image}" \
 HH_CMDLET_SSH_IMAGE="${ssh_image}" \
+HH_CMDLET_REPO_ROOT="${repo_root}" \
 HH_CMDLET_ARTIFACT_ROOT="${artifact_root}" \
-  "${repo_root}/scripts/lib/run-bounded.sh" cmdlet-verifier 300 120 \
+  "${repo_root}/scripts/lib/run-bounded.sh" cmdlet-verifier 90 60 \
     "${artifact_root}/cmdlets/verifier.log" \
     docker compose --file "${repo_root}/compose.cmdlets.yml" run --rm verifier
 readonly verifier_exit=$?

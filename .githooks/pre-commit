@@ -3,4 +3,7 @@
 set -Eeuo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 readonly repo_root
-exec "${repo_root}/scripts/precommit.sh"
+mkdir -p -- "${repo_root}/.artifacts/logs"
+exec "${repo_root}/scripts/lib/run-bounded.sh" \
+    precommit 45 30 "${repo_root}/.artifacts/logs/precommit.log" \
+    "${repo_root}/scripts/precommit.sh"

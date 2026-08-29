@@ -21,6 +21,7 @@ services:
     command:
       - bash
       - scripts/lanes/unit.sh
+      - coverage
 
   test:
     build:

@@ -4,20 +4,9 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$expectedCommands = @(
-    'Enable-HHSshKeyAuthentication'
-    'Get-HHAuditOutput'
-    'Get-HHAuditRecord'
-    'Get-HHEscalationPreference'
-    'Get-HHTarget'
-    'Get-TargetHostDetails'
-    'Invoke-HHCommand'
-    'Remove-HHTarget'
-    'Set-HHEscalationPreference'
-    'Set-HHTarget'
-    'Set-HHWindowsProcessAuditPolicy'
-    'Test-HHTarget'
-)
+$modulePath = [IO.Path]::GetFullPath($env:HH_RUNTIME_MODULE_PATH)
+$moduleManifest = Import-PowerShellDataFile -LiteralPath $modulePath
+$expectedCommands = @($moduleManifest.FunctionsToExport | Sort-Object -Unique)
 $orderedJourney = @(
     'Get-HHTarget'
     'Set-HHTarget'
@@ -36,7 +25,10 @@ $receiptPath = if ([string]::IsNullOrWhiteSpace($env:HH_CMDLET_RECEIPT)) {
     '/artifacts/cmdlets/receipt.json'
 }
 else { [IO.Path]::GetFullPath($env:HH_CMDLET_RECEIPT) }
-$modulePath = [IO.Path]::GetFullPath($env:HH_RUNTIME_MODULE_PATH)
+if (@(Compare-Object -ReferenceObject $expectedCommands `
+            -DifferenceObject @($orderedJourney | Sort-Object -Unique)).Count -ne 0) {
+    throw 'The cmdlet journey must contain exactly one handler for every exported function.'
+}
 $dataRoot = [IO.Path]::GetFullPath($env:HH_DATA_ROOT)
 $databasePath = Join-Path $dataRoot 'hosthunter.db'
 $runtimeDirectory = [IO.Path]::GetFullPath($env:HH_SSH_RUNTIME_DIR)
@@ -49,7 +41,10 @@ $script:commandResult = $null
 $script:auditCountBeforeRemoval = 0
 
 $env:DISPLAY = 'hosthunter-cmdlet-verifier'
-$env:SSH_ASKPASS = '/opt/hosthunter-cmdlet-tests/fixture-askpass.sh'
+$env:SSH_ASKPASS = if ([string]::IsNullOrWhiteSpace($env:HH_CMDLET_ASKPASS)) {
+    '/opt/hosthunter-cmdlet-tests/fixture-askpass.sh'
+}
+else { $env:HH_CMDLET_ASKPASS }
 $env:SSH_ASKPASS_REQUIRE = 'force'
 $env:HH_SSH_PASSWORD_FILE = Join-Path $runtimeDirectory 'password'
 
@@ -442,7 +437,9 @@ finally {
     $finalSnapshot = try { Get-HHDatabaseSnapshot } catch { $null }
     $receipt = [pscustomobject][ordered]@{
         schema = 'HostHunter.CmdletVerifierReceipt.v1'
-        status = if ($failed.Count -eq 0 -and $rows.Count -eq 12) { 'passed' } else { 'failed' }
+        status = if ($failed.Count -eq 0 -and $rows.Count -eq $expectedCommands.Count) {
+            'passed'
+        } else { 'failed' }
         sourceSha = $env:HH_SOURCE_SHA
         verifierImageId = $env:HH_VERIFIER_IMAGE_ID
         moduleManifestSha256 = (Get-FileHash -LiteralPath $modulePath -Algorithm SHA256).Hash.ToLowerInvariant()

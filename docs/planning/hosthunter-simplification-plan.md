@@ -413,20 +413,19 @@ The ordinary user journey stays simple. Retain focused release-only proof for:
 | Windows compensation | Exact policy and key cleanup in live receipt |
 
 The retained active unit suite must meet at least 90 percent independently for
-statements, branches, functions, and lines, with a 92 percent engineering target.
-Every shipped production source file is counted. Materially changed engine and
-persistence code targets 95 percent.
+native statements, executable lines, and invoked functions, with a 92 percent
+engineering target. Every shipped production source file is counted.
+Materially changed engine and persistence code targets 95 percent. Named
+behavioral tests cover meaningful validation, authentication, dispatch,
+persistence, and recovery branches.
 
-Coverage never invokes the 11-cmdlet E2E journey.
+Coverage never invokes the 12-cmdlet E2E journey.
 
-Coverage is one bounded container command owning one PowerShell process and two
-fixed sequential unit passes: untouched source for native statement/line and
-AST-owned function coverage, then an ephemeral instrumented copy for genuine
-branch outcomes. The branch collector holds outcome IDs in memory and writes
-once. Integration and live results cannot increase unit coverage. There are no
-retries, shards, nested runners, worker processes, per-hit files, SSH/Windows
-fixtures, or database service in the coverage command. Normal duration targets
-180 seconds or less and the hard timeout is 300 seconds.
+Coverage is one bounded, networkless standard-profiler container command.
+Integration and live results cannot increase unit coverage. There is no custom
+AST branch collector, source rewriting, retry, shard, nested runner, worker
+process, per-hit file, SSH/Windows fixture, or database service in the coverage
+command.
 
 PowerShell CLI/service-journey coverage is the browser/E2E equivalent.
 Playwright and visual testing are not applicable.
@@ -463,15 +462,15 @@ Rules:
 |---|---|---:|
 | Preflight | Detached checkout, Docker, credentials, disk, state checks | No test attempt consumed |
 | Build/package | Build the supported exact-SHA images and package once | 600s |
-| Cmdlets | Two-container 11-cmdlet journey | 180s |
-| Windows | One live Windows journey against the exact image | 900s |
-| Coverage | Unit-only two-pass four-metric coverage | 300s |
-| Critical integration | Focused SQLite, recovery, SSH and persistence proof | Bounded |
-| Security | Gitleaks, dependency, filesystem, package, SBOM/licence, image scans | 900s |
+| Cmdlets | Two-container 12-cmdlet journey | 90s |
+| Windows | One live Windows journey against the exact image | 180s |
+| Coverage | Unit-only native three-metric coverage | 300s |
+| Critical integration | Focused authenticated SQLite fault and recovery proof | 300s |
+| Security | Gitleaks, dependency, filesystem, package, SBOM/licence, image scans | 600s |
 | Aggregator | Validate receipts and derive final verdict | 10s |
 
 Later failures never replace or hide the cmdlet verdict. A final report may say
-`cmdlets passed 11/11; release failed during image scanning`.
+`cmdlets passed 12/12; release failed during image scanning`.
 
 Every independent phase runs once even after another independent phase fails.
 Only a genuine dependency may prevent a phase, recorded as
@@ -481,11 +480,12 @@ read-only and cannot schedule a diagnostic rerun.
 
 ### 10.2 Hooks
 
-- Pre-commit: syntax, module-export contract, and engine-boundary guard only.
-- Pre-push: validates that required exact-HEAD receipts already exist; it
-  executes no test suite.
-- The exact-SHA gate creates the Gitleaks receipt once before the first push of
-  that SHA.
+- Pre-commit: repo-scoped Gitleaks, static/governance checks, and
+  changed/focused tests, with a 45-second hard limit.
+- Pre-push: repo-scoped Gitleaks, dependency audit, static/governance checks,
+  one ordinary unit smoke, and one 12-cmdlet/SQLite journey. The native macOS
+  journey is impact-selected. Coverage, builds, image scans, Windows, and broad
+  persistence matrices are prohibited.
 - GitHub runs no tests.
 
 ## 11. Container simplification
@@ -651,8 +651,8 @@ Run once for the exact candidate SHA:
 1. Preflight, claim, and build the exact images once.
 2. Cmdlet journey.
 3. Windows journey against the exact image.
-4. Unit-only two-pass coverage.
-5. Critical integration.
+4. Unit-only native three-metric coverage.
+5. Focused authenticated SQLite fault and recovery integration.
 6. Security scans.
 7. Read-only aggregation.
 
@@ -779,12 +779,14 @@ The user approved:
 - one shared managed-host engine;
 - internal Docker traffic excluded from that engine;
 - release-only coverage, scans, and production builds;
-- coverage across every shipped source file using one container, one PowerShell
-  process, two fixed unit passes, four independent 90 percent thresholds, and a
-  92 percent engineering target;
+- coverage across every shipped source file using one networkless container,
+  standard native evidence, independent 90 percent statement/line/invoked-
+  function thresholds, a 92 percent engineering target, and explicit
+  behavioral branch tests;
 - immutable once-per-SHA receipts;
-- starting from clean commit `b7e53b8`;
-- destructively discarding the 65-path dirty Git state;
+- starting from clean commit `31d6baa` after preserving the experiment outside
+  the repository;
+- destructively discarding the verified 25-path dirty testing experiment;
 - saving this plan before cleanup.
 
-Implementation was explicitly authorized by the user on 2026-08-26.
+The fast test contract was explicitly authorized by the user on 2026-08-29.

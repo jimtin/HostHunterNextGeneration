@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
-    [string]$TestPath,
+    [string[]]$TestPath,
 
     [Parameter(Mandatory)]
     [string]$Tag,
@@ -17,7 +17,14 @@ $ErrorActionPreference = 'Stop'
 
 Import-Module Pester -RequiredVersion $PesterVersion -Force
 $configuration = New-PesterConfiguration
-$configuration.Run.Path = @((Resolve-Path -LiteralPath $TestPath).Path)
+$resolvedTestPaths = @($TestPath | ForEach-Object { $_ -split "`r?`n" } |
+    Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+    ForEach-Object { (Resolve-Path -LiteralPath $_).Path } |
+    Select-Object -Unique)
+if ($resolvedTestPaths.Count -eq 0) {
+    throw 'At least one test path is required.'
+}
+$configuration.Run.Path = $resolvedTestPaths
 $configuration.Run.PassThru = $true
 $configuration.Run.Exit = $false
 $configuration.Filter.Tag = @($Tag)

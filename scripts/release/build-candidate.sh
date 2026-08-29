@@ -84,11 +84,6 @@ failure='Production-derived cmdlet verifier image build failed'
 docker build --build-arg "HH_CONTROLLER_IMAGE=$controller_image" \
   --file "$repo_root/Dockerfile.cmdlets" --tag "$verifier_image" "$repo_root"
 
-phase=production-probe-check
-failure='Coverage instrumentation leaked into the production package'
-docker run --rm --network none --entrypoint sh "$controller_image" -c \
-  '! grep -R -E "Invoke-HHBranchProbe|HH_BRANCH_COVERAGE" /opt/hosthunter/module'
-
 status=passed
 failure=''
 write_receipt 0

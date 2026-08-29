@@ -151,7 +151,16 @@ done
 docker pause "$source_controller" >/dev/null
 source_paused=true
 for index in "${!roles[@]}"; do
-  docker run --rm --network none --read-only --user 0:0 --cap-drop ALL \
+  docker run --rm --network none --read-only --workdir / --user 0:0 \
+    --cap-drop ALL --cap-add CHOWN \
+    --security-opt no-new-privileges:true \
+    --volume "${volumes[$index]}:/destination" \
+    --entrypoint sh "$image_id" -ceu '
+      chmod 0700 /destination
+      chown 10001:10001 /destination
+    '
+  docker run --rm --network none --read-only --workdir / --user 10001:10001 \
+    --cap-drop ALL \
     --security-opt no-new-privileges:true \
     --volume "${source_volumes[$index]}:/source:ro" \
     --volume "${volumes[$index]}:/destination" \
@@ -200,8 +209,16 @@ if ! docker cp "$container:/var/lib/hosthunter-evidence/windows-receipt.json" \
   exit "${container_status:-1}"
 fi
 if ((container_status != 0)); then
-  jq '{status, failure, policyRestored, operatorStateCloned, rows}' \
-    "$receipt.tmp" >&2
+  jq -e --arg sha "$candidate_sha" --arg image "$image_id" '
+    (.status=="failed" or .status=="blocked" or .status=="aborted") and
+    .candidateSha==$sha and .controllerImageId==$image
+  ' "$receipt.tmp" >/dev/null || {
+    printf 'Windows qualification emitted an incoherent failure receipt.\n' >&2
+    exit 1
+  }
+  chmod 0400 "$receipt.tmp"
+  mv -- "$receipt.tmp" "$receipt"
+  jq '{status, failure, policyRestored, operatorStateCloned, rows}' "$receipt" >&2
   exit "$container_status"
 fi
 jq -e --arg sha "$candidate_sha" --arg image "$image_id" '
