@@ -6,16 +6,27 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd -P)"
 readonly repo_root
 cd -- "$repo_root"
 
-artifact_root="${HH_ARTIFACT_ROOT:-.artifacts}"
-receipt_root="$artifact_root/sqlite-integration"
+artifact_mount_root="$repo_root/.artifacts"
+release_artifact_root="${HH_SQLITE_RELEASE_ARTIFACT_ROOT:-$artifact_mount_root}"
+[[ -d "$release_artifact_root" && ! -L "$release_artifact_root" ]] || {
+  printf 'SQLite release artifact root is missing or unsafe: %s\n' \
+    "$release_artifact_root" >&2
+  exit 2
+}
+release_artifact_root="$(cd -- "$release_artifact_root" && pwd -P)"
+case "$release_artifact_root" in
+  "$artifact_mount_root"|"$artifact_mount_root"/*) ;;
+  *) printf 'SQLite release artifacts must remain under %s\n' "$artifact_mount_root" >&2; exit 2 ;;
+esac
+receipt_root="$release_artifact_root/sqlite-integration"
 mkdir -p -- "$receipt_root"
-module_path="$(tr -d '\r\n' </artifacts/build/module-path.txt)"
+module_path="$(tr -d '\r\n' <"$artifact_mount_root/build/module-path.txt")"
 
 test -f "$module_path"
 
 docker compose -f compose.test.yml run --rm --no-deps \
   -e "HH_TEST_MODULE_PATH=$module_path" \
-  test pwsh -NoLogo -NoProfile -NonInteractive -Command \
+  persistence pwsh -NoLogo -NoProfile -NonInteractive -Command \
   '$paths=@(
     "tests/integration/SqliteFaultRecovery.Tests.ps1"
     "tests/integration/SqliteFaultConcurrency.Tests.ps1"
@@ -25,9 +36,12 @@ docker compose -f compose.test.yml run --rm --no-deps \
   if ($result.FailedCount -gt 0) { exit 1 }'
 
 docker run --rm \
+  --read-only --network none --cap-drop ALL \
+  --security-opt no-new-privileges:true --pids-limit 128 --memory 512m --cpus 1 \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777 \
   --tmpfs /fault:rw,size=64m,mode=0700,uid=10001,gid=10001 \
   --volume "$repo_root:/workspace:ro" \
-  --volume "$repo_root/$artifact_root:/artifacts" \
+  --volume "$artifact_mount_root/build:/artifacts/build:ro" \
   --workdir /workspace \
   --env "HH_TEST_MODULE_PATH=$module_path" \
   --env HH_SQLITE_FAULT_ROOT=/fault \

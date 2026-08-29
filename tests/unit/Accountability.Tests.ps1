@@ -455,6 +455,25 @@ Describe 'transport accountability validation' -Tag Unit {
                 Should -Throw '*requires reconciliation*'
         }
 
+        It 'accepts a complete no-mutation outcome for an existing-key proof' {
+            $script:intent.IntentRecord.payload.operation = 'EnableSshKeyAuthentication'
+            $script:result | Add-Member -NotePropertyMembers ([ordered]@{
+                    Installed = $false
+                    RollbackAttempted = $false
+                    RollbackSucceeded = $null
+                    ReconciliationRequired = $false
+                    CommitState = 'NotRequested'
+                })
+
+            $validated = Assert-HHTransportAuditResult `
+                -TransportResult $script:result `
+                -IntentMetadata (Get-HHAuditIntentTransportContext $script:intent)
+
+            $validated.HasBootstrapOutcome | Should -BeTrue
+            $validated.Installed | Should -BeFalse
+            $validated.CommitState | Should -BeExactly NotRequested
+        }
+
         It 'rejects invalid result status, failure, stream, byte and exception metadata' {
             $cases = @(
                 @{ Name = 'Succeeded'; Value = 'true'; Expected = "*'Succeeded' must be Boolean*" },

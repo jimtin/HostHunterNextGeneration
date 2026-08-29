@@ -481,7 +481,16 @@ function Assert-HHTransportAuditResult {
             $outcomeStatus -cne 'Unknown') {
             throw 'An Unknown bootstrap commit state requires an Unknown aggregate outcome.'
         }
+        $isSuccessfulExistingKeyProof =
+            $IntentMetadata.Operation -ceq 'EnableSshKeyAuthentication' -and
+            $bootstrapOutcome.Installed -is [bool] -and
+            -not [bool]$bootstrapOutcome.Installed -and
+            -not $bootstrapOutcome.RollbackAttempted -and
+            $null -eq $bootstrapOutcome.RollbackSucceeded -and
+            -not $bootstrapOutcome.ReconciliationRequired -and
+            $bootstrapOutcome.CommitState -ceq 'NotRequested'
         if ($succeeded -and
+            -not $isSuccessfulExistingKeyProof -and
             ($bootstrapOutcome.CommitState -cne 'Committed' -or
                 $bootstrapOutcome.ReconciliationRequired)) {
             throw 'A successful SSH key bootstrap requires a committed, reconciled profile transition.'

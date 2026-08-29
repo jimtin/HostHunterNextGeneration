@@ -1312,6 +1312,19 @@ function Invoke-HHManagedHostEnableSshKeyAuthenticationOperation {
                         Succeeded = $true
                     }
                 }
+                TransportResultAugmenter = {
+                    param($SelectedTarget, $TransportResult, $CommandResult)
+                    $null = $SelectedTarget
+                    $null = $CommandResult
+                    $TransportResult | Add-Member -NotePropertyMembers ([ordered]@{
+                            Installed = $false
+                            RollbackAttempted = $false
+                            RollbackSucceeded = $null
+                            ReconciliationRequired = $false
+                            CommitState = 'NotRequested'
+                        })
+                    $TransportResult
+                }
             }
             $proof = @(Invoke-HHManagedHostCommandCoordinator @proofParameters)
             $proofMarker = @(if (

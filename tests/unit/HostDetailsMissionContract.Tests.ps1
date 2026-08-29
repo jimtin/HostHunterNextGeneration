@@ -170,8 +170,17 @@ Describe 'host details and mission public contract' -Tag Unit {
             @($raw.FieldResults.field | Sort-Object -Unique).Count | Should -Be @($raw.FieldResults).Count
             @($raw.FieldResults.field) | Should -Contain 'hosthunter.boot.time'
             @($raw.SourceMethods) | Should -Contain dotnet_runtime_information
-            @($raw.Ip | Where-Object { [Net.IPAddress]::IsLoopback([Net.IPAddress]::Parse($_)) }) |
-                Should -HaveCount 0
+            $ipProperty = $raw.PSObject.Properties['Ip']
+            if ($null -ne $ipProperty) {
+                @($ipProperty.Value | Where-Object {
+                        [Net.IPAddress]::IsLoopback([Net.IPAddress]::Parse($_))
+                    }) | Should -HaveCount 0
+            }
+            else {
+                $ipResult = @($raw.FieldResults | Where-Object field -eq 'host.ip')
+                $ipResult | Should -HaveCount 1
+                $ipResult[0].status | Should -Not -BeExactly observed
+            }
             if ($null -ne $raw.PSObject.Properties['Fqdn']) {
                 $raw.Fqdn | Should -BeExactly $raw.Fqdn.ToLowerInvariant()
             }
@@ -256,6 +265,92 @@ Describe 'host details and mission public contract' -Tag Unit {
             Assert-HHHostDetailsPayloadSchema -PayloadBytes $valid | Should -BeTrue
             $invalid=[Text.UTF8Encoding]::new($false).GetBytes('{"schema_version":"wrong"}')
             { Assert-HHHostDetailsPayloadSchema -PayloadBytes $invalid } | Should -Throw '*does not conform*'
+        }
+    }
+
+    It 'keeps visualizer connection defaults local and treats missing credentials as finite' {
+        InModuleScope HostHunterNextGeneration {
+            $previousBase = $env:HH_VISUALIZER_BASE_URI
+            $previousToken = $env:HH_VISUALIZER_TOKEN_FILE
+            try {
+                $env:HH_VISUALIZER_BASE_URI = $null
+                $env:HH_VISUALIZER_TOKEN_FILE = $null
+                $defaults = Get-HHVisualizerConnectionSettings
+                $defaults.BaseUri | Should -BeExactly 'http://hosthunter-visualizer:3000'
+                $defaults.TokenPath | Should -BeExactly `
+                    '/run/secrets/hosthunter_visualizer_producer_token'
+
+                $env:HH_VISUALIZER_BASE_URI = 'http://visualizer.internal:3000///'
+                $env:HH_VISUALIZER_TOKEN_FILE = Join-Path $TestDrive 'missing-token'
+                $custom = Get-HHVisualizerConnectionSettings
+                $custom.BaseUri | Should -BeExactly 'http://visualizer.internal:3000'
+                $result = Invoke-HHVisualizerPut -RelativePath '/api/v1/test' `
+                    -PayloadBytes ([Text.Encoding]::UTF8.GetBytes('{}'))
+                $result.Delivered | Should -BeFalse
+                $result.FailureKind | Should -BeExactly CredentialUnavailable
+                $result.ContentSha256 | Should -Match '^[a-f0-9]{64}$'
+            }
+            finally {
+                $env:HH_VISUALIZER_BASE_URI = $previousBase
+                $env:HH_VISUALIZER_TOKEN_FILE = $previousToken
+            }
+        }
+    }
+
+    It 'binds visualizer sender paths and payloads to their SHA256 digest' {
+        InModuleScope HostHunterNextGeneration {
+            $mission = [Guid]::NewGuid()
+            $eventId = [Guid]::NewGuid()
+            $bytes = [Text.Encoding]::UTF8.GetBytes('{"kind":"asset"}')
+            $script:requests = [Collections.Generic.List[object]]::new()
+            $requestSender = {
+                param($Path,$Payload,$Digest)
+                $script:requests.Add([pscustomobject]@{
+                        Path=$Path;Payload=[byte[]]$Payload;Digest=$Digest
+                    })
+                [pscustomobject]@{
+                    Delivered=$true;StatusCode=201;FailureKind=$null;ContentSha256=$Digest
+                }
+            }
+
+            Send-HHVisualizerMission -MissionId $mission -PayloadBytes $bytes `
+                -RequestSender $requestSender | Select-Object -ExpandProperty Delivered |
+                Should -BeTrue
+            Send-HHVisualizerObservation -MissionId $mission -EventId $eventId `
+                -PayloadBytes $bytes -RequestSender $requestSender |
+                Select-Object -ExpandProperty Delivered | Should -BeTrue
+
+            $script:requests.Count | Should -Be 2
+            $script:requests[0].Path | Should -BeExactly `
+                "/api/v1/collection-runs/$($mission.ToString('D').ToLowerInvariant())"
+            $script:requests[1].Path | Should -BeExactly (
+                "/api/v1/collection-runs/$($mission.ToString('D').ToLowerInvariant())" +
+                "/host-observations/$($eventId.ToString('D').ToLowerInvariant())"
+            )
+            $script:requests[0].Digest | Should -BeExactly $script:requests[1].Digest
+            { Invoke-HHVisualizerPut -RelativePath '/api/v1/test' `
+                    -PayloadBytes ([byte[]]::new(262145)) -RequestSender $requestSender } |
+                Should -Throw '*exceeds 256 KiB*'
+            $script:requests.Count | Should -Be 2
+        }
+    }
+
+    It 'rejects malformed visualizer status identity without making another request' {
+        InModuleScope HostHunterNextGeneration {
+            $script:statusAttempts = 0
+            $requestSender = {
+                $script:statusAttempts++
+                [pscustomobject]@{
+                    status='ready';service='hosthunter-visualizer';api_version='1.0.0'
+                    collection_run_schema_version='1.0.0'
+                    host_observation_schema_version='1.0.0'
+                    process_event_schema_version=$null
+                    active_collection_run_id='not-a-guid'
+                }
+            }
+            { Invoke-HHVisualizerStatus -RequestSender $requestSender } |
+                Should -Throw '*invalid collection-run identifier*'
+            $script:statusAttempts | Should -Be 1
         }
     }
 }

@@ -26,6 +26,9 @@ BeforeAll {
     $script:testCompose = Get-Content -LiteralPath (
         Join-Path $script:repositoryRoot 'compose.test.yml'
     ) -Raw
+    $script:sqliteRunner = Get-Content -LiteralPath (
+        Join-Path $script:repositoryRoot 'scripts/lanes/sqlite-integration.sh'
+    ) -Raw
     $script:newValidCoverageReceipt = {
         param([string] $CandidateSha, [string] $CandidateTree)
         $inventory = @(
@@ -561,6 +564,53 @@ Describe 'Immutable exact-SHA release receipt state machine' -Tag Unit {
         $script:heavyRunner | Should -Match 'run --rm --no-deps coverage'
         $script:heavyRunner | Should -Not -Match 'release-critical-integration'
         $script:testCompose | Should -Match '(?ms)^  coverage:.*?network_mode: none'
+    }
+
+    It 'keeps release persistence writes in its isolated artifact mount' {
+        $persistenceService = [regex]::Match(
+            $script:testCompose,
+            '(?ms)^  persistence:\r?\n(?<body>.*?)(?=^  [a-z][a-z0-9-]*:|\z)'
+        )
+        $persistenceService.Success | Should -BeTrue
+        $persistenceService.Groups['body'].Value | Should -Match 'read_only: true'
+        $persistenceService.Groups['body'].Value | Should -Match 'network_mode: none'
+        $persistenceService.Groups['body'].Value | Should -Match '(?m)^    cap_drop:'
+        $persistenceService.Groups['body'].Value |
+            Should -Match 'no-new-privileges:true'
+        $persistenceService.Groups['body'].Value |
+            Should -Match '\.\:/workspace:ro'
+        $persistenceService.Groups['body'].Value |
+            Should -Match '\./\.artifacts/build:/artifacts/build:ro'
+        $persistenceService.Groups['body'].Value |
+            Should -Match '\./\.artifacts/release-proof:/artifacts/release-proof'
+
+        $script:heavyRunner | Should -Match (
+            'HH_SQLITE_RELEASE_ARTIFACT_ROOT=\$artifact_root'
+        )
+        $script:sqliteRunner | Should -Match (
+            'release_artifact_root="\$\{HH_SQLITE_RELEASE_ARTIFACT_ROOT:-\$artifact_mount_root\}"'
+        )
+        $script:sqliteRunner | Should -Match (
+            '<"\$artifact_mount_root/build/module-path\.txt"'
+        )
+        $script:sqliteRunner | Should -Not -Match (
+            '</artifacts/build/module-path\.txt'
+        )
+        $script:sqliteRunner | Should -Match (
+            'persistence pwsh -NoLogo -NoProfile -NonInteractive'
+        )
+        $script:sqliteRunner | Should -Match (
+            '--volume "\$artifact_mount_root/build:/artifacts/build:ro"'
+        )
+        $script:sqliteRunner | Should -Match (
+            '--read-only --network none --cap-drop ALL'
+        )
+        $script:sqliteRunner | Should -Not -Match (
+            '--volume "\$repo_root/\$artifact_root:/artifacts"'
+        )
+        $script:sqliteRunner | Should -Match (
+            'SQLite release artifacts must remain under %s'
+        )
     }
 
     It 'prepares writable artifacts and binds coverage to the exact candidate tree' {

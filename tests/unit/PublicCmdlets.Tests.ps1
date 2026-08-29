@@ -821,7 +821,12 @@ Describe 'HostHunter SQLite public cmdlets' -Tag Unit {
                     -LastValidatedAtUtc '2026-08-24T00:00:00Z' `
                     -LastValidatedPSEdition Core -LastValidatedPowerShellVersion 7.6.5 `
                     -LastValidatedExecutionMode Direct)
+            $script:existingKeyAuditOutcome = $null
             Mock Invoke-HHManagedHostCommandCoordinator {
+                param($TransportResultAugmenter)
+                $transportResult = [pscustomobject]@{ Succeeded = $true }
+                $script:existingKeyAuditOutcome = & $TransportResultAugmenter `
+                    $script:savedTargets[0] $transportResult $null
                 [pscustomobject]@{
                     Succeeded = $true
                     StreamEvents = @([pscustomobject]@{
@@ -838,6 +843,11 @@ Describe 'HostHunter SQLite public cmdlets' -Tag Unit {
 
             $result.Authentication | Should -BeExactly PublicKey
             $result.KeyPath | Should -BeExactly $keyPath
+            $script:existingKeyAuditOutcome.Installed | Should -BeFalse
+            $script:existingKeyAuditOutcome.RollbackAttempted | Should -BeFalse
+            $script:existingKeyAuditOutcome.RollbackSucceeded | Should -BeNullOrEmpty
+            $script:existingKeyAuditOutcome.ReconciliationRequired | Should -BeFalse
+            $script:existingKeyAuditOutcome.CommitState | Should -BeExactly NotRequested
             Should -Invoke Invoke-HHManagedHostCommandCoordinator -Times 1 -Exactly `
                 -ParameterFilter { $Operation -ceq 'EnableSshKeyAuthentication' }
             Should -Not -Invoke Prepare-HHSshKeyBootstrapOperation

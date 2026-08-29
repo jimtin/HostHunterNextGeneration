@@ -178,6 +178,150 @@ param(
             finally { $env:HH_RUNTIME_PROJECT = $previousRuntimeProject }
         }
 
+        It 'loads valid controller metadata and rejects ambiguous or incompatible definitions' {
+            $script:HHClientSourceFingerprint = 'focused-fingerprint'
+            $script:definition = [ordered]@{
+                schema='HostHunter.ClientCommandMetadata.v1';protocolVersion=1
+                sourceFingerprint='focused-fingerprint'
+                commands=@([pscustomobject]@{
+                        name='Get-HHExample';declaration='[CmdletBinding()] param()'
+                        pipelineParameters=@()
+                    })
+                aliases=@([pscustomobject]@{name='Get-HHExamples';target='Get-HHExample'})
+            }
+            Mock Invoke-HHClientDockerCapture {
+                $script:definition | ConvertTo-Json -Compress -Depth 10
+            }
+
+            $valid = Get-HHClientDefinition -ControllerId focused-controller
+            @($valid.commands).Count | Should -Be 1
+            @($valid.aliases).Count | Should -Be 1
+
+            $script:definition.sourceFingerprint = 'different'
+            { Get-HHClientDefinition -ControllerId focused-controller } |
+                Should -Throw '*different source fingerprint*'
+            $script:definition.sourceFingerprint = 'focused-fingerprint'
+
+            $script:definition.commands = @()
+            { Get-HHClientDefinition -ControllerId focused-controller } |
+                Should -Throw '*no exported commands*'
+            $script:definition.commands = @(
+                [pscustomobject]@{name='Get-HHExample';declaration='param()';pipelineParameters=@()},
+                [pscustomobject]@{name='Get-HHExample';declaration='param()';pipelineParameters=@()}
+            )
+            { Get-HHClientDefinition -ControllerId focused-controller } |
+                Should -Throw '*duplicate command metadata*'
+
+            $script:definition.commands = @(
+                [pscustomobject]@{name='Get-HHExample';declaration='param()';pipelineParameters=@()}
+            )
+            $script:definition.aliases = @(
+                [pscustomobject]@{name='Get-HHExamples';target='Get-HHExample'},
+                [pscustomobject]@{name='Get-HHExamples';target='Get-HHExample'}
+            )
+            { Get-HHClientDefinition -ControllerId focused-controller } |
+                Should -Throw '*duplicate alias metadata*'
+            $script:definition.aliases = @(
+                [pscustomobject]@{name='invalid';target='Get-HHExample'}
+            )
+            { Get-HHClientDefinition -ControllerId focused-controller } |
+                Should -Throw '*invalid alias metadata*'
+            Should -Invoke Invoke-HHClientDockerCapture -Times 6 -Exactly
+        }
+
+        It 'selects one runtime controller and rejects ambiguous controller state' {
+            $script:controllerIds = @()
+            Mock Invoke-HHClientDockerCapture { $script:controllerIds }
+
+            Get-HHClientControllerId | Should -BeNullOrEmpty
+            $script:controllerIds = @('one-controller')
+            Get-HHClientControllerId | Should -BeExactly one-controller
+            $script:controllerIds = @('one-controller','two-controller')
+            { Get-HHClientControllerId } | Should -Throw '*More than one*'
+            Should -Invoke Invoke-HHClientDockerCapture -Times 3 -Exactly
+        }
+
+        It 'reuses an exact controller only when fingerprint and visualization mode match' {
+            $script:HHClientSourceFingerprint = 'focused-fingerprint'
+            $script:captureCall = 0
+            Mock Get-Command { [pscustomobject]@{Name='docker'} } -ParameterFilter {
+                $Name -ceq 'docker'
+            }
+            Mock Connect-HHClientDocker {}
+            Mock Get-HHClientControllerId { 'focused-controller' }
+            Mock Invoke-HHClientDockerCapture {
+                $script:captureCall++
+                if ($script:captureCall -eq 1) { 'focused-fingerprint' } else { 'true' }
+            }
+
+            Connect-HHClientRuntime -RepoRoot '/workspace' `
+                -SourceFingerprint 'focused-fingerprint' -VisualizationMode Enable `
+                -VisualizerRepoRoot '/visualizer' | Should -BeExactly focused-controller
+            Should -Invoke Connect-HHClientDocker -Times 1 -Exactly
+            Should -Invoke Get-HHClientControllerId -Times 1 -Exactly
+            Should -Invoke Invoke-HHClientDockerCapture -Times 2 -Exactly
+        }
+
+        It 'starts a stale runtime once and restores process-scoped launch settings' {
+            $runtimeRoot = Join-Path $TestDrive 'runtime-repository'
+            $runtimeScript = Join-Path $runtimeRoot 'scripts/runtime/hosthunter.sh'
+            [IO.Directory]::CreateDirectory((Split-Path -Parent $runtimeScript)) |
+                Out-Null
+            [IO.File]::WriteAllText($runtimeScript, "printf 'runtime started\n'`n")
+            $previousFingerprint = $env:HH_SOURCE_FINGERPRINT
+            $previousVisualizer = $env:HH_VISUALIZER_ENABLED
+            $previousToken = $env:HH_VISUALIZER_TOKEN_SOURCE
+            $script:controllerChecks = 0
+            Mock Get-Command { [pscustomobject]@{Name='docker'} } -ParameterFilter {
+                $Name -ceq 'docker'
+            }
+            Mock Connect-HHClientDocker {}
+            Mock Get-HHClientControllerId {
+                $script:controllerChecks++
+                if ($script:controllerChecks -eq 1) { $null } else { 'new-controller' }
+            }
+            Mock Invoke-HHClientDockerCapture { 'new-fingerprint' }
+
+            try {
+                Connect-HHClientRuntime -RepoRoot $runtimeRoot `
+                    -SourceFingerprint 'new-fingerprint' -VisualizationMode Disable `
+                    -VisualizerRepoRoot $null | Should -BeExactly new-controller
+                $script:controllerChecks | Should -Be 2
+            }
+            finally {
+                $env:HH_SOURCE_FINGERPRINT = $previousFingerprint
+                $env:HH_VISUALIZER_ENABLED = $previousVisualizer
+                $env:HH_VISUALIZER_TOKEN_SOURCE = $previousToken
+            }
+            $env:HH_SOURCE_FINGERPRINT | Should -BeExactly $previousFingerprint
+            $env:HH_VISUALIZER_ENABLED | Should -BeExactly $previousVisualizer
+            $env:HH_VISUALIZER_TOKEN_SOURCE | Should -BeExactly $previousToken
+            Should -Invoke Get-HHClientControllerId -Times 2 -Exactly
+            Should -Invoke Invoke-HHClientDockerCapture -Times 1 -Exactly
+        }
+
+        It 'resolves an environment-configured client root and validates the fingerprint helper' {
+            $previousRepo = $env:HH_CLIENT_REPO_ROOT
+            $previousVisualizer = $env:HH_VISUALIZER_REPO_ROOT
+            try {
+                $env:HH_CLIENT_REPO_ROOT = '/workspace'
+                $env:HH_VISUALIZER_REPO_ROOT = $null
+                $configuration = Get-HHClientConfiguration
+                $configuration.RepoRoot | Should -BeExactly '/workspace'
+                $configuration.VisualizerRepoRoot | Should -BeNullOrEmpty
+                $configuration.VisualizerUrl | Should -BeExactly 'http://127.0.0.1:4310'
+                Get-HHClientRepositoryRoot | Should -BeExactly '/workspace'
+                Get-HHClientSourceFingerprint -RepoRoot '/workspace' |
+                    Should -Match '^[a-f0-9]{64}$'
+                { Get-HHClientSourceFingerprint -RepoRoot $TestDrive } |
+                    Should -Throw '*fingerprint helper is missing*'
+            }
+            finally {
+                $env:HH_CLIENT_REPO_ROOT = $previousRepo
+                $env:HH_VISUALIZER_REPO_ROOT = $previousVisualizer
+            }
+        }
+
         It 'starts Docker Desktop once and only polls readiness afterward' {
             $script:dockerReadinessChecks = 0
             Mock Test-HHClientDockerReady {

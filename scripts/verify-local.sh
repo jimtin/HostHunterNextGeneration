@@ -226,7 +226,8 @@ run_component coverage release-unit-coverage 300 120 \
 if phase_passed release-module; then
   run_component persistence release-sqlite-faults 300 120 \
     .artifacts/logs/release-sqlite-faults.log \
-    bash scripts/lanes/sqlite-integration.sh
+    env "HH_SQLITE_RELEASE_ARTIFACT_ROOT=$artifact_root" \
+      bash scripts/lanes/sqlite-integration.sh
 else
   skip_component persistence release-sqlite-faults 'not_run_due_to_release-module'
 fi

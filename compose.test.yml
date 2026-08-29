@@ -48,6 +48,30 @@ services:
     networks:
       - test
 
+  persistence:
+    image: ${HH_TEST_IMAGE:-hosthunter-next-generation-test:local}
+    working_dir: /workspace
+    read_only: true
+    network_mode: none
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 1g
+    cpus: 2
+    tmpfs:
+      - /tmp:mode=1777
+    volumes:
+      - .:/workspace:ro
+      - ./.artifacts/build:/artifacts/build:ro
+      - ./.artifacts/release-proof:/artifacts/release-proof
+    group_add:
+      - "${HH_HOST_GID:-1000}"
+    environment:
+      HOME: /tmp
+      HH_ARTIFACT_ROOT: /artifacts/release-proof
+
   ssh-target:
     build:
       context: tests/fixtures/ssh
