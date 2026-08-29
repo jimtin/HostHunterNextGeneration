@@ -32,6 +32,7 @@ services:
       - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
     group_add:
       - "10002"
+      - "${HH_HOST_GID:-1000}"
     environment: *verifier-environment
     volumes:
       - data:/var/lib/hosthunter-data

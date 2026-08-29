@@ -8,6 +8,7 @@ $script:prePushHook = Get-Content (Join-Path $script:fastHookRepoRoot '.githooks
 $script:preCommit = Get-Content (Join-Path $script:fastHookRepoRoot 'scripts/precommit.sh') -Raw
 $script:prePush = Get-Content (Join-Path $script:fastHookRepoRoot 'scripts/prepush.sh') -Raw
 $script:cmdlets = Get-Content (Join-Path $script:fastHookRepoRoot 'scripts/verify-cmdlets.sh') -Raw
+$script:cmdletCompose = Get-Content (Join-Path $script:fastHookRepoRoot 'compose.cmdlets.yml') -Raw
 $script:journey = Get-Content (
     Join-Path $script:fastHookRepoRoot 'tests/e2e/TargetAndCommandJourneys.Tests.ps1') -Raw
 
@@ -52,6 +53,12 @@ Describe 'fast hook and cmdlet test contract' -Tag Unit {
         $cmdlets | Should -Match 'cached HostHunter controller is stale'
         ([regex]::Matches($cmdlets, 'docker compose[\s\S]{0,160}run --rm verifier')).Count |
             Should -Be 1
+    }
+
+    It 'gives the non-root verifier write access only through the host artifact group' {
+        $cmdletCompose | Should -Match 'user:\s*"10001:10001"'
+        $cmdletCompose | Should -Match 'group_add:[\s\S]{0,100}\$\{HH_HOST_GID:-1000\}'
+        $cmdletCompose | Should -Match '\$\{HH_CMDLET_ARTIFACT_ROOT:\?[^}]+\}:/artifacts'
     }
 
     It 'derives expected commands from the packaged manifest and fails additions closed' {
