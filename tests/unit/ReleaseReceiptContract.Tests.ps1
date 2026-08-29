@@ -591,11 +591,21 @@ Describe 'Immutable exact-SHA release receipt state machine' -Tag Unit {
             'release_artifact_root="\$\{HH_SQLITE_RELEASE_ARTIFACT_ROOT:-\$artifact_mount_root\}"'
         )
         $script:sqliteRunner | Should -Match (
-            '<"\$artifact_mount_root/build/module-path\.txt"'
+            'module_marker="\$artifact_mount_root/build/module-path\.txt"'
+        )
+        $script:sqliteRunner | Should -Match (
+            '<"\$module_marker"'
         )
         $script:sqliteRunner | Should -Not -Match (
             '</artifacts/build/module-path\.txt'
         )
+        $script:sqliteRunner | Should -Match (
+            'host_module_path="\$artifact_mount_root/\$module_relative_path"'
+        )
+        $script:sqliteRunner | Should -Match (
+            '\[\[ -f "\$host_module_path" && ! -L "\$host_module_path" \]\]'
+        )
+        $script:sqliteRunner | Should -Not -Match '(?m)^test -f "\$module_path"$'
         $script:sqliteRunner | Should -Match (
             'persistence pwsh -NoLogo -NoProfile -NonInteractive'
         )
@@ -605,6 +615,10 @@ Describe 'Immutable exact-SHA release receipt state machine' -Tag Unit {
         $script:sqliteRunner | Should -Match (
             '--read-only --network none --cap-drop ALL'
         )
+        $script:sqliteRunner | Should -Match '--env HOME=/tmp'
+        $script:sqliteRunner | Should -Match '--env XDG_CACHE_HOME=/tmp/cache'
+        $script:sqliteRunner | Should -Match '--env XDG_CONFIG_HOME=/tmp/config'
+        $script:sqliteRunner | Should -Match '--env XDG_DATA_HOME=/tmp/data'
         $script:sqliteRunner | Should -Not -Match (
             '--volume "\$repo_root/\$artifact_root:/artifacts"'
         )

@@ -303,6 +303,16 @@ param(
         It 'resolves an environment-configured client root and validates the fingerprint helper' {
             $previousRepo = $env:HH_CLIENT_REPO_ROOT
             $previousVisualizer = $env:HH_VISUALIZER_REPO_ROOT
+            $fingerprintRoot = Join-Path $TestDrive 'fingerprint-repository'
+            $fingerprintHelper = Join-Path $fingerprintRoot `
+                'scripts/client/Get-HHSourceFingerprint.ps1'
+            [IO.Directory]::CreateDirectory((Split-Path -Parent $fingerprintHelper)) |
+                Out-Null
+            [IO.File]::WriteAllText($fingerprintHelper, @'
+param([string]$RepoRoot)
+if ($RepoRoot -notmatch 'fingerprint-repository$') { throw 'unexpected repository root' }
+'a' * 64
+'@)
             try {
                 $env:HH_CLIENT_REPO_ROOT = '/workspace'
                 $env:HH_VISUALIZER_REPO_ROOT = $null
@@ -311,8 +321,8 @@ param(
                 $configuration.VisualizerRepoRoot | Should -BeNullOrEmpty
                 $configuration.VisualizerUrl | Should -BeExactly 'http://127.0.0.1:4310'
                 Get-HHClientRepositoryRoot | Should -BeExactly '/workspace'
-                Get-HHClientSourceFingerprint -RepoRoot '/workspace' |
-                    Should -Match '^[a-f0-9]{64}$'
+                Get-HHClientSourceFingerprint -RepoRoot $fingerprintRoot |
+                    Should -BeExactly ('a' * 64)
                 { Get-HHClientSourceFingerprint -RepoRoot $TestDrive } |
                     Should -Throw '*fingerprint helper is missing*'
             }
@@ -320,6 +330,87 @@ param(
                 $env:HH_CLIENT_REPO_ROOT = $previousRepo
                 $env:HH_VISUALIZER_REPO_ROOT = $previousVisualizer
             }
+        }
+
+        It 'handles native bridge interaction frames once and fails closed without a terminal frame' {
+            $fakeBin = Join-Path '/artifacts' (
+                'fake-docker-bin-' + [Guid]::NewGuid().ToString('N')
+            )
+            $fakeDocker = Join-Path $fakeBin 'docker'
+            [IO.Directory]::CreateDirectory($fakeBin) | Out-Null
+            $previousPath = $env:PATH
+            $script:HHClientRepoRoot = '/workspace'
+            $script:HHClientSourceFingerprint = 'focused-fingerprint'
+            $outputXml = [Management.Automation.PSSerializer]::Serialize(
+                [pscustomobject]@{Marker='HostHunter.NativeClientFixture.v1';Value=42},
+                5
+            )
+            $outputPayload = [Convert]::ToBase64String(
+                [Text.Encoding]::UTF8.GetBytes($outputXml)
+            )
+            $confirmationPrompt = [Convert]::ToBase64String(
+                [Text.Encoding]::UTF8.GetBytes('Continue? [Y/n]')
+            )
+            $credentialPrompt = [Convert]::ToBase64String(
+                [Text.Encoding]::UTF8.GetBytes('Password')
+            )
+            Mock Use-HHClientLock { & $Action }
+            Mock Connect-HHClientRuntime { 'focused-controller' }
+            Mock Read-Host {
+                if ($AsSecureString) {
+                    $secureValue = [Security.SecureString]::new()
+                    foreach ($character in 'fixture-password'.ToCharArray()) {
+                        $secureValue.AppendChar($character)
+                    }
+                    $secureValue.MakeReadOnly()
+                    $secureValue
+                }
+                else { '' }
+            }
+            try {
+                $env:PATH = "$fakeBin$([IO.Path]::PathSeparator)$previousPath"
+                $successScript = @"
+#!/usr/bin/env bash
+IFS= read -r request
+[[ "`$request" == *'HostHunter.ClientInvocation.v1'* ]] || exit 9
+printf '%s\n' '{"type":"confirmation_request","prompt":"$confirmationPrompt"}'
+IFS= read -r confirmation
+[[ "`$confirmation" == 'confirmation yes' ]] || exit 10
+printf '%s\n' '{"type":"credential_request","prompt":"$credentialPrompt"}'
+IFS= read -r credential
+[[ "`$credential" == credential\ * ]] || exit 11
+printf '%s\n' '{"type":"output","payload":"$outputPayload"}'
+printf '%s\n' '{"type":"terminal","status":"succeeded","message":"ok"}'
+"@
+                [IO.File]::WriteAllText($fakeDocker,$successScript)
+                & chmod 0700 $fakeDocker
+
+                $output = @(Invoke-HHClientCommand -CommandName Get-HHExample `
+                        -Parameters @{Name='alpha'} -HasPipelineInput $false)
+                $output | Should -HaveCount 1
+                $output[0].Marker | Should -BeExactly HostHunter.NativeClientFixture.v1
+                $output[0].Value | Should -Be 42
+
+                [IO.File]::WriteAllText($fakeDocker, @'
+#!/usr/bin/env bash
+IFS= read -r request
+[[ "$request" == *'HostHunter.ClientInvocation.v1'* ]] || exit 9
+'@)
+                & chmod 0700 $fakeDocker
+                {
+                    Invoke-HHClientCommand -CommandName Get-HHExample `
+                        -Parameters @{} -HasPipelineInput $false
+                } | Should -Throw '*without a terminal frame*'
+            }
+            finally {
+                $env:PATH = $previousPath
+                if ([IO.Directory]::Exists($fakeBin)) {
+                    [IO.Directory]::Delete($fakeBin,$true)
+                }
+            }
+            Should -Invoke Use-HHClientLock -Times 2 -Exactly
+            Should -Invoke Connect-HHClientRuntime -Times 2 -Exactly
+            Should -Invoke Read-Host -Times 2 -Exactly
         }
 
         It 'starts Docker Desktop once and only polls readiness afterward' {

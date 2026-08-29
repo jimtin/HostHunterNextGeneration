@@ -20,9 +20,26 @@ case "$release_artifact_root" in
 esac
 receipt_root="$release_artifact_root/sqlite-integration"
 mkdir -p -- "$receipt_root"
-module_path="$(tr -d '\r\n' <"$artifact_mount_root/build/module-path.txt")"
-
-test -f "$module_path"
+module_marker="$artifact_mount_root/build/module-path.txt"
+[[ -f "$module_marker" && ! -L "$module_marker" ]] || {
+  printf 'Packaged module path marker is missing or unsafe.\n' >&2
+  exit 2
+}
+module_path="$(tr -d '\r\n' <"$module_marker")"
+[[ "$module_path" =~ ^/artifacts/build/[A-Za-z0-9._/-]+$ ]] || {
+  printf 'Packaged module path is outside the read-only build mount.\n' >&2
+  exit 2
+}
+module_relative_path="${module_path#/artifacts/}"
+[[ "/$module_relative_path/" != *'/../'* && "/$module_relative_path/" != *'/./'* ]] || {
+  printf 'Packaged module path contains an unsafe segment.\n' >&2
+  exit 2
+}
+host_module_path="$artifact_mount_root/$module_relative_path"
+[[ -f "$host_module_path" && ! -L "$host_module_path" ]] || {
+  printf 'Packaged module is missing from the read-only build artifacts.\n' >&2
+  exit 2
+}
 
 docker compose -f compose.test.yml run --rm --no-deps \
   -e "HH_TEST_MODULE_PATH=$module_path" \
@@ -43,6 +60,10 @@ docker run --rm \
   --volume "$repo_root:/workspace:ro" \
   --volume "$artifact_mount_root/build:/artifacts/build:ro" \
   --workdir /workspace \
+  --env HOME=/tmp \
+  --env XDG_CACHE_HOME=/tmp/cache \
+  --env XDG_CONFIG_HOME=/tmp/config \
+  --env XDG_DATA_HOME=/tmp/data \
   --env "HH_TEST_MODULE_PATH=$module_path" \
   --env HH_SQLITE_FAULT_ROOT=/fault \
   "${HH_TEST_IMAGE:-hosthunter-next-generation-test:local}" \

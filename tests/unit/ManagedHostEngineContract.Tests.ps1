@@ -576,4 +576,122 @@ Describe 'managed-host engine contract' -Tag Unit {
             Should -Invoke Invoke-HHSshSessionFanOut -Times 0 -Exactly
         }
     }
+
+    It 'returns finite host details without persistence while visualization is paused' {
+        InModuleScope HostHunterNextGeneration {
+            $raw = [pscustomobject]@{
+                ObservedAtUtc='2026-08-29T00:00:00Z';Hostname='alpha';Platform='linux'
+            }
+            $failure = [pscustomobject]@{
+                Target='beta';Succeeded=$false;FailureKind='TransportFailure'
+            }
+            Mock Get-HHCurrentMissionId { $null }
+            Mock Get-HHHostDetailsRemoteScriptBlock { { [pscustomobject]@{} } }
+            Mock Invoke-HHManagedHostCommandCoordinator {
+                @(
+                    [pscustomobject]@{
+                        Target='alpha';Succeeded=$true;HostDetailsRaw=$raw
+                    },
+                    $failure
+                )
+            }
+            Mock Get-HHRuntimeContext { throw 'paused collection must not persist' }
+
+            $result = @(Invoke-HHManagedHostGetHostDetailsOperation `
+                    -Name alpha,beta -ThrottleLimit 2 -Reason inventory -CaseId case-1)
+
+            $result | Should -HaveCount 2
+            $result[0].Hostname | Should -BeExactly alpha
+            $result[0].VisualizerDelivered | Should -BeFalse
+            $result[0].VisualizerPublishingState | Should -BeExactly Paused
+            $result[1] | Should -Be $failure
+            Should -Invoke Invoke-HHManagedHostCommandCoordinator -Times 1 -Exactly `
+                -ParameterFilter {
+                    $Operation -ceq 'GetHostDetails' -and
+                    @($Target) -join ',' -ceq 'alpha,beta' -and
+                    $ThrottleLimit -eq 2 -and $Reason -ceq 'inventory' -and
+                    $CaseId -ceq 'case-1'
+                }
+            Should -Not -Invoke Get-HHRuntimeContext
+        }
+    }
+
+    It 'authenticates stores delivers and records an active-mission host observation once' {
+        InModuleScope HostHunterNextGeneration {
+            $missionId = [Guid]::NewGuid()
+            $batchId = [Guid]::NewGuid().ToByteArray()
+            $invocationId = [Guid]::NewGuid().ToByteArray()
+            $raw = [pscustomobject]@{
+                ObservedAtUtc='2026-08-29T00:00:00Z';Hostname='alpha';Platform='linux'
+                NativeIdentityDigest=('b' * 64)
+            }
+            $transport = [pscustomobject]@{
+                Target='alpha';Succeeded=$true;HostDetailsRaw=$raw
+                BatchId=$batchId;InvocationId=$invocationId
+            }
+            $runtime = [pscustomobject]@{DatabasePath='/data/hosthunter.sqlite3'}
+            $writer = [pscustomobject]@{
+                MasterKey=[byte[]](0..31)
+                Anchor=[pscustomobject]@{DatabaseId=[Guid]::NewGuid().ToByteArray()}
+                VisualizerSnapshot=[pscustomobject]@{Generation=1}
+            }
+            $payload = [pscustomobject]@{
+                host=[pscustomobject]@{hostname='alpha'}
+            }
+            $payloadBytes = [Text.UTF8Encoding]::new($false).GetBytes('{"host":{"hostname":"alpha"}}')
+            $script:transactionCount = 0
+            Mock Get-HHCurrentMissionId { $missionId }
+            Mock Get-HHHostDetailsRemoteScriptBlock { { [pscustomobject]@{} } }
+            Mock Invoke-HHManagedHostCommandCoordinator { @($transport) }
+            Mock Get-HHRuntimeContext { $runtime }
+            Mock Open-HHAuthenticatedPersistence {
+                [pscustomobject]@{Connection=[pscustomobject]@{};MasterKey=$writer.MasterKey}
+            }
+            Mock Close-HHAuthenticatedPersistence {}
+            Mock Invoke-HHAnchoredPersistenceTransaction {
+                $script:transactionCount++
+                & $Action ([pscustomobject]@{}) ([pscustomobject]@{}) $writer $ArgumentList
+            }
+            Mock Read-HHTargetRepositorySnapshot {
+                [pscustomobject]@{Targets=@([pscustomobject]@{
+                            Name='alpha';HostName='alpha.example';Port=22
+                        })}
+            }
+            Mock Resolve-HHVisualizerEndpointIdentity {
+                [pscustomobject]@{
+                    EndpointId=('hh_' + ('a' * 52));Strategy='platform_instance_hmac_sha256'
+                    TargetNameKey='ALPHA'
+                }
+            }
+            Mock ConvertTo-HHHostDetailsPayload { $payload }
+            Mock Assert-HHHostDetailsPayloadSchema { $true }
+            Mock Add-HHVisualizerHostObservation {
+                [pscustomobject]@{PayloadBytes=$payloadBytes}
+            }
+            Mock Send-HHVisualizerObservation {
+                [pscustomobject]@{Delivered=$true;StatusCode=201}
+            }
+            Mock Set-HHVisualizerDeliveryResult {}
+
+            $result = @(Invoke-HHManagedHostGetHostDetailsOperation `
+                    -Name alpha -ProducerSender { throw 'sender is passed through, not invoked directly' })
+
+            $result | Should -HaveCount 1
+            $result[0].host.hostname | Should -BeExactly alpha
+            $result[0].VisualizerDelivered | Should -BeTrue
+            $script:transactionCount | Should -Be 2
+            Should -Invoke Open-HHAuthenticatedPersistence -Times 2 -Exactly
+            Should -Invoke Close-HHAuthenticatedPersistence -Times 2 -Exactly
+            Should -Invoke Add-HHVisualizerHostObservation -Times 1 -Exactly
+            Should -Invoke Send-HHVisualizerObservation -Times 1 -Exactly `
+                -ParameterFilter {
+                    $MissionId -eq $missionId -and
+                    [Text.Encoding]::UTF8.GetString($PayloadBytes) -match 'hostname'
+                }
+            Should -Invoke Set-HHVisualizerDeliveryResult -Times 1 -Exactly `
+                -ParameterFilter {
+                    $Kind -ceq 'Observation' -and $Delivered -and $StatusCode -eq 201
+                }
+        }
+    }
 }
