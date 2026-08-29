@@ -269,6 +269,100 @@ Describe 'managed-host engine contract' -Tag Unit {
         }
     }
 
+    It 'proves an existing public key once without bootstrapping or changing the profile' {
+        InModuleScope HostHunterNextGeneration {
+            $databasePath = Join-Path $TestDrive 'key-proof/hosthunter.sqlite3'
+            [IO.Directory]::CreateDirectory((Split-Path -Parent $databasePath)) |
+                Out-Null
+            [IO.File]::WriteAllBytes($databasePath, [byte[]](1))
+            $savedTarget = [pscustomobject]@{
+                Name = 'alpha'
+                Transport = 'SSH'
+                Authentication = 'PublicKey'
+                PowerShellRuntime = 'PowerShell7'
+                KeyPath = '/var/lib/hosthunter-data/keys/hosthunter_ed25519'
+            }
+            Mock Get-HHRuntimeContext {
+                [pscustomobject]@{ DatabasePath=$databasePath; KeyRoot=$TestDrive }
+            }
+            Mock Open-HHAuthenticatedPersistence {
+                [pscustomobject]@{
+                    Connection = [pscustomobject]@{}
+                    MasterKey = [byte[]](0..31)
+                    Anchor = [pscustomobject]@{}
+                }
+            }
+            Mock Close-HHAuthenticatedPersistence {}
+            Mock Read-HHTargetRepositorySnapshot {
+                [pscustomobject]@{ Targets=@($savedTarget) }
+            }
+            Mock Invoke-HHManagedHostCommandCoordinator {
+                [pscustomobject]@{
+                    Succeeded = $true
+                    StreamEvents = @([pscustomobject]@{
+                            Phase = 'Command'
+                            Value = [pscustomobject]@{
+                                Marker = 'HostHunter.ExistingSshKeyProof.v1'
+                                Succeeded = $true
+                            }
+                        })
+                }
+            }
+            Mock Prepare-HHSshKeyBootstrapOperation {
+                throw 'must not bootstrap an existing public key'
+            }
+
+            $result = Invoke-HHManagedHostEnableSshKeyAuthenticationOperation `
+                -Name alpha -Confirm:$false
+
+            $result | Should -Be $savedTarget
+            Should -Invoke Invoke-HHManagedHostCommandCoordinator -Times 1 `
+                -Exactly -ParameterFilter {
+                $Operation -ceq 'EnableSshKeyAuthentication' -and
+                @($Target).Count -eq 1 -and $Target[0] -ceq 'alpha'
+            }
+            Should -Invoke Prepare-HHSshKeyBootstrapOperation -Times 0 -Exactly
+        }
+    }
+
+    It 'fails an existing public-key proof when the fixed marker is absent' {
+        InModuleScope HostHunterNextGeneration {
+            $databasePath = Join-Path $TestDrive 'key-proof-failure/hosthunter.sqlite3'
+            [IO.Directory]::CreateDirectory((Split-Path -Parent $databasePath)) |
+                Out-Null
+            [IO.File]::WriteAllBytes($databasePath, [byte[]](1))
+            Mock Get-HHRuntimeContext {
+                [pscustomobject]@{ DatabasePath=$databasePath; KeyRoot=$TestDrive }
+            }
+            Mock Open-HHAuthenticatedPersistence {
+                [pscustomobject]@{
+                    Connection = [pscustomobject]@{}
+                    MasterKey = [byte[]](0..31)
+                    Anchor = [pscustomobject]@{}
+                }
+            }
+            Mock Close-HHAuthenticatedPersistence {}
+            Mock Read-HHTargetRepositorySnapshot {
+                [pscustomobject]@{ Targets=@([pscustomobject]@{
+                            Name = 'alpha'
+                            Transport = 'SSH'
+                            Authentication = 'PublicKey'
+                            PowerShellRuntime = 'PowerShell7'
+                            KeyPath = '/keys/id_ed25519'
+                        }) }
+            }
+            Mock Invoke-HHManagedHostCommandCoordinator {
+                [pscustomobject]@{ Succeeded=$true; StreamEvents=@() }
+            }
+
+            {
+                Invoke-HHManagedHostEnableSshKeyAuthenticationOperation `
+                    -Name alpha -Confirm:$false
+            } | Should -Throw '*could not prove its existing SSH key authentication*'
+            Should -Invoke Invoke-HHManagedHostCommandCoordinator -Times 1 -Exactly
+        }
+    }
+
     It 'rejects invalid command and Windows policy requests before dispatch' {
         InModuleScope HostHunterNextGeneration {
             Mock Invoke-HHManagedHostCommandCoordinator { 'dispatched' }

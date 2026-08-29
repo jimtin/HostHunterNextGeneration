@@ -16,12 +16,14 @@
   or reset a mission unless identities, body hashes, and idempotency keys stay bound.
 - High: candidate-owned coverage code could omit source or forge a passing
   percentage unless the standalone gate independently validates the receipt.
-- High: the first exact-SHA Windows qualification stopped before key bootstrap
-  because key generation unexpectedly requested a passphrase; the candidate is
-  terminally failed and cannot be retried.
+- High: copying live authentication state for Windows qualification would widen
+  secret exposure or create an inconsistent snapshot unless the source is
+  paused, mounted read-only, copied only into labeled disposable volumes, and
+  cleaned on every terminal path.
 - Overall posture is fail-closed; focused integrity/recovery evidence is green.
-  The prior eleven-command live-Windows proof remains historical evidence; the
-  new details operation and final twelve-command exact-SHA proof are pending.
+  Candidate `11aca1fe562f4bd5e80f7d6fe0a3fa13db9ccba6` is terminally
+  consumed after its Windows phase bypassed the native interaction broker. The
+  saved-key correction and final twelve-command exact-SHA proof are pending.
 
 ## 2. Scope and Method
 
@@ -60,7 +62,7 @@ consequence; unknown means not determined.
 | Candidate build | Builds four exact-SHA images once and binds immutable IDs | build-candidate.sh | build receipt | confirmed |
 | Coverage proof | One process, two unit-only passes, four independent metrics | unit.sh | coverage runner and summary | confirmed |
 | Remaining release proof | Critical integration and source/image scans | verify-local.sh | terminal phase receipt | confirmed |
-| Windows qualifier | Public-cmdlet mutation, Event 4688 proof, and restoration | Test-HHWindowsCmdlets.ps1 | qualification script; working-tree receipt | confirmed working-tree live result |
+| Windows qualifier | Disposable clone of the five operator trust roots, public-cmdlet saved-key proof, Event 4688 proof, and restoration | windows-cmdlets.sh; Test-HHWindowsCmdlets.ps1 | qualification scripts and exact-image receipt | confirmed implementation; new exact-SHA result pending |
 
 ## 4. Trust Boundaries
 
@@ -78,6 +80,7 @@ consequence; unknown means not determined.
 | B9 | controller → private visualizer producer API | file-only token; private Docker network; bounded status GET; exact write-body SHA-256; UUID idempotency keys; bounded body/time | bearer token compromise permits forged producer reads/writes until rotation | VisualizerProducer.ps1; compose.runtime.yml; AP-16 |
 | B11 | macOS lifecycle client → local Docker/Visualizer repositories | configured absolute paths; fixed allowlisted scripts/actions; loopback browser URL; bounded/redacted diagnostics | trusted local repository or Docker administrator can still replace executed lifecycle code | HostHunter.Client/Private/VisualizationLifecycle.ps1; installer; AP-19 |
 | B10 | managed host identity → controller observation | remote native identity is SHA-256 digested, then controller HMACs it into an opaque endpoint ID | compromised endpoint can lie about its inventory | HostDetails.ps1; VisualizerRepository.ps1; AP-17 |
+| B12 | live operator trust roots → disposable Windows-qualification roots | exact five-role label validation; sole-controller and saved-key readiness checks; source pause; read-only source mounts; copy in networkless hardened container; cloned mission pause; trap cleanup | trusted Docker administrator can inspect either source or disposable volumes by accepted design | windows-cmdlets.sh; AP-20 |
 
 ## 5. Assets
 
@@ -96,6 +99,7 @@ consequence; unknown means not determined.
 | Host observations | encrypted SQLite payload and authenticated visualizer state | drives endpoint identity and visualization |
 | Mission identity/state | authenticated SQLite and visualizer API | controls visualization reset and observation grouping |
 | Visualizer producer token | owner-private runtime secret file | authorizes write-only mission/observation ingestion |
+| Disposable qualification state | run-scoped data, secret, anchor, key, and evidence volumes | temporarily grants the exact image the same host authority as the live controller |
 
 ## 6. Attacker Profile
 
@@ -137,6 +141,7 @@ Non-capabilities:
 | AP-17 | merge or expose endpoint identity | hostile endpoint data → B10 → endpoint graph | privacy / integrity | medium | high | high | raw identity hashed remotely; controller HMAC; raw value is not output, logged, persisted, or sent; target data remains attributed and partial | collector/repository/security tests |
 | AP-18 | turn inventory into continuous surveillance | feature expansion → collector/API → endpoint telemetry | privacy / availability | low | high | medium | fixed on-demand/first-connect operation only; no event-log fields, polling, subscription, or retry worker | public surface, docs, deleted-surface sweep |
 | AP-19 | execute or disclose through visualizer startup | replaced local repo/script or hostile diagnostic → B11 → operator shell/output | execution / disclosure | low | high | medium | trusted local-operator model; configured absolute repo; fixed `up.sh`/`down.sh`; fixed controller actions; loopback-only URL; diagnostic redaction and size bounds; no automatic retry | client lifecycle and native-client contract tests |
+| AP-20 | steal credentials or corrupt operator state during qualification | release invocation → B12 → copied or source trust roots | exfiltration / integrity | low | high | medium | source labels, sole active user, and one saved key validated before claim; source controller paused; source mounts read-only; copied mission paused; copies stay in Docker volumes; no password/TTY/raw-SSH path; cleanup trap removes disposable volumes | windows-cmdlets.sh; WindowsQualification.Tests.ps1 |
 
 AP-1 through AP-6 are medium likelihood because realistic untrusted inputs must
 also defeat an evidenced control. AP-7 is low because exclusive writes directly
@@ -170,6 +175,7 @@ stake.
 | AP-17 | Keep remote digest plus controller HMAC, encrypted local payload, per-field provenance, and raw-identifier negative tests | collector/repository/contract | preventative/detective |
 | AP-18 | Retain negative surface assertions for event logs, polling, subscriptions, and retry workers | module/runtime/testing docs | preventative/governance |
 | AP-19 | Keep lifecycle scripts/actions closed, browser URL loopback-only, diagnostics bounded/redacted, startup failures isolated, and animation suppressed in automation | native client/installer | preventative/detective |
+| AP-20 | Keep pre-claim source/saved-key readiness, pause/read-only clone, exact five-volume allowlist, cloned mission pause, noninteractive saved-key proof, redacted receipts, and cleanup-on-every-exit contract | Windows qualification wrapper and release state | preventative/detective |
 | AP-2, AP-6, AP-8 | Repeat the green live-Windows journey against the packaged exact-SHA image | Windows release qualification | detective |
 
 ## 9. Assumptions and Open Questions
@@ -207,11 +213,14 @@ stake.
   event logs, process activity, polling, subscriptions, and automatic retries
   are excluded.
 - unvalidated: minimum Windows and PowerShell versions remain to be fixed.
-- terminal exact-SHA evidence: candidate `652157af4a3ab21702b9895d3efffb3f946b8e5f`
-  passed the eleven-cmdlet container journey, then the live-Windows phase stopped
-  at an unexpected `ssh-keygen` passphrase prompt before remote key installation.
-  The candidate remains consumed and failed.
-- remediation: dedicated Ed25519 generation supplies an explicit empty
-  passphrase without putting a credential in arguments, environment variables,
-  files, logs, or receipts. A new exact SHA must prove the full Windows journey;
-  the failed SHA must never be rerun.
+- terminal exact-SHA evidence: candidate
+  `11aca1fe562f4bd5e80f7d6fe0a3fa13db9ccba6` passed the twelve-row
+  Linux cmdlet verifier, then its live-Windows phase stopped at Set-HHTarget
+  because the direct container module call could not service the native-client
+  `confirmation_request`. The candidate remains consumed and aborted.
+- remediation: the release gate now preflights the existing runtime, clones its
+  five trust-domain volumes into disposable state, and uses the saved PublicKey
+  profile noninteractively. Existing-key enablement performs one audited proof
+  through the managed-host engine without bootstrap, password, retry, or raw
+  SSH. A new exact SHA must prove the full Windows journey; the failed SHA must
+  never be rerun.

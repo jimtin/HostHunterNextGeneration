@@ -798,7 +798,7 @@ Describe 'HostHunter SQLite public cmdlets' -Tag Unit {
             Should -Not -Invoke Prepare-HHSshKeyBootstrapOperation
         }
 
-        It 'rejects bootstrap before mutation for an absent unknown or non-password target' {
+        It 'rejects bootstrap before mutation for an absent or unknown target' {
             [IO.File]::Delete($script:runtime.DatabasePath)
             { Enable-HHSshKeyAuthentication -Name alpha -Confirm:$false } |
                 Should -Throw "*Unknown target 'alpha'*"
@@ -809,6 +809,9 @@ Describe 'HostHunter SQLite public cmdlets' -Tag Unit {
             { Enable-HHSshKeyAuthentication -Name alpha -Confirm:$false } |
                 Should -Throw "*Unknown target 'alpha'*"
 
+        }
+
+        It 'proves an already-keyed target without bootstrap or profile mutation' {
             $keyPath = Join-Path $TestDrive 'already-keyed'
             [IO.File]::WriteAllText($keyPath, 'test-key')
             $script:savedTargets = @(New-HHTargetRecord -Name alpha -Transport SSH `
@@ -818,8 +821,27 @@ Describe 'HostHunter SQLite public cmdlets' -Tag Unit {
                     -LastValidatedAtUtc '2026-08-24T00:00:00Z' `
                     -LastValidatedPSEdition Core -LastValidatedPowerShellVersion 7.6.5 `
                     -LastValidatedExecutionMode Direct)
-            { Enable-HHSshKeyAuthentication -Name alpha -Confirm:$false } |
-                Should -Throw '*must use SSH password authentication*'
+            Mock Invoke-HHManagedHostCommandCoordinator {
+                [pscustomobject]@{
+                    Succeeded = $true
+                    StreamEvents = @([pscustomobject]@{
+                            Phase = 'Command'
+                            Value = [pscustomobject]@{
+                                Marker = 'HostHunter.ExistingSshKeyProof.v1'
+                                Succeeded = $true
+                            }
+                        })
+                }
+            }
+
+            $result = Enable-HHSshKeyAuthentication -Name alpha -Confirm:$false
+
+            $result.Authentication | Should -BeExactly PublicKey
+            $result.KeyPath | Should -BeExactly $keyPath
+            Should -Invoke Invoke-HHManagedHostCommandCoordinator -Times 1 -Exactly `
+                -ParameterFilter { $Operation -ceq 'EnableSshKeyAuthentication' }
+            Should -Not -Invoke Prepare-HHSshKeyBootstrapOperation
+            Should -Not -Invoke Invoke-HHAnchoredPersistenceTransaction
         }
 
         It 'previews bootstrap with an explicit normalized key path' {

@@ -629,7 +629,12 @@ function Invoke-HHManagedHostCommandCoordinator {
         [string]$Reason,
         [string]$CaseId,
 
-        [ValidateSet('InvokeCommand', 'GetHostDetails', 'SetWindowsProcessAuditPolicy')]
+        [ValidateSet(
+            'InvokeCommand',
+            'GetHostDetails',
+            'EnableSshKeyAuthentication',
+            'SetWindowsProcessAuditPolicy'
+        )]
         [string]$Operation = 'InvokeCommand',
 
         [scriptblock]$RemoteScriptBlock,
@@ -1253,10 +1258,12 @@ function Invoke-HHManagedHostGetHostDetailsOperation {
 function Invoke-HHManagedHostEnableSshKeyAuthenticationOperation {
     <#
     .SYNOPSIS
-    Converts a password-authenticated SSH target to a proven Ed25519 key.
+    Establishes or proves key authentication for a saved SSH target.
     .DESCRIPTION
-    Installs one exact marker-tagged key through the password session, proves a
-    separate key-only session, and changes the saved profile only after proof.
+    A password-authenticated target installs one exact marker-tagged key,
+    proves a separate key-only session, and changes the saved profile only
+    after proof. An already key-authenticated target performs one audited
+    key-only proof without changing its profile.
     #>
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
     param(
@@ -1283,8 +1290,52 @@ function Invoke-HHManagedHostEnableSshKeyAuthenticationOperation {
         if ($targets.Count -ne 1) { throw "Unknown target '$Name'." }
         $target = $targets[0]
         Assert-HHManagedTargetSupported -Target @($target)
-        if ($target.Transport -ne 'SSH' -or $target.Authentication -ne 'Password') {
-            throw "Target '$Name' must use SSH password authentication."
+        if ($target.Transport -ne 'SSH') {
+            throw "Target '$Name' must use SSH."
+        }
+        if ($target.Authentication -ceq 'PublicKey') {
+            if (-not $PSCmdlet.ShouldProcess(
+                    $Name,
+                    'Prove existing HostHunter SSH key authentication'
+                )) {
+                return $target
+            }
+            $proofParameters = @{
+                Command = 'Prove existing HostHunter SSH key authentication'
+                Target = @($Name)
+                Reason = $Reason
+                CaseId = $CaseId
+                Operation = 'EnableSshKeyAuthentication'
+                RemoteScriptBlock = {
+                    [pscustomobject]@{
+                        Marker = 'HostHunter.ExistingSshKeyProof.v1'
+                        Succeeded = $true
+                    }
+                }
+            }
+            $proof = @(Invoke-HHManagedHostCommandCoordinator @proofParameters)
+            $proofMarker = @(if (
+                    $proof.Count -eq 1 -and
+                    $null -ne $proof[0].PSObject.Properties['StreamEvents']
+                ) {
+                    $proof[0].StreamEvents | Where-Object {
+                        $_.Phase -ceq 'Command' -and
+                        $null -ne $_.Value -and
+                        $_.Value.Marker -ceq 'HostHunter.ExistingSshKeyProof.v1' -and
+                        $_.Value.Succeeded -eq $true
+                    }
+                })
+            if (
+                $proof.Count -ne 1 -or
+                -not $proof[0].Succeeded -or
+                $proofMarker.Count -ne 1
+            ) {
+                throw "Target '$Name' could not prove its existing SSH key authentication."
+            }
+            return $target
+        }
+        if ($target.Authentication -ne 'Password') {
+            throw "Target '$Name' must use SSH password or public-key authentication."
         }
         $selectedKeyPath = if ([string]::IsNullOrWhiteSpace($KeyPath)) {
             Join-Path $runtime.KeyRoot 'hosthunter_ed25519'

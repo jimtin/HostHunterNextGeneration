@@ -1,11 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string]$ModuleManifestPath,
-    [Parameter(Mandatory)][string]$SshHost,
-    [Parameter(Mandatory)][string]$UserName,
-    [Parameter(Mandatory)][ValidatePattern('^SHA256:[A-Za-z0-9+/]{43}$')][string]$HostKeyFingerprint,
-    [ValidateRange(1, 65535)][int]$Port = 22,
-    [Parameter(Mandatory)][ValidateSet('Enabled', 'Disabled')][string]$RestoreProcessCreationState,
+    [string]$TargetName,
     [Parameter(Mandatory)][string]$CandidateSha,
     [Parameter(Mandatory)][string]$ControllerImageId,
     [Parameter(Mandatory)][string]$ReceiptPath
@@ -13,7 +9,6 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$null = @($SshHost, $UserName, $HostKeyFingerprint, $Port)
 $expected = @(
     'Get-HHTarget', 'Set-HHTarget', 'Get-TargetHostDetails', 'Test-HHTarget', 'Invoke-HHCommand',
     'Get-HHAuditRecord', 'Get-HHAuditOutput', 'Enable-HHSshKeyAuthentication',
@@ -21,15 +16,15 @@ $expected = @(
     'Get-HHEscalationPreference', 'Remove-HHTarget'
 )
 $rows = [Collections.Generic.List[object]]::new()
-$targetName = 'windows-qualification'
+$selectedTargetName = $null
 $policyChanged = $false
 $policyRestorationAttempted = $false
 $policyRestorationOutcome = $null
 $commandLineRestoreState = 'Unchanged'
+$processCreationRestoreState = $null
 $windowsAuditEventVerified = $false
+$cloneMissionPaused = $false
 $targetSaved = $false
-$remoteKeyInstalled = $false
-$qualificationPublicKeyPath = $null
 $status = 'failed'
 $failure = $null
 
@@ -54,80 +49,19 @@ function Invoke-QualificationStep {
     finally { $watch.Stop() }
 }
 
-function Remove-QualificationRemoteKey {
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
-        'PSUseShouldProcessForStateChangingFunctions',
-        '',
-        Justification = 'This bounded cleanup is part of a qualification transaction and delegates the remote mutation through an audited public cmdlet.'
-    )]
-    [CmdletBinding()]
-    param()
-
-    if (-not $script:remoteKeyInstalled) { return }
-
-    $publicKey = [IO.File]::ReadAllText($script:qualificationPublicKeyPath).Trim()
-    $parts = @($publicKey -split '\s+')
-    if ($parts.Count -lt 2) { throw 'The qualification public key is malformed.' }
-    $material = "$($parts[0]) $($parts[1])"
-    $encodedMaterial = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($material))
-    $cleanupCommand = @"
-`$ErrorActionPreference = 'Stop'
-`$material = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('$encodedMaterial'))
-`$paths = @(
-    (Join-Path `$env:ProgramData 'ssh/administrators_authorized_keys'),
-    (Join-Path `$HOME '.ssh/authorized_keys')
-)
-`$removed = 0
-`$remaining = 0
-foreach (`$path in `$paths) {
-    if (-not [IO.File]::Exists(`$path)) { continue }
-    `$lines = @([IO.File]::ReadAllLines(`$path))
-    `$matches = @(`$lines | Where-Object {
-            `$_.Trim().StartsWith(`$material, [StringComparison]::Ordinal)
-        })
-    `$kept = @(`$lines | Where-Object {
-            -not `$_.Trim().StartsWith(`$material, [StringComparison]::Ordinal)
-        })
-    if (`$matches.Count -gt 0) {
-        [IO.File]::WriteAllLines(`$path, [string[]]`$kept, [Text.UTF8Encoding]::new(`$false))
-        `$removed += `$matches.Count
-    }
-    `$remaining += @([IO.File]::ReadAllLines(`$path) | Where-Object {
-            `$_.Trim().StartsWith(`$material, [StringComparison]::Ordinal)
-        }).Count
-}
-
-[pscustomobject]@{
-    Marker = 'HostHunter.QualificationKeyCleanup.v1'
-    Removed = `$removed
-    Remaining = `$remaining
-}
-"@
-    $cleanup = Invoke-HHCommand -Target $script:targetName -Command $cleanupCommand `
-        -Reason 'exact-SHA Windows qualification key cleanup' `
-        -CaseId 'WINDOWS-QUALIFICATION-CLEANUP'
-    $cleanupOutcome = @($cleanup.StreamEvents | Where-Object {
-            $_.Phase -ceq 'Command' -and
-            $_.Value.Marker -ceq 'HostHunter.QualificationKeyCleanup.v1'
-        } | Select-Object -Last 1)
-    if (-not $cleanup.Succeeded -or $cleanupOutcome.Count -ne 1 -or
-        [int]$cleanupOutcome[0].Value.Removed -lt 1 -or
-        [int]$cleanupOutcome[0].Value.Remaining -ne 0) {
-        throw 'The exact remote qualification key was not removed.'
-    }
-    $script:remoteKeyInstalled = $false
-}
-
 function Restore-QualificationPolicy {
     if (-not $script:policyChanged -or $script:policyRestorationAttempted) { return }
     $script:policyRestorationAttempted = $true
+    if ($script:processCreationRestoreState -notin @('Enabled', 'Disabled')) {
+        throw 'The original Process Creation audit state is unavailable for restoration.'
+    }
     $requestedCommandLineState = if (
-        $RestoreProcessCreationState -ceq 'Disabled' -and
+        $script:processCreationRestoreState -ceq 'Disabled' -and
         $script:commandLineRestoreState -ceq 'Enabled'
     ) { 'Unchanged' }
     else { $script:commandLineRestoreState }
-    $restoration = Set-HHWindowsProcessAuditPolicy -Target $script:targetName `
-        -State $RestoreProcessCreationState -Subcategory ProcessCreation `
+    $restoration = Set-HHWindowsProcessAuditPolicy -Target $script:selectedTargetName `
+        -State $script:processCreationRestoreState -Subcategory ProcessCreation `
         -CommandLineLogging $requestedCommandLineState -Escalate `
         -Reason 'exact-SHA Windows qualification restoration' -Confirm:$false
     $policySucceeded = $null -ne $restoration.PolicyOutcome -and
@@ -218,7 +152,7 @@ $commandLine = [string]$matched['CommandLine']
 }
 '@.Replace('__MARKER__', $marker)
 
-    $probe = Invoke-HHCommand -Target $script:targetName -Command $probeCommand `
+    $probe = Invoke-HHCommand -Target $script:selectedTargetName -Command $probeCommand `
         -Reason 'exact-SHA Windows process-audit event proof' `
         -CaseId 'WINDOWS-QUALIFICATION-AUDIT-EVENT'
     $eventOutcome = @($probe.StreamEvents | Where-Object {
@@ -240,26 +174,54 @@ try {
             Sort-Object Name | ForEach-Object Name)
     if ($exports.Count -ne 12) { throw "Expected 12 exports; observed $($exports.Count)." }
 
-    $null = Invoke-QualificationStep Get-HHTarget { @(Get-HHTarget -Name $targetName).Count }
-    $null = Invoke-QualificationStep Set-HHTarget {
-        Set-HHTarget -Name $targetName -HostName $SshHost -Port $Port -UserName $UserName `
-            -HostKeyFingerprint $HostKeyFingerprint -Reason 'exact-SHA Windows qualification' -Confirm:$false
+    $module = Get-Module HostHunterNextGeneration
+    $pauseReceipt = & $module {
+        Invoke-HHVisualizationLifecycleCore -Action pause
     }
+    if ($pauseReceipt.PublishingState -cne 'Paused') {
+        throw 'The disposable qualification mission state was not paused.'
+    }
+    $cloneMissionPaused = $true
+
+    $savedTargets = @(Invoke-QualificationStep Get-HHTarget { @(Get-HHTarget) })
+    $eligibleTargets = @($savedTargets | Where-Object {
+            $_.IsActive -and $_.Transport -ceq 'SSH' -and
+            $_.Authentication -ceq 'PublicKey' -and
+            ([string]::IsNullOrWhiteSpace($TargetName) -or
+                $_.Name -ieq $TargetName)
+        })
+    if ($eligibleTargets.Count -ne 1) {
+        throw (
+            'Windows qualification requires exactly one active saved SSH public-key ' +
+            'target, or HH_WINDOWS_QUALIFICATION_TARGET must select one.'
+        )
+    }
+    $savedTarget = $eligibleTargets[0]
+    $selectedTargetName = [string]$savedTarget.Name
     $targetSaved = $true
+    $null = Invoke-QualificationStep Set-HHTarget {
+        Set-HHTarget -Name $selectedTargetName -HostName $savedTarget.HostName `
+            -Port $savedTarget.Port -UserName $savedTarget.UserName `
+            -Authentication PublicKey -KeyPath $savedTarget.KeyPath `
+            -HostKeyFingerprint $savedTarget.HostKeyFingerprint `
+            -Reason 'exact-SHA Windows qualification' -Confirm:$false
+    }
     $details = Invoke-QualificationStep Get-TargetHostDetails {
-        Get-TargetHostDetails -Name $targetName -Reason 'exact-SHA Windows qualification'
+        Get-TargetHostDetails -Name $selectedTargetName `
+            -Reason 'exact-SHA Windows qualification'
     }
     if ($details.Platform -cne 'windows' -or $details.VisualizerPublishingState -cne 'Paused') {
         throw 'Windows host details did not report Windows while visualization was paused.'
     }
     $probe = Invoke-QualificationStep Test-HHTarget {
-        Test-HHTarget -Name $targetName -Reason 'exact-SHA Windows qualification'
+        Test-HHTarget -Name $selectedTargetName -Reason 'exact-SHA Windows qualification'
     }
     if (-not $probe.Succeeded -or $probe.RemotePSEdition -cne 'Core') {
         throw 'Windows target did not prove a PowerShell 7 Core SSH endpoint.'
     }
     $command = Invoke-QualificationStep Invoke-HHCommand {
-        Invoke-HHCommand -Target $targetName -Command '[Environment]::OSVersion.Platform; "HH-WINDOWS-OK"' `
+        Invoke-HHCommand -Target $selectedTargetName `
+            -Command '[Environment]::OSVersion.Platform; "HH-WINDOWS-OK"' `
             -Reason 'exact-SHA Windows qualification' -CaseId 'WINDOWS-QUALIFICATION'
     }
     if (-not $command.Succeeded) { throw 'Windows command execution failed.' }
@@ -272,25 +234,27 @@ try {
     }
     if (@($output).Count -lt 1) { throw 'Windows command output was not readable.' }
     $key = Invoke-QualificationStep Enable-HHSshKeyAuthentication {
-        Enable-HHSshKeyAuthentication -Name $targetName -Reason 'exact-SHA Windows qualification' -Confirm:$false
+        Enable-HHSshKeyAuthentication -Name $selectedTargetName `
+            -Reason 'exact-SHA Windows qualification' -Confirm:$false
     }
     if ($key.Authentication -cne 'PublicKey') { throw 'Windows SSH key transition failed.' }
-    $qualificationPublicKeyPath = "$($key.KeyPath).pub"
-    if (-not [IO.File]::Exists($qualificationPublicKeyPath)) {
-        throw 'The qualification public key is unavailable for exact remote cleanup.'
-    }
-    $remoteKeyInstalled = $true
     $policy = Invoke-QualificationStep Set-HHWindowsProcessAuditPolicy {
-        Set-HHWindowsProcessAuditPolicy -Target $targetName -State Enabled -Subcategory ProcessCreation `
+        Set-HHWindowsProcessAuditPolicy -Target $selectedTargetName `
+            -State Enabled -Subcategory ProcessCreation `
             -CommandLineLogging Enabled -Escalate `
             -Reason 'exact-SHA Windows qualification' -Confirm:$false
     }
-    $policyChanged = $true
     if (-not $policy.Succeeded) { throw 'Windows process-audit policy mutation failed.' }
+    $processCreationBefore = [uint32]$policy.PolicyOutcome.AuditBefore.ProcessCreation
+    $processCreationRestoreState = if (($processCreationBefore -band 1) -ne 0) {
+        'Enabled'
+    }
+    else { 'Disabled' }
     $commandLineRestoreState = [string]$policy.PolicyOutcome.CommandLineBefore
     if ($commandLineRestoreState -notin @('Enabled', 'Disabled', 'NotConfigured')) {
         throw 'The original command-line audit setting cannot be restored exactly.'
     }
+    $policyChanged = $true
     Test-QualificationWindowsAuditEvent
     $null = Invoke-QualificationStep Set-HHEscalationPreference {
         Set-HHEscalationPreference -Method WindowsTokenPrivilege -Confirm:$false
@@ -298,9 +262,8 @@ try {
     $preference = Invoke-QualificationStep Get-HHEscalationPreference { Get-HHEscalationPreference }
     if ($preference.Method -cne 'WindowsTokenPrivilege') { throw 'Escalation preference did not persist.' }
     Restore-QualificationPolicy
-    Remove-QualificationRemoteKey
     $null = Invoke-QualificationStep Remove-HHTarget {
-        Remove-HHTarget -Name $targetName -Confirm:$false
+        Remove-HHTarget -Name $selectedTargetName -Confirm:$false
     }
     $targetSaved = $false
     $status = 'passed'
@@ -318,17 +281,8 @@ finally {
             $failure = "$failure | Policy restoration failed: $($_.Exception.Message)"
         }
     }
-    if ($remoteKeyInstalled -and $targetSaved) {
-        try {
-            Remove-QualificationRemoteKey
-        }
-        catch {
-            $status = 'failed'
-            $failure = "$failure | Remote qualification-key cleanup failed: $($_.Exception.Message)"
-        }
-    }
     if ($targetSaved) {
-        try { Remove-HHTarget -Name $targetName -Confirm:$false }
+        try { Remove-HHTarget -Name $selectedTargetName -Confirm:$false }
         catch {
             $status = 'failed'
             $failure = "$failure | Target cleanup failed: $($_.Exception.Message)"
@@ -344,10 +298,12 @@ finally {
         expectedCmdlets = $expected
         rows = @($rows)
         noAutomaticRetries = $true
-        policyRestoredTo = $RestoreProcessCreationState
+        policyRestoredTo = $processCreationRestoreState
         policyRestored = -not $policyChanged
         policyRestorationOutcome = $policyRestorationOutcome
-        remoteQualificationKeyRemoved = -not $remoteKeyInstalled
+        authenticationMode = 'existing-public-key'
+        operatorStateCloned = $true
+        cloneMissionPaused = $cloneMissionPaused
         windowsAuditEventVerified = $windowsAuditEventVerified
         failure = $failure
     }

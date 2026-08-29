@@ -213,12 +213,23 @@ Describe 'Immutable exact-SHA release receipt state machine' -Tag Unit {
     It 'does not consume an exact SHA before read-only readiness passes' {
         $clean = $script:runner.IndexOf('status --porcelain=v1')
         $docker = $script:runner.IndexOf('docker info')
-        $windows = $script:runner.IndexOf('Live Windows qualification command is required')
+        $windows = $script:runner.IndexOf('bash -c "$windows_preflight_command"')
         $claim = $script:runner.IndexOf('python3 "$state" claim')
         $clean | Should -BeGreaterThan -1
         $docker | Should -BeGreaterThan $clean
         $windows | Should -BeGreaterThan $docker
         $claim | Should -BeGreaterThan $windows
+    }
+
+    It 'uses the canonical saved-key Windows qualifier without a TTY or command override' {
+        $script:runner | Should -Match (
+            'windows_command="\./scripts/qualification/windows-cmdlets\.sh \$candidate_sha"'
+        )
+        $script:runner | Should -Match (
+            "windows_preflight_command='\./scripts/qualification/windows-cmdlets\.sh --preflight'"
+        )
+        $script:runner | Should -Not -Match 'HH_WINDOWS_QUALIFICATION_COMMAND'
+        $script:runner | Should -Not -Match '\[\[ -t 0 && -t 1 \]\]'
     }
 
     It 'builds once then runs cmdlets and Windows before the independent heavy phases' {

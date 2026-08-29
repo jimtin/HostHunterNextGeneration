@@ -18,7 +18,8 @@ candidate_sha="$(git -C "$repo_root" rev-parse --verify "$1^{commit}" 2>/dev/nul
 candidate_tree="$(git -C "$repo_root" show -s --format=%T "$candidate_sha")"
 artifact_root="$repo_root/.artifacts/release/$candidate_sha"
 started_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-windows_command="${HH_WINDOWS_QUALIFICATION_COMMAND:-}"
+windows_command="./scripts/qualification/windows-cmdlets.sh $candidate_sha"
+windows_preflight_command='./scripts/qualification/windows-cmdlets.sh --preflight'
 
 terminal_status=failed
 terminal_phase=initialization
@@ -118,10 +119,8 @@ fi
 [[ -z "$(git -C "$repo_root" status --porcelain=v1 --untracked-files=all)" ]] || \
   preflight_block 'Exact-candidate verification requires a clean source repository.'
 docker info >/dev/null 2>&1 || preflight_block 'Docker is unavailable before the exact-SHA claim.'
-[[ -n "$windows_command" ]] || \
-  preflight_block 'Live Windows qualification command is required before the exact-SHA claim.'
-[[ -t 0 && -t 1 ]] || \
-  preflight_block 'Live Windows qualification requires an interactive terminal before claim.'
+(cd -- "$repo_root" && bash -c "$windows_preflight_command") || \
+  preflight_block 'Saved-key Windows qualification state is not ready before the exact-SHA claim.'
 
 python3 "$state" claim --root "$artifact_root" --sha "$candidate_sha" \
   --tree "$candidate_tree" --started "$started_at" --pid "$$" >/dev/null
