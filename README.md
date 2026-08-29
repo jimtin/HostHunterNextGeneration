@@ -192,9 +192,10 @@ for an exact committed SHA:
 ```
 
 The gate atomically consumes the SHA before work begins. It writes independent
-cmdlet and heavy-proof receipts plus one immutable terminal receipt. A failed,
-blocked, interrupted, or passed SHA is never executed again; fixes require a new
-commit SHA. The read-only aggregator is:
+build, cmdlet, Windows, coverage, persistence, security, and orchestration
+receipts plus one immutable terminal receipt. A failed, blocked, interrupted,
+or passed SHA is never executed again; fixes require a new commit SHA. The
+read-only aggregator is:
 
 ```sh
 ./scripts/release/aggregate-candidate.sh <40-character-sha>
