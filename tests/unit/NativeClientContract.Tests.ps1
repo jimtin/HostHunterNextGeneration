@@ -413,6 +413,85 @@ IFS= read -r request
             Should -Invoke Read-Host -Times 2 -Exactly
         }
 
+        It 'fails closed for incomplete configuration and reports local Docker command outcomes' {
+            $previousConfig = $env:XDG_CONFIG_HOME
+            $previousState = $env:XDG_STATE_HOME
+            $previousRepo = $env:HH_CLIENT_REPO_ROOT
+            $previousVisualizer = $env:HH_VISUALIZER_REPO_ROOT
+            $previousPath = $env:PATH
+            $fakeBin = Join-Path '/artifacts' (
+                'fake-docker-capture-' + [Guid]::NewGuid().ToString('N')
+            )
+            $fakeDocker = Join-Path $fakeBin 'docker'
+            [IO.Directory]::CreateDirectory($fakeBin) | Out-Null
+            [IO.File]::WriteAllText($fakeDocker, @'
+#!/usr/bin/env bash
+if [[ "$1" == 'success' ]]; then
+    printf '%s\n' first second
+    exit 0
+fi
+printf '%s\n' 'fixture docker failure' >&2
+exit 7
+'@)
+            & chmod 0700 $fakeDocker
+            try {
+                $env:HH_CLIENT_REPO_ROOT = $null
+                $env:HH_VISUALIZER_REPO_ROOT = $null
+                $env:XDG_CONFIG_HOME = $null
+                { Get-HHClientConfiguration } |
+                    Should -Throw '*HostHunter.Client is not configured*'
+
+                $configurationRoot = Join-Path $TestDrive 'configuration'
+                $configurationPath = Join-Path $configurationRoot 'hosthunter/client.json'
+                [IO.Directory]::CreateDirectory((Split-Path -Parent $configurationPath)) |
+                    Out-Null
+                $env:XDG_CONFIG_HOME = $configurationRoot
+                [IO.File]::WriteAllText($configurationPath, (@{
+                            schema='HostHunter.ClientConfiguration.v2';repoRoot=''
+                            visualizerRepoRoot=$null;visualizerUrl='http://127.0.0.1:4310'
+                        } | ConvertTo-Json -Compress))
+                { Get-HHClientConfiguration } |
+                    Should -Throw '*does not contain a repository root*'
+
+                [IO.File]::WriteAllText($configurationPath, (@{
+                            schema='HostHunter.ClientConfiguration.v2'
+                            repoRoot=(Join-Path $TestDrive 'moved-repository')
+                            visualizerRepoRoot=$null;visualizerUrl='http://127.0.0.1:4310'
+                        } | ConvertTo-Json -Compress))
+                { Get-HHClientConfiguration } |
+                    Should -Throw '*repository moved*'
+
+                $env:HH_CLIENT_REPO_ROOT = '/workspace'
+                $env:HH_VISUALIZER_REPO_ROOT = $TestDrive
+                (Get-HHClientConfiguration).VisualizerRepoRoot |
+                    Should -BeExactly (Resolve-Path $TestDrive).Path
+
+                $env:XDG_STATE_HOME = Join-Path $TestDrive 'state'
+                Use-HHClientLock { 'lock action completed' } |
+                    Should -BeExactly 'lock action completed'
+
+                $env:PATH = "$fakeBin$([IO.Path]::PathSeparator)$previousPath"
+                @(Invoke-HHClientDockerCapture -Arguments @('success')) |
+                    Should -Be @('first','second')
+                { Invoke-HHClientDockerCapture -Arguments @('failure') } |
+                    Should -Throw '*fixture docker failure*'
+
+                Mock Test-HHClientDockerReady { $false }
+                { Connect-HHClientDocker -PlatformIsMacOS $false } |
+                    Should -Throw '*engine is not running*'
+            }
+            finally {
+                $env:XDG_CONFIG_HOME = $previousConfig
+                $env:XDG_STATE_HOME = $previousState
+                $env:HH_CLIENT_REPO_ROOT = $previousRepo
+                $env:HH_VISUALIZER_REPO_ROOT = $previousVisualizer
+                $env:PATH = $previousPath
+                if ([IO.Directory]::Exists($fakeBin)) {
+                    [IO.Directory]::Delete($fakeBin,$true)
+                }
+            }
+        }
+
         It 'starts Docker Desktop once and only polls readiness afterward' {
             $script:dockerReadinessChecks = 0
             Mock Test-HHClientDockerReady {
