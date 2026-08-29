@@ -85,7 +85,6 @@ record_result() {
   local kind="$1" source="$2" exit_code="$3" missing_reason="$4"
   local enforce_process_exit="${5:-true}"
   local source_root="${6:-}"
-  local -a source_root_arguments=()
   if [[ -f "$source" ]]; then
     local source_status
     source_status="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("status", ""))' "$source")"
@@ -94,11 +93,16 @@ record_result() {
         "$kind exited $exit_code but emitted a contradictory passing receipt"
       return
     fi
+    local record_status=0
     if [[ -n "$source_root" ]]; then
-      source_root_arguments=(--source-root "$source_root")
+      python3 "$state" record --root "$artifact_root" --sha "$candidate_sha" \
+        --kind "$kind" --source "$source" --source-root "$source_root" \
+        >/dev/null || record_status=$?
+    else
+      python3 "$state" record --root "$artifact_root" --sha "$candidate_sha" \
+        --kind "$kind" --source "$source" >/dev/null || record_status=$?
     fi
-    if ! python3 "$state" record --root "$artifact_root" --sha "$candidate_sha" \
-      --kind "$kind" --source "$source" "${source_root_arguments[@]}" >/dev/null; then
+    if [[ "$record_status" -ne 0 ]]; then
       record_synthetic "$kind" failed "$kind emitted an invalid terminal receipt"
     fi
   else

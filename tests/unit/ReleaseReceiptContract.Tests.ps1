@@ -538,6 +538,12 @@ Describe 'Immutable exact-SHA release receipt state machine' -Tag Unit {
         $script:runner | Should -Match 'record_result orchestration'
     }
 
+    It 'records receipts without expanding an unset optional argument array' {
+        $script:runner | Should -Not -Match 'source_root_arguments'
+        $script:runner | Should -Match '--source-root "\$source_root"'
+        $script:runner | Should -Match '--kind "\$kind" --source "\$source" >/dev/null'
+    }
+
     It 'continues persistence and security after a coverage failure' {
         $coverage = $script:heavyRunner.IndexOf(
             'run_component coverage release-unit-coverage'
