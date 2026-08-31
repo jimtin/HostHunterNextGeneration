@@ -84,6 +84,52 @@ function Register-HHSshHostTrust {
         throw 'ExpectedFingerprint must be a complete OpenSSH SHA256 host-key fingerprint.'
     }
 
+    $algorithmRank = @{
+        'ssh-ed25519' = 0
+        'ecdsa-sha2-nistp256' = 1
+        'ecdsa-sha2-nistp384' = 2
+        'ecdsa-sha2-nistp521' = 3
+        'ssh-rsa' = 4
+    }
+    $existingLines = if (Test-Path -LiteralPath $KnownHostsPath) {
+        @(Get-Content -LiteralPath $KnownHostsPath)
+    }
+    else {
+        @()
+    }
+    if (-not [string]::IsNullOrWhiteSpace($ExpectedFingerprint)) {
+        $expectedHostToken = if ($Port -eq 22) { $HostName } else { "[$HostName]:$Port" }
+        $matchingPinned = @(
+            foreach ($line in $existingLines) {
+                $parts = $line -split '\s+'
+                if ($parts.Count -lt 3 -or $parts[0] -cne $expectedHostToken -or
+                    -not $algorithmRank.ContainsKey($parts[1])) {
+                    continue
+                }
+                try { $fingerprint = Get-HHSshKeyFingerprint -PublicKeyBase64 $parts[2] }
+                catch { continue }
+                if ($fingerprint -cne $ExpectedFingerprint) { continue }
+                [pscustomobject][ordered]@{
+                    Line = "$($parts[0]) $($parts[1]) $($parts[2])"
+                    Algorithm = $parts[1]
+                    Fingerprint = $fingerprint
+                    Rank = [int]$algorithmRank[$parts[1]]
+                }
+            }
+        )
+        if ($matchingPinned.Count -gt 0) {
+            $selectedPinned = @($matchingPinned | Sort-Object Rank, Line)[0]
+            $pinnedResult = [pscustomobject][ordered]@{
+                Line = [string]$selectedPinned.Line
+                Algorithm = [string]$selectedPinned.Algorithm
+                Fingerprint = [string]$selectedPinned.Fingerprint
+                NewlyTrusted = $false
+            }
+            if ($PassThru) { return $pinnedResult }
+            return $pinnedResult.Line
+        }
+    }
+
     $scanOutput = if ($null -ne $KeyScanner) {
         & $KeyScanner $HostName $Port $TimeoutSeconds
     }
@@ -108,13 +154,6 @@ function Register-HHSshHostTrust {
         $result.StandardOutput
     }
 
-    $algorithmRank = @{
-        'ssh-ed25519' = 0
-        'ecdsa-sha2-nistp256' = 1
-        'ecdsa-sha2-nistp384' = 2
-        'ecdsa-sha2-nistp521' = 3
-        'ssh-rsa' = 4
-    }
     $candidates = [Collections.Generic.List[object]]::new()
     foreach ($line in @($scanOutput -split "`r?`n")) {
         if ([string]::IsNullOrWhiteSpace($line) -or $line.StartsWith('#')) {
@@ -136,12 +175,6 @@ function Register-HHSshHostTrust {
     }
     if ($candidates.Count -eq 0) {
         throw 'SSH host-key discovery returned no supported host keys.'
-    }
-    $existingLines = if (Test-Path -LiteralPath $KnownHostsPath) {
-        @(Get-Content -LiteralPath $KnownHostsPath)
-    }
-    else {
-        @()
     }
     $selected = if ([string]::IsNullOrWhiteSpace($ExpectedFingerprint)) {
         $matchingPinned = @($candidates | Where-Object { $_.Line -cin $existingLines })
