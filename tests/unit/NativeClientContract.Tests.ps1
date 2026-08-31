@@ -64,7 +64,10 @@ Describe 'native PowerShell client contract' -Tag Unit {
         }
         $metadata.schema | Should -BeExactly HostHunter.ClientCommandMetadata.v1
         $metadata.sourceFingerprint | Should -BeExactly contract-fingerprint
-        @($metadata.commands).Count | Should -Be 12
+        $manifest = Import-PowerShellDataFile -LiteralPath (
+            Join-Path $runtimeSourceRoot 'HostHunterNextGeneration.psd1'
+        )
+        @($metadata.commands).Count | Should -Be @($manifest.FunctionsToExport).Count
         @($metadata.commands.name | Sort-Object) | Should -Be @(
             Get-Command -Module HostHunterNextGeneration -CommandType Function |
                 Sort-Object Name | Select-Object -ExpandProperty Name
@@ -73,6 +76,15 @@ Describe 'native PowerShell client contract' -Tag Unit {
             Should -HaveCount 0
         (Get-Content -LiteralPath $script:metadataScript -Raw) |
             Should -Not -Match "'Set-HHTarget'|'Invoke-HHCommand'|'Get-HHTarget'"
+    }
+
+    It 'locks controller startup to the packaged manifest without a literal export count' {
+        $entrypoint = Get-Content -LiteralPath (
+            Join-Path $repoRoot 'scripts/runtime/controller-entrypoint.sh'
+        ) -Raw
+        $entrypoint | Should -Not -Match '(?m)^readonly expected_exports='
+        $entrypoint | Should -Match 'Import-PowerShellDataFile'
+        $entrypoint | Should -Match 'Compare-Object -ReferenceObject \$expected'
     }
 
     InModuleScope HostHunter.Client {
@@ -491,7 +503,6 @@ exit 7
                 }
             }
         }
-
         It 'starts Docker Desktop once and only polls readiness afterward' {
             $script:dockerReadinessChecks = 0
             Mock Test-HHClientDockerReady {
@@ -881,7 +892,7 @@ exit 7
     }
 
     It 'selects exactly one native-client terminal receipt from incidental output' {
-        $receipt = [pscustomobject]@{ Status='passed'; InvokedUniqueCommandCount=12 }
+        $receipt = [pscustomobject]@{ Status='passed'; InvokedUniqueCommandCount=16 }
         (Select-HHNativeClientTerminalResult -InputObject @('incidental', $receipt)).Status |
             Should -BeExactly passed
         { Select-HHNativeClientTerminalResult -InputObject @('incidental') } |
@@ -959,7 +970,7 @@ exit 7
         $source | Should -Match "'pwsh'"
         $source | Should -Not -Match "'-NoProfile'"
         $source | Should -Match 'RequireProfileLoadedClient'
-        $source | Should -Match 'InvokedUniqueCommandCount -ne 12'
+        $source | Should -Match 'InvokedUniqueCommandCount -ne\s+\[int\]\$result.ExpectedFrameworkCommandCount'
         $source | Should -Match 'fresh-process-installed-profile'
         $source | Should -Match "Environment\['DOCKER_CONFIG'\]"
         $source | Should -Match '\$journeyParameters\s*=\s*@\{'

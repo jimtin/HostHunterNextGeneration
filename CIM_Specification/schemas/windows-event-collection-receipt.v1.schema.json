@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hosthunter.dev/schemas/windows-event-collection-receipt.v1.schema.json",
+  "title": "HostHunter bounded Windows event collection receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "receipt_id",
+    "collection_run_id",
+    "host_id",
+    "record_family",
+    "status",
+    "result",
+    "requested",
+    "counts",
+    "has_more",
+    "gaps",
+    "cursor_advanced",
+    "completed_at"
+  ],
+  "properties": {
+    "schema_version": { "const": "1.0.0" },
+    "receipt_id": { "$ref": "#/$defs/uuid" },
+    "collection_run_id": { "$ref": "#/$defs/uuid" },
+    "host_id": { "type": "string", "pattern": "^hh_[a-z2-7]{52}$" },
+    "record_family": { "enum": ["process.start", "process.end", "authentication"] },
+    "status": { "enum": ["complete", "partial", "unavailable", "failed"] },
+    "result": { "enum": ["records", "no_events", "gap"] },
+    "requested": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["since", "until", "first", "mode"],
+      "properties": {
+        "since": { "$ref": "#/$defs/dateTime" },
+        "until": { "$ref": "#/$defs/dateTime" },
+        "first": { "type": "integer", "minimum": 1, "maximum": 500 },
+        "mode": { "enum": ["cursor", "backfill"] }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matched", "normalized", "persisted", "rejected"],
+      "properties": {
+        "matched": { "$ref": "#/$defs/count" },
+        "normalized": { "$ref": "#/$defs/count" },
+        "persisted": { "$ref": "#/$defs/count" },
+        "rejected": { "$ref": "#/$defs/count" }
+      }
+    },
+    "has_more": { "type": "boolean" },
+    "gaps": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "detail"],
+        "properties": {
+          "code": {
+            "enum": [
+              "audit_disabled",
+              "access_denied",
+              "log_cleared",
+              "cursor_reset",
+              "history_truncated",
+              "unsupported_event_version"
+            ]
+          },
+          "detail": { "type": "string", "minLength": 1, "maxLength": 1024 },
+          "first_missing_record_id": { "$ref": "#/$defs/recordId" },
+          "last_missing_record_id": { "$ref": "#/$defs/recordId" }
+        }
+      }
+    },
+    "cursor_before": { "$ref": "#/$defs/cursor" },
+    "cursor_after": { "$ref": "#/$defs/cursor" },
+    "cursor_advanced": { "type": "boolean" },
+    "completed_at": { "$ref": "#/$defs/dateTime" }
+  },
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "dateTime": { "type": "string", "format": "date-time" },
+    "count": { "type": "integer", "minimum": 0, "maximum": 500 },
+    "recordId": { "type": "string", "pattern": "^(0|[1-9][0-9]{0,19})$" },
+    "cursor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["channel", "epoch_id", "record_id", "event_time"],
+      "properties": {
+        "channel": { "const": "Security" },
+        "epoch_id": { "$ref": "#/$defs/uuid" },
+        "record_id": { "$ref": "#/$defs/recordId" },
+        "event_time": { "$ref": "#/$defs/dateTime" }
+      }
+    }
+  }
+}

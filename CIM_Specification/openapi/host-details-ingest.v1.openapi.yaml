@@ -1,11 +1,12 @@
 openapi: 3.1.0
 info:
-  title: HostHunter Visualizer Host Details Ingest API
-  version: 1.0.0-draft.1
+  title: HostHunter Visualizer Producer API
+  version: 1.1.0-draft.1
   description: >-
     Private, authenticated producer boundary for compatibility status,
     idempotent collection-run activation, and immutable HostHunter ECS
-    target-host observations. This contract does not expose managed-host
+    target-host observations and registered source-neutral forensic CIM events.
+    This contract does not expose managed-host
     control, HostHunter persistence, investigation reads, or PostgreSQL.
 servers:
   - url: http://hosthunter-visualizer:3000
@@ -251,6 +252,112 @@ paths:
             application/problem+json:
               schema:
                 $ref: '#/components/schemas/Problem'
+  /api/v1/collection-runs/{collection_run_id}/events/{event_id}:
+    put:
+      operationId: putForensicEventV1
+      summary: Create or replay one immutable normalized forensic event
+      description: >-
+        This is the single forensic-information event boundary. The path IDs
+        must equal hosthunter.collection_run.id and event.id in the body. The
+        registry accepts only the named schemas advertised by producer status.
+        HostHunter must normalize source evidence before submission; raw EVTX,
+        XML, native field bags, or encoded Windows values are rejected. A
+        successful response proves durable acceptance, not completed specialized
+        projection. Processing is record-specific.
+      parameters:
+        - name: collection_run_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: event_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/Uuid'
+        - name: X-HostHunter-Content-SHA256
+          in: header
+          required: true
+          description: Lower-case SHA-256 hex of the exact UTF-8 request bytes.
+          schema:
+            type: string
+            pattern: '^[0-9a-f]{64}$'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - $ref: ../schemas/process-start.v1.schema.json
+                - $ref: ../schemas/authentication-session-start.v1.schema.json
+                - $ref: ../schemas/authentication-logon-failure.v1.schema.json
+                - $ref: ../schemas/authentication-session-end.v1.schema.json
+                - $ref: ../schemas/authentication-session-logoff-initiated.v1.schema.json
+                - $ref: ../schemas/authentication-explicit-credential-use.v1.schema.json
+                - $ref: ../schemas/authentication-session-special-privileges.v1.schema.json
+                - $ref: ../schemas/process-access-token.v1.schema.json
+                - $ref: ../schemas/user-effective-rights.v1.schema.json
+      responses:
+        '200':
+          description: Identical immutable event already exists.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForensicEventReceipt'
+        '201':
+          description: Event durably accepted for asynchronous processing.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ForensicEventReceipt'
+        '400':
+          description: Malformed request, JSON, digest, or path/body identity.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '401':
+          description: Missing or invalid producer credential.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '409':
+          description: Event or source identity already exists with different immutable bytes.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '413':
+          description: Request exceeds 262144 bytes.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '422':
+          description: JSON violates the registered canonical CIM schema.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '429':
+          description: Bounded ingest capacity is temporarily exhausted.
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+                minimum: 1
+                maximum: 300
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
+        '503':
+          description: Persistence is unavailable; no event was accepted.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/Problem'
 components:
   securitySchemes:
     producerToken:
@@ -288,10 +395,34 @@ components:
         host_observation_schema_version:
           const: 1.0.0
         process_event_schema_version:
-          description: Null until the separately specified Phase 2 process ingest is enabled.
-          oneOf:
-            - const: 1.0.0
-            - type: 'null'
+          const: 1.0.0
+        registered_forensic_schemas:
+          description: >-
+            Optional authoritative runtime-accepted forensic schema list.
+            When absent, process_event_schema_version advertises only
+            process.start/1.0.0.
+          type: array
+          minItems: 1
+          maxItems: 64
+          uniqueItems: true
+          items:
+            type: object
+            additionalProperties: false
+            required:
+              - name
+              - version
+              - kind
+            properties:
+              name:
+                type: string
+                pattern: '^[a-z][a-z0-9.-]{2,63}$'
+              version:
+                type: string
+                pattern: '^[0-9]+\.[0-9]+\.[0-9]+$'
+              kind:
+                enum:
+                  - event
+                  - state
         active_collection_run_id:
           oneOf:
             - $ref: '#/components/schemas/Uuid'
@@ -318,6 +449,58 @@ components:
         host_id:
           type: string
           pattern: '^hh_[a-z2-7]{52}$'
+        content_sha256:
+          type: string
+          pattern: '^[0-9a-f]{64}$'
+        received_at:
+          type: string
+          format: date-time
+    ForensicEventReceipt:
+      type: object
+      additionalProperties: false
+      required:
+        - status
+        - collection_run_id
+        - event_id
+        - host_id
+        - event_type
+        - schema_version
+        - processing_state
+        - content_sha256
+        - received_at
+      properties:
+        status:
+          enum:
+            - created
+            - replayed
+        collection_run_id:
+          $ref: '#/components/schemas/Uuid'
+        event_id:
+          $ref: '#/components/schemas/Uuid'
+        host_id:
+          type: string
+          pattern: '^hh_[a-z2-7]{52}$'
+        event_type:
+          enum:
+            - process.start
+            - process.end
+            - authentication.session.start
+            - authentication.logon.failure
+            - authentication.session.end
+            - authentication.session.logoff-initiated
+            - authentication.explicit-credential-use
+            - authentication.session.special-privileges
+            - process.access-token
+            - user.effective-rights
+        schema_version:
+          const: 1.0.0
+        processing_state:
+          enum:
+            - pending
+            - processing
+            - completed
+            - retryable_failure
+            - terminal_failure
         content_sha256:
           type: string
           pattern: '^[0-9a-f]{64}$'

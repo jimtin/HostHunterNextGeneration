@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 $resolvedRoot = (Resolve-Path -LiteralPath $RepoRoot).Path
 $scopes = @(
     '.dockerignore', 'Dockerfile.runtime', 'compose.runtime.yml',
-    'src/HostHunterNextGeneration', 'eng/durability', 'eng/sqlite',
+    'src/HostHunterNextGeneration', 'CIM_Specification/schemas', 'eng/durability', 'eng/sqlite',
     'scripts/build', 'scripts/runtime'
 )
 $relativeFiles = @(& git -C $resolvedRoot ls-files --cached --others `

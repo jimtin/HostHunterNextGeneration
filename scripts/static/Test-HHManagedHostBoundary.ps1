@@ -11,6 +11,11 @@ $expected = [ordered]@{
     'Test-HHTarget.ps1' = 'TestTarget'
     'Invoke-HHCommand.ps1' = 'InvokeCommand'
     'Get-TargetHostDetails.ps1' = 'GetHostDetails'
+    'Get-TargetProcessStartEvents.ps1' = 'GetProcessStartEvents'
+    'Get-TargetProcessEndEvents.ps1' = 'GetProcessEndEvents'
+    'Get-TargetAuthenticationEvents.ps1' = 'GetAuthenticationEvents'
+    'Get-TargetProcessAccessToken.ps1' = 'GetProcessAccessToken'
+    'Get-TargetUserEffectiveRights.ps1' = 'GetUserEffectiveRights'
     'Enable-HHSshKeyAuthentication.ps1' = 'EnableSshKeyAuthentication'
     'Set-HHWindowsProcessAuditPolicy.ps1' = 'SetWindowsProcessAuditPolicy'
 }
@@ -20,6 +25,11 @@ $hostCmdlets = @(
     'Invoke-HHCommand',
     'Enable-HHSshKeyAuthentication',
     'Set-HHWindowsProcessAuditPolicy'
+    'Get-TargetProcessStartEvents'
+    'Get-TargetProcessEndEvents'
+    'Get-TargetAuthenticationEvents'
+    'Get-TargetProcessAccessToken'
+    'Get-TargetUserEffectiveRights'
 )
 $forbiddenBoundaryCommands = @(
     'Invoke-HHManagedHostCommandCoordinator',

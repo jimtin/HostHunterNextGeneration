@@ -19,20 +19,30 @@
     "api_version": { "const": "1.0.0" },
     "collection_run_schema_version": { "const": "1.0.0" },
     "host_observation_schema_version": { "const": "1.0.0" },
-    "process_event_schema_version": {
-      "oneOf": [
-        { "const": "1.0.0" },
-        { "type": "null" }
-      ]
+    "process_event_schema_version": { "const": "1.0.0" },
+    "registered_forensic_schemas": {
+      "description": "Runtime-accepted forensic schemas. If absent, process_event_schema_version advertises only process.start/1.0.0.",
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/forensicSchemaCapability" }
     },
     "active_collection_run_id": {
-      "oneOf": [
-        { "$ref": "#/$defs/uuid" },
-        { "type": "null" }
-      ]
+      "oneOf": [{ "$ref": "#/$defs/uuid" }, { "type": "null" }]
     }
   },
   "$defs": {
+    "forensicSchemaCapability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "kind"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9.-]{2,63}$" },
+        "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "kind": { "enum": ["event", "state"] }
+      }
+    },
     "uuid": {
       "type": "string",
       "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"

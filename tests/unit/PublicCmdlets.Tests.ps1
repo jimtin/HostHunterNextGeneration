@@ -26,6 +26,10 @@ Describe 'HostHunter SQLite public cmdlets' -Tag Unit {
                 MasterKey = [byte[]](0..31)
                 Anchor = [pscustomobject]@{ Artifact = [byte[]]::new(196) }
                 TargetSnapshot = [pscustomobject]@{ Generation = 0L; Targets = @() }
+                VisualizerSnapshot = [pscustomobject]@{
+                    Generation = 0L
+                    CurrentMissionId = $null
+                }
                 WriterLock = 'writer'
             }
             $script:transportResult = [pscustomobject]@{
@@ -59,6 +63,15 @@ Describe 'HostHunter SQLite public cmdlets' -Tag Unit {
                     @($script:savedTargets | Where-Object { $_.Name -iin @($Name) })
                 }
                 [pscustomobject]@{ Generation = 0L; Targets = $targets }
+            }
+            Mock Get-HHLatestVisualizerMissionRecord { $null }
+            Mock Invoke-HHManagedHostGetHostDetailsOperation
+            Mock Get-HHLocalMissionState {
+                [pscustomobject]@{
+                    PublishingState = 'Paused'
+                    CurrentMissionId = $null
+                    LatestMissionId = $null
+                }
             }
             Mock Register-HHAuthenticatedAuditBatch {
                 param($Request)

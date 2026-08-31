@@ -1,80 +1,63 @@
 {
-  "@timestamp": "2026-08-28T10:00:00Z",
-  "ecs": {
-    "version": "9.5.0"
-  },
+  "@timestamp": "2026-08-29T04:12:31.427Z",
+  "ecs": { "version": "9.5.0" },
   "event": {
-    "id": "11111111-1111-4111-8111-111111111111",
+    "id": "adb9884f-9517-5d6a-88e1-34feb53b51bc",
     "kind": "event",
-    "category": [
-      "process"
-    ],
-    "type": [
-      "start"
-    ],
+    "category": ["process"],
+    "type": ["start"],
     "action": "process-started",
-    "dataset": "hosthunter.process_lifecycle",
+    "dataset": "hosthunter.process_start",
     "module": "hosthunter",
     "provider": "HostHunter",
-    "created": "2026-08-28T10:00:02Z",
-    "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    "created": "2026-08-29T04:12:33.000Z"
   },
   "agent": {
     "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
     "name": "hosthunter-controller",
     "type": "hosthunter",
-    "version": "0.5.0"
+    "version": "0.6.0"
   },
   "host": {
     "id": "hh_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "hostname": "WIN-CLIENT-01",
-    "name": "win-client-01.lab.example"
+    "name": "win-client-01.lab.example",
+    "boot": { "id": "40000000-0000-4000-8000-000000000001" }
   },
   "process": {
-    "pid": 4120,
-    "entity_id": "{11111111-2222-4333-8444-555555555555}",
-    "name": "powershell.exe",
-    "executable": "C:\\\\Program Files\\\\PowerShell\\\\7\\\\pwsh.exe",
-    "command_line": "pwsh.exe -NoProfile -File C:\\\\ProgramData\\\\Example\\\\task.ps1",
-    "args": [
-      "-NoProfile",
-      "-File",
-      "C:\\\\ProgramData\\\\Example\\\\task.ps1"
-    ],
-    "parent": {
-      "pid": 980,
-      "entity_id": "{aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee}",
-      "name": "services.exe"
-    }
+    "pid": 700,
+    "entity_id": "hhproc_v1_0372bdd4ad9bb44cb95b5b7cd430f35095082bb61099088a54da6ab6dfcbbd21",
+    "name": "rundll32.exe",
+    "executable": "C:\\Windows\\System32\\rundll32.exe",
+    "command_line": "rundll32.exe example.dll,EntryPoint",
+    "token_elevation": "limited",
+    "integrity_level": "medium",
+    "parent": { "pid": 3700, "name": "explorer.exe", "executable": "C:\\Windows\\explorer.exe" }
   },
-  "user": {
-    "id": "S-1-5-21-1000",
-    "name": "analyst",
-    "domain": "LAB"
-  },
+  "user": { "id": "S-1-5-18", "name": "WIN-CLIENT-01$", "domain": "LAB", "logon_id": "999" },
   "hosthunter": {
-    "collection_run": {
-      "id": "22222222-2222-4222-8222-222222222222"
-    },
+    "schema": { "name": "process.start", "version": "1.0.0" },
+    "collection_run": { "id": "22222222-2222-4222-8222-222222222222" },
     "source": {
-      "provider": "Microsoft-Windows-Sysmon",
-      "channel": "Microsoft-Windows-Sysmon/Operational",
-      "event_code": "1",
-      "record_id": "12345",
-      "computer": "WIN-CLIENT-01"
+      "provider": "Microsoft-Windows-Security-Auditing",
+      "channel": "Security",
+      "event_code": "4688",
+      "event_version": 2,
+      "record_id": "2814",
+      "computer": "WIN-CLIENT-01.lab.example"
     },
     "process": {
-      "boot_id": "boot-20260828-01",
-      "source_instance_id": "{11111111-2222-4333-8444-555555555555}",
-      "source_parent_instance_id": "{aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee}"
+      "target_user": {
+        "id": "S-1-5-21-1000",
+        "name": "analyst",
+        "domain": "LAB",
+        "logon_id": "4872944"
+      }
     },
     "provenance": {
-      "transport": "event-log-export",
-      "collected_at": "2026-08-28T10:00:02Z"
-    },
-    "audit": {
-      "batch_id": "33333333-3333-4333-8333-333333333333",
-      "invocation_id": "44444444-4444-4444-8444-444444444444"
+      "transport": "powershell7_over_ssh",
+      "collected_at": "2026-08-29T04:12:33.000Z",
+      "normalizer": { "name": "HostHunter.Security4688", "version": "1.0.0" }
     }
   }
 }

@@ -1,7 +1,7 @@
 # HostHunterNextGeneration
 
 HostHunter is a container-first PowerShell module for operating managed Linux
-and Windows hosts through PowerShell 7 over OpenSSH. It exposes twelve framework cmdlets
+and Windows hosts through PowerShell 7 over OpenSSH. It exposes seventeen framework cmdlets
 and records every managed-host operation in authenticated SQLite with encrypted,
 tamper-evident output artifacts.
 
@@ -31,14 +31,20 @@ Set-HHWindowsProcessAuditPolicy
 Set-HHEscalationPreference
 Get-HHEscalationPreference
 Get-TargetHostDetails
+Get-TargetProcessStartEvents
+Get-TargetProcessEndEvents
+Get-TargetAuthenticationEvents
+Get-TargetProcessAccessToken
+Get-TargetUserEffectiveRights
 ```
 
 `Get-HHTargets` is an alias for `Get-HHTarget`. When no matching targets are
 saved, either name displays `No currently set` and returns no pipeline objects.
 
-Six cmdlets contact managed hosts: `Set-HHTarget`, `Test-HHTarget`,
+Eleven cmdlets contact managed hosts: `Set-HHTarget`, `Test-HHTarget`,
 `Invoke-HHCommand`, `Enable-HHSshKeyAuthentication`, and
-`Set-HHWindowsProcessAuditPolicy`, plus `Get-TargetHostDetails`. They all delegate once to the same private
+`Set-HHWindowsProcessAuditPolicy`, `Get-TargetHostDetails`, plus the five
+on-demand CIM collection cmdlets. They all delegate once to the same private
 engine, which owns intent persistence, dispatch arming, SSH phases, stream
 capture, encrypted evidence, terminal audit, cleanup, and uncertain-outcome
 handling. The remaining local cmdlets never contact a managed host.
@@ -52,7 +58,9 @@ never creates or resets a mission. `Start-HHVisualization` explicitly starts or
 resumes visualization; `Stop-HHVisualization` pauses publishing before stopping
 the visualizer containers without deleting either repository's durable state.
 Visualizer downtime leaves local delivery state and never blocks HostHunter.
-No endpoint event logs or continuous collectors are part of this release.
+Process start/end, authentication activity, primary process tokens, and effective
+user rights are collected only on demand. Collection is bounded, persists
+canonical evidence before delivery, and never starts polling or subscriptions.
 
 `Invoke-HHCommand` accepts arbitrary remote PowerShell. HostHunter audits the
 originating request and result; it cannot constrain network activity performed
@@ -70,7 +78,7 @@ pwsh -NoProfile -File ./scripts/client/Install-HHClient.ps1 `
 
 Open PowerShell normally. The profile import launches Docker Desktop once when
 its engine is stopped, starts the controller when needed, reuses an unchanged
-controller, and synchronizes the twelve exported framework commands from the packaged
+controller, and synchronizes the seventeen exported framework commands from the packaged
 module. In an interactive terminal it finishes with a short radar-style
 welcome animation, then presents a separate visualization prompt when the
 visualizer is stopped. That prompt defaults to No. If the visualizer is already
@@ -172,9 +180,11 @@ Run the only development acceptance journey:
 ```
 
 It builds a production-derived verifier and a disposable SSH fixture, calls all
-twelve framework cmdlets in one ordered stateful journey, and validates read-only SQLite
+seventeen framework cmdlets in one ordered stateful journey, and validates read-only SQLite
 snapshots and deltas. It has one timeout owner, no shards, and no retries.
-Results are written below `.artifacts/cmdlets/<source-sha>/`.
+Development results are written below
+`.artifacts/cmdlets/<source-fingerprint>/<run-id>/`; exact-SHA release results
+remain below `.artifacts/cmdlets/<source-sha>/`.
 
 The Linux fixture can prove only a finite, audited unsupported outcome for
 `Set-HHWindowsProcessAuditPolicy`. A release that claims positive Windows

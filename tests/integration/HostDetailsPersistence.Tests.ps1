@@ -7,13 +7,13 @@ if ([IO.Directory]::Exists('/opt/hosthunter-sqlite/lib')) {
 }
 
 Describe 'authenticated host-details persistence' -Tag Integration {
-    It 'builds schema v3 from migrations and stores observations encrypted and rollback sealed' {
+    It 'builds schema v5 from migrations and stores observations encrypted and rollback sealed' {
         InModuleScope HostHunterNextGeneration {
             $root=Join-Path $TestDrive 'host-details-state'
             $runtime=Get-HHPersistenceContext -DataRoot $root
             $key=[byte[]](0..31)
             $schema=Initialize-HHSqliteDatabase -PersistenceContext $runtime -MasterKey $key
-            $schema.SchemaVersion | Should -Be 3
+            $schema.SchemaVersion | Should -Be 5
             $provider={param($Context,$Exists);$null=$Context,$Exists;[byte[]](0..31)}
             $context=Open-HHAuthenticatedPersistence -PersistenceContext $runtime `
                 -MasterKeyProvider $provider -OperationLock -AllowAnchorAdvance

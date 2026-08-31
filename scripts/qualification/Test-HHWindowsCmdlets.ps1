@@ -10,7 +10,11 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $expected = @(
-    'Get-HHTarget', 'Set-HHTarget', 'Get-TargetHostDetails', 'Test-HHTarget', 'Invoke-HHCommand',
+    'Get-HHTarget', 'Set-HHTarget', 'Get-TargetHostDetails',
+    'Get-TargetProcessStartEvents', 'Get-TargetProcessEndEvents',
+    'Get-TargetAuthenticationEvents',
+    'Get-TargetProcessAccessToken', 'Get-TargetUserEffectiveRights',
+    'Test-HHTarget', 'Invoke-HHCommand',
     'Get-HHAuditRecord', 'Get-HHAuditOutput', 'Enable-HHSshKeyAuthentication',
     'Set-HHWindowsProcessAuditPolicy', 'Set-HHEscalationPreference',
     'Get-HHEscalationPreference', 'Remove-HHTarget'
@@ -22,6 +26,7 @@ $policyRestorationAttempted = $false
 $policyRestorationOutcome = $null
 $commandLineRestoreState = 'Unchanged'
 $processCreationRestoreState = $null
+$processTerminationRestoreState = $null
 $windowsAuditEventVerified = $false
 $cloneMissionPaused = $false
 $targetSaved = $false
@@ -55,26 +60,36 @@ function Restore-QualificationPolicy {
     if ($script:processCreationRestoreState -notin @('Enabled', 'Disabled')) {
         throw 'The original Process Creation audit state is unavailable for restoration.'
     }
+    if ($script:processTerminationRestoreState -notin @('Enabled', 'Disabled')) {
+        throw 'The original Process Termination audit state is unavailable for restoration.'
+    }
     $requestedCommandLineState = if (
         $script:processCreationRestoreState -ceq 'Disabled' -and
         $script:commandLineRestoreState -ceq 'Enabled'
     ) { 'Unchanged' }
     else { $script:commandLineRestoreState }
-    $restoration = Set-HHWindowsProcessAuditPolicy -Target $script:selectedTargetName `
+    $creationRestoration = Set-HHWindowsProcessAuditPolicy -Target $script:selectedTargetName `
         -State $script:processCreationRestoreState -Subcategory ProcessCreation `
         -CommandLineLogging $requestedCommandLineState -Escalate `
         -Reason 'exact-SHA Windows qualification restoration' -Confirm:$false
-    $policySucceeded = $null -ne $restoration.PolicyOutcome -and
-        [bool]$restoration.PolicyOutcome.Succeeded
+    $terminationRestoration = Set-HHWindowsProcessAuditPolicy -Target $script:selectedTargetName `
+        -State $script:processTerminationRestoreState -Subcategory ProcessTermination `
+        -CommandLineLogging Unchanged -Escalate `
+        -Reason 'exact-SHA Windows qualification termination restoration' -Confirm:$false
+    $creationSucceeded = $null -ne $creationRestoration.PolicyOutcome -and
+        [bool]$creationRestoration.PolicyOutcome.Succeeded
+    $terminationSucceeded = $null -ne $terminationRestoration.PolicyOutcome -and
+        [bool]$terminationRestoration.PolicyOutcome.Succeeded
+    $policySucceeded = $creationSucceeded -and $terminationSucceeded
     $script:policyRestorationOutcome = [ordered]@{
-        operationSucceeded = [bool]$restoration.Succeeded
+        operationSucceeded = [bool]$creationRestoration.Succeeded -and [bool]$terminationRestoration.Succeeded
         policySucceeded = $policySucceeded
-        dispatchState = [string]$restoration.DispatchState
-        outcomeStatus = [string]$restoration.OutcomeStatus
-        failureKind = [string]$restoration.FailureKind
-        exceptionType = [string]$restoration.ExceptionType
+        creationDispatchState = [string]$creationRestoration.DispatchState
+        terminationDispatchState = [string]$terminationRestoration.DispatchState
         commandLineBefore = $script:commandLineRestoreState
-        commandLineAfter = [string]$restoration.PolicyOutcome.CommandLineAfter
+        commandLineAfter = [string]$creationRestoration.PolicyOutcome.CommandLineAfter
+        processCreation = $script:processCreationRestoreState
+        processTermination = $script:processTerminationRestoreState
     }
     if ($policySucceeded) {
         $script:policyChanged = $false
@@ -82,11 +97,11 @@ function Restore-QualificationPolicy {
     if (-not $policySucceeded) {
         throw 'Windows process-audit policy restoration was not confirmed by its policy outcome.'
     }
-    if ([string]$restoration.PolicyOutcome.CommandLineAfter -cne
+    if ([string]$creationRestoration.PolicyOutcome.CommandLineAfter -cne
         $script:commandLineRestoreState) {
         throw 'The original command-line audit state was not restored exactly.'
     }
-    if (-not $restoration.Succeeded) {
+    if (-not $creationRestoration.Succeeded -or -not $terminationRestoration.Succeeded) {
         throw 'Windows process-audit policy was restored but its operation did not terminalize successfully.'
     }
 }
@@ -101,7 +116,7 @@ $startInfo = [Diagnostics.ProcessStartInfo]::new()
 $startInfo.FileName = Join-Path $env:SystemRoot 'System32\cmd.exe'
 $startInfo.UseShellExecute = $false
 $startInfo.CreateNoWindow = $true
-$startInfo.Arguments = '/d /c echo ' + $marker + '>NUL'
+$startInfo.Arguments = '/d /c echo ' + $marker + '>NUL & exit /b 23'
 $process = [Diagnostics.Process]::new()
 $process.StartInfo = $startInfo
 if (-not $process.Start()) { throw 'The audit marker process did not start.' }
@@ -111,6 +126,7 @@ try {
         throw 'The audit marker process did not exit in time.'
     }
     $markerProcessId = $process.Id
+    $markerExitCode = $process.ExitCode
 }
 finally { $process.Dispose() }
 
@@ -144,11 +160,14 @@ do {
 
 if ($null -eq $matched) { throw 'The expected Security event 4688 was not observed.' }
 $commandLine = [string]$matched['CommandLine']
-[pscustomobject]@{
+    [pscustomobject]@{
     Marker = 'HostHunter.WindowsProcessAuditEventProbe.v1'
     EventFound = $true
     CommandLinePresent = -not [string]::IsNullOrWhiteSpace($commandLine)
     MarkerPresent = $commandLine.Contains($marker)
+    ProcessId = $markerProcessId
+    ExitCode = $markerExitCode
+    StartedAtUtc = $startedAt
 }
 '@.Replace('__MARKER__', $marker)
 
@@ -166,13 +185,17 @@ $commandLine = [string]$matched['CommandLine']
         throw 'Windows Security event 4688 command-line proof failed.'
     }
     $script:windowsAuditEventVerified = $true
+    $eventOutcome[0].Value
 }
 
 try {
     Import-Module $ModuleManifestPath -Force
     $exports = @(Get-Command -Module HostHunterNextGeneration -CommandType Function |
             Sort-Object Name | ForEach-Object Name)
-    if ($exports.Count -ne 12) { throw "Expected 12 exports; observed $($exports.Count)." }
+    if (@(Compare-Object -ReferenceObject @($expected | Sort-Object) `
+                -DifferenceObject $exports).Count -ne 0) {
+        throw 'Windows qualification steps differ from the packaged framework exports.'
+    }
 
     $module = Get-Module HostHunterNextGeneration
     $pauseReceipt = & $module {
@@ -213,6 +236,26 @@ try {
     if ($details.Platform -cne 'windows' -or $details.VisualizerPublishingState -cne 'Paused') {
         throw 'Windows host details did not report Windows while visualization was paused.'
     }
+    $processStarts = Invoke-QualificationStep Get-TargetProcessStartEvents {
+        @(Get-TargetProcessStartEvents -Name $selectedTargetName `
+                -Since ([DateTimeOffset]::UtcNow.AddMinutes(-5)) -First 20 `
+                -Reason 'exact-SHA Windows qualification')
+    }
+    if (@($processStarts).Count -lt 1) { throw 'Windows process-start collection returned no finite result.' }
+    $authentication = Invoke-QualificationStep Get-TargetAuthenticationEvents {
+        @(Get-TargetAuthenticationEvents -Name $selectedTargetName `
+                -Since ([DateTimeOffset]::UtcNow.AddMinutes(-5)) -First 20 `
+                -Reason 'exact-SHA Windows qualification')
+    }
+    if (@($authentication).Count -lt 1) { throw 'Windows authentication collection returned no finite result.' }
+    $token = Invoke-QualificationStep Get-TargetProcessAccessToken {
+        @(Get-TargetProcessAccessToken -Name $selectedTargetName -ProcessName pwsh.exe -Reason 'exact-SHA Windows qualification')
+    }
+    if (@($token).Count -lt 1) { throw 'Windows process-token collection returned no finite result.' }
+    $rights = Invoke-QualificationStep Get-TargetUserEffectiveRights {
+        @(Get-TargetUserEffectiveRights -Name $selectedTargetName -Reason 'exact-SHA Windows qualification')
+    }
+    if (@($rights).Count -lt 1) { throw 'Windows effective-rights collection returned no finite result.' }
     $probe = Invoke-QualificationStep Test-HHTarget {
         Test-HHTarget -Name $selectedTargetName -Reason 'exact-SHA Windows qualification'
     }
@@ -240,7 +283,7 @@ try {
     if ($key.Authentication -cne 'PublicKey') { throw 'Windows SSH key transition failed.' }
     $policy = Invoke-QualificationStep Set-HHWindowsProcessAuditPolicy {
         Set-HHWindowsProcessAuditPolicy -Target $selectedTargetName `
-            -State Enabled -Subcategory ProcessCreation `
+            -State Enabled -Subcategory ProcessCreation,ProcessTermination `
             -CommandLineLogging Enabled -Escalate `
             -Reason 'exact-SHA Windows qualification' -Confirm:$false
     }
@@ -250,12 +293,29 @@ try {
         'Enabled'
     }
     else { 'Disabled' }
+    $processTerminationBefore = [uint32]$policy.PolicyOutcome.AuditBefore.ProcessTermination
+    $processTerminationRestoreState = if (($processTerminationBefore -band 1) -ne 0) {
+        'Enabled'
+    }
+    else { 'Disabled' }
     $commandLineRestoreState = [string]$policy.PolicyOutcome.CommandLineBefore
     if ($commandLineRestoreState -notin @('Enabled', 'Disabled', 'NotConfigured')) {
         throw 'The original command-line audit setting cannot be restored exactly.'
     }
     $policyChanged = $true
-    Test-QualificationWindowsAuditEvent
+    $lifecycleProbe = Test-QualificationWindowsAuditEvent
+    $processEnds = Invoke-QualificationStep Get-TargetProcessEndEvents {
+        @(Get-TargetProcessEndEvents -Name $selectedTargetName `
+                -Since ([DateTimeOffset]$lifecycleProbe.StartedAtUtc - [TimeSpan]::FromSeconds(5)) `
+                -First 100 -Reason 'exact-SHA Windows qualification')
+    }
+    $matchedEnd = @($processEnds | Where-Object {
+            $_.process.pid -eq [uint32]$lifecycleProbe.ProcessId -and
+            $_.process.exit_code -eq [uint32]$lifecycleProbe.ExitCode
+        })
+    if ($matchedEnd.Count -ne 1) {
+        throw 'Windows process-end collection did not return the known PID and exit code exactly once.'
+    }
     $null = Invoke-QualificationStep Set-HHEscalationPreference {
         Set-HHEscalationPreference -Method WindowsTokenPrivilege -Confirm:$false
     }
@@ -299,6 +359,7 @@ finally {
         rows = @($rows)
         noAutomaticRetries = $true
         policyRestoredTo = $processCreationRestoreState
+        processTerminationPolicyRestoredTo = $processTerminationRestoreState
         policyRestored = -not $policyChanged
         policyRestorationOutcome = $policyRestorationOutcome
         authenticationMode = 'existing-public-key'

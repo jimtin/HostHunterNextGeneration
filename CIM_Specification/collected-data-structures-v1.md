@@ -26,14 +26,16 @@ a blocking contract defect.
 | DS-002 | Producer status | 1 | Non-mutating authentication, compatibility, readiness, and active mission proof | `GET /api/v1/producer/status` |
 | DS-003 | Host details observation | 1 | One immutable observation of one endpoint | `PUT /api/v1/collection-runs/{collection_run_id}/host-observations/{event_id}` |
 | DS-004 | Host field result | 1 | Explain how each attempted host fact was obtained or why it is absent | Embedded in DS-003 |
-| DS-005 | Process lifecycle event | 2 | One immutable process start or stop event | `PUT /api/v1/collection-runs/{collection_run_id}/process-events/{event_id}` |
+| DS-005 | Canonical forensic record | 2+ | One immutable registered forensic event or state observation | `PUT /api/v1/collection-runs/{collection_run_id}/events/{event_id}` |
 | DS-006 | Ingest receipt | 1 | Prove created/replayed acceptance and exact-byte digest | API response |
 | DS-007 | Problem document | 1 | Return bounded machine-readable failures | API response |
 | DS-008 | Operator host summary/detail | 1 | Bounded derived browser read model | Operator API only; never producer input |
 | DS-009 | Operator process tree/timeline window | 2 | Bounded derived browser read model with correlation disclosure | Operator API only; never producer input |
+| DS-010 | Windows event collection receipt | 2+ | Bounded cmdlet result, cursor continuity, and explicit collection gaps | Controller/operator result only; never producer input |
 
-There is no arbitrary general-log document in v1. New evidence categories need
-a named schema, provenance rules, size limits, route, fixtures, and version.
+DS-005 is the single forensic-information record route, but it is not an
+arbitrary JSON or raw-log bucket. Every accepted event type needs a registered
+canonical CIM schema, provenance rules, size limits, fixtures, and version.
 
 ## 3. Common Rules
 
@@ -80,11 +82,15 @@ Normative schema: `schemas/producer-status.v1.schema.json`.
 | `api_version` | version | Yes | Producer API compatibility |
 | `collection_run_schema_version` | version | Yes | DS-001 compatibility |
 | `host_observation_schema_version` | version | Yes | DS-003 compatibility |
-| `process_event_schema_version` | version or null | Yes | DS-005 support; null until Phase 2 is enabled |
+| `process_event_schema_version` | constant `1.0.0` | Yes | Registered `process.start` contract |
+| `registered_forensic_schemas` | array of name/version/kind objects | No | Authoritative runtime-accepted forensic schemas when present |
 | `active_collection_run_id` | UUID or null | Yes | Current mission without investigation read access |
 
 This structure grants no host-detail, investigation, operator-session, or
-database read capability.
+database read capability. `registered_forensic_schemas` is an additive,
+backward-compatible capability. When absent, the legacy process-event field
+advertises only `process.start/1.0.0`; producers must not infer support for any
+other schema.
 
 ## 6. DS-003 Host Details Observation
 
@@ -174,71 +180,110 @@ Each attempted canonical host field appears once in
 Missing facts are omitted from their value locations and explained here. The
 same field path must not occur twice.
 
-## 8. DS-005 Process Lifecycle Event
+## 8. DS-005 Canonical Forensic Record
 
-Normative schema: `schemas/process-lifecycle-event.v1.schema.json`.
+Normative common schema: `schemas/forensic-event-envelope.v1.schema.json`.
+Normative initial event schema: `schemas/process-start.v1.schema.json`.
+The producer obligations are defined in
+`hosthunter-forensic-event-producer-v1.md`.
+The Windows authentication, process-token, and effective-right semantics are
+defined in `windows-authentication-and-privilege-records-v1.md`.
+
+The shared envelope accepts immutable source events (`event.kind: event`) and
+point-in-time forensic state observations (`event.kind: state`). Every record
+still has one immutable identity and one exact registered schema.
 
 ### 8.1 Required event identity and timing
 
 | Field | Required | Meaning |
 | --- | --- | --- |
-| `@timestamp` | Yes | Source process start or stop time |
+| `@timestamp` | Yes | Decoded Windows Security 4688 process start time |
 | `ecs.version` | Yes | Exact ECS baseline |
 | `event.id` | Yes | Immutable lifecycle event identity |
-| `event.action` | Yes | `process-started` or `process-stopped` |
-| `event.type` | Yes | `["start"]` or `["end"]` matching action |
+| `event.action` | Yes | Constant `process-started` |
+| `event.type` | Yes | Constant `["start"]` |
 | `event.created` | Yes | HostHunter normalization/collection time |
-| `event.hash` | Yes | Digest of finite canonical source event |
 | `host.id` | Yes | Stable endpoint ID |
 | `hosthunter.collection_run.id` | Yes | Mission identity |
-| `process.pid` | Yes | Source PID, scoped to host and boot context |
+| `process.pid` | Yes | Decoded decimal PID, scoped to the host and event time |
 
 ### 8.2 Process facts
 
 | Field | Required | Rule |
 | --- | --- | --- |
-| `process.entity_id` | No | Provider-stable process identity when explicitly available |
-| `process.name` | No | Reported image/process name |
-| `process.executable` | No | Reported executable path |
+| `process.name` | Yes | Reported image/process name |
+| `process.entity_id` | No | HostHunter-backed identity derived from a start event or verified PID/start-time pair |
+| `process.executable` | Yes | Reported executable path |
 | `process.command_line` | No | Reported command line; bounded and access controlled |
-| `process.args` | No | Finite reported argument array |
-| `process.parent.pid` | No | Reported parent PID |
-| `process.parent.entity_id` | No | Provider-stable parent identity when available |
+| `process.token_elevation` | Yes | Decoded elevation classification |
+| `process.integrity_level` | No | Decoded integrity classification when Event 4688 version provides it |
+| `process.parent.pid` | Yes | Decoded reported parent PID |
 | `process.parent.name` | No | Reported parent image/name |
-| `process.exit_code` | No | Reported stop exit code |
-| `user.id/name/domain` | No | Explicit event user/security context |
+| `user.id/name/domain/logon_id` | Yes | Decoded new-process security context |
+| `hosthunter.process.target_user` | Version 2 only | Decoded target security context |
 
-A stop event is valid when only its required identity/timing/PID/source fields
-are available. A start without a stop remains open. A stop without a matching
-start remains unmatched.
+Version 0 omits command line, integrity, and target-user fields. Version 1 may
+include command line but omits integrity and target-user fields. Version 2 may
+include every canonical field. Optional source-absent values are omitted; they
+are never guessed or represented as encoded native strings.
 
 ### 8.3 Source and correlation evidence
 
 | Field | Required | Meaning |
 | --- | --- | --- |
-| `hosthunter.source.provider` | Yes | Provider such as Sysmon or Security |
-| `hosthunter.source.channel` | Yes | Exact source channel/log |
-| `hosthunter.source.event_code` | Yes | Provider event identifier |
+| `hosthunter.source.provider` | Yes | Constant `Microsoft-Windows-Security-Auditing` |
+| `hosthunter.source.channel` | Yes | Constant `Security` |
+| `hosthunter.source.event_code` | Yes | Constant `4688` |
+| `hosthunter.source.event_version` | Yes | Integer `0`, `1`, or `2` |
 | `hosthunter.source.record_id` | Yes | Stable record identity within source |
-| `hosthunter.source.computer` | No | Original source computer label |
-| `hosthunter.process.boot_id` | No | Qualified boot/session scope |
-| `hosthunter.process.source_instance_id` | No | Source-stable process instance ID |
-| `hosthunter.process.source_parent_instance_id` | No | Source-stable parent instance ID |
+| `hosthunter.source.computer` | Yes | Original source computer label |
 | `hosthunter.provenance.transport` | Yes | HostHunter acquisition transport/method |
 | `hosthunter.provenance.collected_at` | Yes | Controller collection time |
+| `hosthunter.provenance.normalizer` | Yes | Exact HostHunter normalizer name/version |
 
-Provider-native stable identities are retained as bounded inert identifiers
-when safe. PID alone is never a globally stable process identity.
+`host.boot.id` and `process.entity_id` are optional correlation identifiers in
+the enabled `1.0.0` contract. HostHunter should populate
+`host.boot.id` whenever it can assign the record to a boot, and should populate
+`process.entity_id` consistently across all records that describe the same
+process instance. A bare PID or logon ID is never upgraded to exact identity.
 
-The visualizer's derived correlation uses, in order:
+HostHunter performs all EVTX/XML decoding, hexadecimal-to-decimal conversion,
+SID/logon/token/integrity normalization, and timestamp normalization before
+delivery. Raw EVTX, raw XML, native field bags, encoded PIDs, and undecoded
+token or integrity values are invalid input and receive `422`.
 
-1. explicit source process instance identity;
-2. explicit source parent instance identity;
-3. otherwise the same host plus boot scope plus PID and closest valid earlier
-    unmatched start.
+The visualizer preserves the immutable accepted document. Matching source
+identifiers produce `exact` links. When those identifiers are absent, it may
+derive process ancestry using the same active collection run, endpoint, boot
+when known, reported parent PID, and closest earlier projected process start.
+Multiple plausible candidates yield `ambiguous`; no valid candidate yields
+`unresolved`; one defensible fallback candidate yields `derived`. Derived
+identities never alter immutable input documents.
 
-The read model must disclose `source_stable`, `derived`, or `unresolved`
-correlation quality. Derived identities never alter immutable input documents.
+### 8.4 Windows authentication and privilege record catalogue
+
+| Schema name | Meaning | Specification status |
+| --- | --- | --- |
+| `process.start/1.0.0` | Security 4688 process creation | Enabled |
+| `process.end/1.0.0` | Security 4689 process termination | Enabled |
+| `authentication.session.start/1.0.0` | Security 4624 successful logon | Enabled |
+| `authentication.logon.failure/1.0.0` | Security 4625 failed logon | Enabled |
+| `authentication.session.end/1.0.0` | Security 4634 session end | Enabled |
+| `authentication.session.logoff-initiated/1.0.0` | Security 4647 user logoff intent | Enabled |
+| `authentication.explicit-credential-use/1.0.0` | Security 4648 explicit credential attempt | Enabled |
+| `authentication.session.special-privileges/1.0.0` | Security 4672 sensitive privileges assigned | Enabled |
+| `process.access-token/1.0.0` | Primary process-token privilege state | Enabled |
+| `user.effective-rights/1.0.0` | Target-host effective rights and origins | Enabled |
+
+`Enabled` establishes mirrored schemas plus registered immutable Visualizer
+validation/storage. Specialized projection remains record-specific and does
+not change whether the complete canonical evidence was accepted.
+
+The older HostHunter `process-lifecycle-event.v1.schema.json` and legacy
+process-stop fixture remain removed. Their mixed lifecycle model is replaced by
+the separately versioned `process.start/1.0.0` and `process.end/1.0.0` records.
+The process-end record preserves Security 4689 v0 evidence without inferring
+duration, outcome, or stable identity from a reusable PID.
 
 ## 9. DS-006 Ingest Receipts
 
@@ -256,11 +301,20 @@ Event receipt fields:
 - `collection_run_id`;
 - `event_id`;
 - `host_id`;
+- `event_type` and `schema_version` for forensic events;
+- `processing_state` for forensic events;
 - exact `content_sha256`;
 - `received_at`.
 
-A receipt proves API acceptance and persistence, not independent truth of the
-endpoint claims.
+A receipt proves durable API acceptance, not completed asynchronous projection
+or independent truth of the endpoint claims.
+
+### 9.1 Exact-byte forensic integrity
+
+Forensic records do not contain `event.hash`. The accepted request's exact
+UTF-8 bytes are hashed before delivery and returned as lower-case
+`content_sha256`; embedding a document digest inside the document would be
+recursive. Created and replayed receipts refer to the same immutable bytes.
 
 ## 10. DS-007 Problem Documents
 
@@ -283,15 +337,48 @@ persistence unavailable.
 Browser structures are not producer contracts and must not be sent back to
 HostHunter.
 
+## 12. DS-010 Windows Event Collection Receipt
+
+Normative schema:
+`schemas/windows-event-collection-receipt.v1.schema.json`.
+
+The process-start and authentication cmdlets return one bounded receipt per
+target. This is controller/operator truth and is never sent through the
+forensic event route. It reports the requested window, record counts,
+`has_more`, cursor continuity, and every known gap.
+
+- `no_events` with `status: complete`, zero counts, no gaps, and no cursor
+  advance means the bounded accessible source contained no matching events. It
+  is successful negative evidence, not a failure.
+- `audit_disabled` is `unavailable` when the required audit category is proven
+  disabled for the entire requested window; it is `partial` when some events
+  were preserved but the setting makes the window incomplete.
+- `access_denied` is `unavailable` when no source records could be read, or
+  `partial` when only part of the requested source was accessible.
+- `log_cleared`, `cursor_reset`, and `history_truncated` are explicit gaps. They
+  never become an ordinary `no_events` result and never silently claim
+  continuity.
+- `unsupported_event_version` is `partial` when other records were preserved;
+  the unsupported source record is counted as rejected and the cursor does not
+  advance past it until the record is explicitly quarantined.
+- Cursor mode advances only through the last contiguous canonical record that
+  was atomically persisted. Backfill mode never rewinds or advances the normal
+  cursor. `has_more` asks the operator to invoke the cmdlet again; it does not
+  authorize an automatic loop or retry.
+
+The cursor epoch is a HostHunter-generated UUID for one observed lifetime of
+the Windows Security channel. A clear/reset starts a new epoch and creates a
+gap receipt linking the old and new cursor states.
+
 Phase 1 host summary contains endpoint ID, optional hostname/FQDN, explicit
 membership, bounded OS summary, collection status, observation time, and
 freshness. Host detail adds the immutable accepted observation.
 
-Phase 2 process windows contain bounded process nodes, disclosed correlation
-quality, start/stop evidence references, optional open-ended ranges, parent
-edges, and pagination/window cursors. They never fabricate absent stop times.
+Phase 2 process windows contain bounded process-start nodes, disclosed
+correlation quality, complete canonical evidence, parent edges, processing
+counts/failures, and time/search bounds. They never fabricate stop times.
 
-## 12. Size And Cardinality Limits
+## 13. Size And Cardinality Limits
 
 - Collection-run, host-observation, and individual process-event requests:
   maximum 262,144 exact bytes before parsing.
@@ -301,7 +388,7 @@ edges, and pagination/window cursors. They never fabricate absent stop times.
   partial-failure rules, and idempotency identity; it must not silently widen
   these v1 routes.
 
-## 13. Compatibility And Change Control
+## 14. Compatibility And Change Control
 
 - Producers and consumers reject unsupported major versions.
 - New optional semantics require schema, prose, OpenAPI, examples, and contract
@@ -312,7 +399,7 @@ edges, and pagination/window cursors. They never fabricate absent stop times.
 - A contract update is incomplete until corresponding files are byte-compatible
   in HostHunter and HostHunter Visualizer.
 
-## 14. Required Golden Fixtures
+## 15. Required Golden Fixtures
 
 Phase 1:
 
@@ -325,15 +412,24 @@ Phase 1:
 
 Phase 2:
 
-- source-stable parent/child start chain;
-- start and matching stop;
-- start without stop;
-- stop without start;
-- PID reuse on the same host;
+- valid Security 4688 versions 0, 1, and 2;
+- valid Security 4624 versions 0, 1, and 2;
+- valid Security 4625, 4634, 4647, 4648, and 4672 records;
+- a complete primary process-token observation with enabled-state attributes;
+- complete, partial, unavailable, and failed process-token observations;
+- a complete effective-rights observation with direct and nested-group origins;
+- an explicitly unknown policy source and a separately observed GPO/local source;
+- failed user identity resolution without a fabricated SID;
+- allow/deny logon-right precedence with both assignments retained;
+- partial membership or assignment resolution that cannot appear as complete;
+- derived and unresolved parent relationships;
+- missing version-specific optional values;
 - same PID on different hosts;
-- missing command line/user/parent;
 - out-of-order delivery;
-- identical replay and conflicting replay.
+- identical replay and conflicting event/source identity reuse;
+- complete, no-event, audit-disabled, access-denied, cleared-log, truncated,
+  and unsupported-version collection receipts;
+- raw/native/undecoded input rejection.
 
 No fixture may contain real credentials, private hostnames, user data, tokens,
 keys, or production evidence.

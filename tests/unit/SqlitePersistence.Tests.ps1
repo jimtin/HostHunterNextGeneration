@@ -271,7 +271,7 @@ Describe 'SQLite persistence foundation' -Tag Unit {
             } | Should -Throw -ErrorId 'LegacyPersistenceMigrationRequired*'
         }
 
-    It 'creates and reopens an exact schema-v3 database using parameterized blobs' {
+    It 'creates and reopens an exact schema-v5 database using parameterized blobs' {
             $root = Join-Path $TestDrive 'database'
             $context = Get-HHPersistenceContext -DataRoot $root
             $masterKey = [byte[]](0..31)
@@ -287,7 +287,7 @@ Describe 'SQLite persistence foundation' -Tag Unit {
                 -MasterKey $masterKey `
                 -AnchorWriter $anchorWriter `
                 -Clock { [DateTimeOffset]'2026-08-24T00:00:00Z' }
-        $created.SchemaVersion | Should -Be 3
+        $created.SchemaVersion | Should -Be 5
         $script:writtenAnchor.Length | Should -Be 276
 
             $connection = New-HHSqliteConnection -DatabasePath $context.DatabasePath
@@ -302,7 +302,7 @@ Describe 'SQLite persistence foundation' -Tag Unit {
                 $verified = Test-HHSqliteDatabaseSchema `
                     -Connection $connection `
                     -MigrationPath $context.MigrationPath
-                $verified.SchemaVersion | Should -Be 3
+                $verified.SchemaVersion | Should -Be 5
             }
             finally {
                 $connection.Dispose()
@@ -547,7 +547,7 @@ VALUES(-1,@event,'Test',@at,NULL,@mutation,@projection,@related,@previous,@mac);
                     -Connection ([pscustomobject]@{ DataSource = 'mock.db' }) `
                     -PersistenceContext ([pscustomobject]@{}) `
                     -MasterKey ([byte[]]::new(32)) `
-                -ExistingSchema ([pscustomobject]@{ SchemaVersion = 3 }) `
+                -ExistingSchema ([pscustomobject]@{ SchemaVersion = 5 }) `
                     -ExistingAnchor ([pscustomobject]@{})
             } | Should -Throw -ErrorId 'PersistenceSchemaUnsupported*'
         }

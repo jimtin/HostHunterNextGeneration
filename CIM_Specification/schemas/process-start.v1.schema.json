@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hosthunter.dev/schemas/process-start.v1.schema.json",
+  "title": "HostHunter canonical process start v1",
+  "allOf": [
+    { "$ref": "forensic-event-envelope.v1.schema.json" },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["@timestamp", "ecs", "event", "agent", "host", "process", "user", "hosthunter"],
+      "properties": {
+        "@timestamp": true,
+        "ecs": true,
+        "event": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": true,
+            "kind": true,
+            "created": true,
+            "category": { "const": ["process"] },
+            "type": { "const": ["start"] },
+            "action": { "const": "process-started" },
+            "dataset": { "const": "hosthunter.process_start" },
+            "module": true,
+            "provider": true
+          }
+        },
+        "agent": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "id": true, "name": true, "type": true, "version": true }
+        },
+        "host": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "id": true, "hostname": true, "name": true, "boot": true }
+        },
+        "process": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["pid", "name", "executable", "token_elevation", "parent"],
+          "properties": {
+            "pid": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+            "entity_id": { "type": "string", "minLength": 1, "maxLength": 256 },
+            "name": { "type": "string", "minLength": 1, "maxLength": 255 },
+            "executable": { "type": "string", "minLength": 1, "maxLength": 4096 },
+            "command_line": { "type": "string", "maxLength": 32768 },
+            "token_elevation": { "enum": ["full", "elevated", "limited", "unknown"] },
+            "integrity_level": {
+              "enum": [
+                "untrusted",
+                "low",
+                "medium",
+                "medium_plus",
+                "high",
+                "system",
+                "protected",
+                "secure",
+                "unknown"
+              ]
+            },
+            "parent": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["pid"],
+              "properties": {
+                "pid": { "type": "integer", "minimum": 0, "maximum": 4294967295 },
+                "name": { "type": "string", "minLength": 1, "maxLength": 255 },
+                "executable": { "type": "string", "minLength": 1, "maxLength": 4096 }
+              }
+            }
+          }
+        },
+        "user": { "$ref": "#/$defs/principal" },
+        "hosthunter": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "schema": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "name": { "const": "process.start" },
+                "version": { "const": "1.0.0" }
+              }
+            },
+            "collection_run": true,
+            "source": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "provider": { "const": "Microsoft-Windows-Security-Auditing" },
+                "channel": { "const": "Security" },
+                "event_code": { "const": "4688" },
+                "event_version": { "enum": [0, 1, 2] },
+                "record_id": true,
+                "computer": true
+              }
+            },
+            "process": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": { "target_user": { "$ref": "#/$defs/principal" } }
+            },
+            "provenance": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": { "transport": true, "collected_at": true, "normalizer": true }
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "hosthunter": {
+                "properties": {
+                  "source": {
+                    "properties": { "event_version": { "const": 0 } },
+                    "required": ["event_version"]
+                  }
+                },
+                "required": ["source"]
+              }
+            },
+            "required": ["hosthunter"]
+          },
+          "then": {
+            "properties": {
+              "process": {
+                "not": {
+                  "anyOf": [{ "required": ["command_line"] }, { "required": ["integrity_level"] }]
+                }
+              },
+              "hosthunter": {
+                "properties": { "process": { "not": { "required": ["target_user"] } } }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "hosthunter": {
+                "properties": {
+                  "source": {
+                    "properties": { "event_version": { "const": 1 } },
+                    "required": ["event_version"]
+                  }
+                },
+                "required": ["source"]
+              }
+            },
+            "required": ["hosthunter"]
+          },
+          "then": {
+            "properties": {
+              "process": { "not": { "required": ["integrity_level"] } },
+              "hosthunter": {
+                "properties": { "process": { "not": { "required": ["target_user"] } } }
+              }
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "$defs": {
+    "principal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "domain", "logon_id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "domain": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "logon_id": { "type": "string", "pattern": "^[0-9]+$", "maxLength": 20 }
+      }
+    }
+  }
+}

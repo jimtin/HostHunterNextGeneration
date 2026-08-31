@@ -7,7 +7,7 @@ if ([IO.Directory]::Exists('/opt/hosthunter-sqlite/lib')) {
 }
 
 Describe 'visualization mission lifecycle' -Tag Unit {
-    It 'starts, continues, pauses, resumes, recovers, prunes selection, and replays pending observations' {
+    It 'starts, pauses, recovers, and replays pending observations and forensic events' {
         InModuleScope HostHunterNextGeneration {
             $previousDataRoot = $env:HH_DATA_ROOT
             $previousProvider = $env:HH_SECRET_PROVIDER
@@ -16,6 +16,7 @@ Describe 'visualization mission lifecycle' -Tag Unit {
             $script:activeMission = $null
             $script:missionDeliveryMode = 'success'
             $script:observationAttempts = 0
+            $script:forensicAttempts = 0
             $script:missionSelectedBeforeAcceptance = $false
             $statusSender = {
                 param($Path)
@@ -24,8 +25,22 @@ Describe 'visualization mission lifecycle' -Tag Unit {
                     status='ready'; service='hosthunter-visualizer'; api_version='1.0.0'
                     collection_run_schema_version='1.0.0'
                     host_observation_schema_version='1.0.0'
-                    process_event_schema_version=$null
-                    active_collection_run_id=if($null -eq $script:activeMission){$null}else{$script:activeMission.ToString('D')}
+                    process_event_schema_version='1.0.0'
+                    registered_forensic_schemas=@(
+                        $script:HHForensicEventSchemas | ForEach-Object {
+                            $parts=$_ -split '/',2
+                            [pscustomobject]@{
+                                name=$parts[0]
+                                version=$parts[1]
+                                kind=$script:HHForensicEventSchemaKinds[$_]
+                            }
+                        }
+                    )
+                    active_collection_run_id=if($null -eq $script:activeMission){
+                        $null
+                    }else{
+                        $script:activeMission.ToString('D')
+                    }
                 }
             }
             $producerSender = {
@@ -34,6 +49,10 @@ Describe 'visualization mission lifecycle' -Tag Unit {
                 $Digest | Should -Match '^[a-f0-9]{64}$'
                 if ($Path -match '/host-observations/') {
                     $script:observationAttempts++
+                    return [pscustomobject]@{Delivered=$true;StatusCode=201;ContentSha256=$Digest}
+                }
+                if ($Path -match '/events/') {
+                    $script:forensicAttempts++
                     return [pscustomobject]@{Delivered=$true;StatusCode=201;ContentSha256=$Digest}
                 }
                 $idText = @($Path -split '/')[-1]
@@ -119,6 +138,31 @@ Describe 'visualization mission lifecycle' -Tag Unit {
                             -Kind Observation -Id $d.Event -Delivered $false -StatusCode 503 `
                             -AttemptedAtUtc $d.At
                     } | Out-Null
+                    $forensicData = [pscustomobject]@{
+                        Event=[Guid]::NewGuid()
+                        Mission=$lostResponseMission
+                        Payload=[Text.Encoding]::UTF8.GetBytes('{"event":"pending"}')
+                        At=[DateTimeOffset]::UtcNow
+                    }
+                    Invoke-HHAnchoredPersistenceTransaction -Context $write `
+                        -ArgumentList @($forensicData) -Action {
+                        param($Connection,$Transaction,$WriterContext,$ArgumentList)
+                        $forensic=$ArgumentList[0]
+                        Add-HHVisualizerForensicEventBatch -Connection $Connection `
+                            -Transaction $Transaction `
+                            -MasterKey $WriterContext.MasterKey `
+                            -CurrentSnapshot $WriterContext.VisualizerSnapshot `
+                            -ForensicEvent @([pscustomobject]@{
+                                    EventId=$forensic.Event
+                                    MissionId=$forensic.Mission
+                                    TargetNameKey='DEMO'
+                                    EndpointId=('hh_'+('a'*52))
+                                    SchemaName='process.start'
+                                    OccurredAtUtc=$forensic.At
+                                    CollectedAtUtc=$forensic.At
+                                    PayloadBytes=$forensic.Payload
+                                })
+                    } | Out-Null
                 }
                 finally { Close-HHAuthenticatedPersistence -Context $write }
                 $script:missionDeliveryMode = 'success'
@@ -126,7 +170,10 @@ Describe 'visualization mission lifecycle' -Tag Unit {
                     -StatusSender $statusSender -ProducerSender $producerSender
                 $replayed.ReplayedObservations | Should -Be 1
                 $replayed.PendingObservations | Should -Be 0
+                $replayed.ReplayedForensicEvents | Should -Be 1
+                $replayed.PendingForensicEvents | Should -Be 0
                 $script:observationAttempts | Should -Be 1
+                $script:forensicAttempts | Should -Be 1
 
                 $script:activeMission = [Guid]::NewGuid()
                 { Invoke-HHVisualizationLifecycleCore -Action start `

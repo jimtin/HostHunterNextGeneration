@@ -26,7 +26,8 @@ function Get-HHVisualizerStateDocument {
         [Parameter(Mandatory)][object]$Connection,
         [AllowNull()][object]$Transaction,
         [Parameter(Mandatory)][long]$Generation,
-        [AllowNull()][byte[]]$CurrentMissionId
+        [AllowNull()][byte[]]$CurrentMissionId,
+        [switch]$ExcludeForensic
     )
 
     $missions = @(Invoke-HHSqliteQuery -Connection $Connection -Transaction $Transaction -Sql @'
@@ -44,7 +45,7 @@ SELECT hex(event_id) AS event_id,hex(mission_id) AS mission_id,target_name_key,e
         delivery_status,delivery_attempts,last_status_code,delivered_at_utc
 FROM visualizer_host_observations ORDER BY observed_at_utc,event_id;
 '@)
-    [ordered]@{
+    $document = [ordered]@{
         domain = 'HostHunterNextGeneration/visualizer-state/v1'
         generation = $Generation
         currentMissionId = if ($null -eq $CurrentMissionId) { $null } else {
@@ -80,6 +81,48 @@ FROM visualizer_host_observations ORDER BY observed_at_utc,event_id;
                     deliveredAtUtc = $_.delivered_at_utc
                 } })
     }
+    $forensicTableCount = [long](Invoke-HHSqliteScalar -Connection $Connection `
+            -Transaction $Transaction -Sql @'
+SELECT COUNT(*) FROM sqlite_master
+WHERE type='table' AND name='visualizer_forensic_events';
+'@)
+    if ($forensicTableCount -eq 1 -and -not $ExcludeForensic) {
+        $events = @(Invoke-HHSqliteQuery -Connection $Connection -Transaction $Transaction -Sql @'
+SELECT hex(event_id) AS event_id,hex(mission_id) AS mission_id,target_name_key,
+    endpoint_id,schema_name,occurred_at_utc,collected_at_utc,
+    hex(payload_envelope) AS payload,content_sha256,delivery_status,
+    delivery_attempts,last_status_code,delivered_at_utc
+FROM visualizer_forensic_events ORDER BY occurred_at_utc,event_id;
+'@)
+        $cursors = @(Invoke-HHSqliteQuery -Connection $Connection -Transaction $Transaction -Sql @'
+SELECT target_name_key,source_name,occurred_at_utc,record_id,updated_at_utc
+FROM forensic_collection_cursors
+ORDER BY target_name_key COLLATE BINARY,source_name COLLATE BINARY;
+'@)
+        $document.forensicEvents = @($events | ForEach-Object { [ordered]@{
+                    eventId=([string]$_.event_id).ToLowerInvariant()
+                    missionId=([string]$_.mission_id).ToLowerInvariant()
+                    targetNameKey=[string]$_.target_name_key
+                    endpointId=[string]$_.endpoint_id
+                    schemaName=[string]$_.schema_name
+                    occurredAtUtc=[string]$_.occurred_at_utc
+                    collectedAtUtc=[string]$_.collected_at_utc
+                    payload=([string]$_.payload).ToLowerInvariant()
+                    contentSha256=[string]$_.content_sha256
+                    deliveryStatus=[string]$_.delivery_status
+                    deliveryAttempts=[long]$_.delivery_attempts
+                    lastStatusCode=$_.last_status_code
+                    deliveredAtUtc=$_.delivered_at_utc
+                } })
+        $document.collectionCursors = @($cursors | ForEach-Object { [ordered]@{
+                    targetNameKey=[string]$_.target_name_key
+                    sourceName=[string]$_.source_name
+                    occurredAtUtc=[string]$_.occurred_at_utc
+                    recordId=[string]$_.record_id
+                    updatedAtUtc=[string]$_.updated_at_utc
+                } })
+    }
+    $document
 }
 
 function Get-HHVisualizerStateMac {
@@ -90,12 +133,13 @@ function Get-HHVisualizerStateMac {
         [AllowNull()][object]$Transaction,
         [Parameter(Mandatory)][long]$Generation,
         [AllowNull()][byte[]]$CurrentMissionId,
-        [Parameter(Mandatory)][byte[]]$MasterKey
+        [Parameter(Mandatory)][byte[]]$MasterKey,
+        [switch]$ExcludeForensic
     )
 
     $document = Get-HHVisualizerStateDocument -Connection $Connection `
         -Transaction $Transaction -Generation $Generation `
-        -CurrentMissionId $CurrentMissionId
+        -CurrentMissionId $CurrentMissionId -ExcludeForensic:$ExcludeForensic
     $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($document | ConvertTo-Json -Compress -Depth 12))
     $key = Get-HHVisualizerMacKey -MasterKey $MasterKey
     try { return Get-HHPersistenceMac -Key $key -Bytes $bytes }
@@ -122,6 +166,33 @@ function Initialize-HHVisualizerRepositoryState {
     $null = Invoke-HHSqliteNonQuery -Connection $Connection -Transaction $Transaction `
         -Sql 'INSERT INTO visualizer_store_state(singleton_id,generation,current_mission_id,state_mac) VALUES(1,0,NULL,@mac);' `
         -Parameters @{ mac = $stateMac }
+}
+
+function Update-HHVisualizerRepositoryStateForMigration {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+        'PSUseShouldProcessForStateChangingFunctions',
+        '',
+        Justification = 'Re-authenticates an unchanged state document after an additive schema migration.'
+    )]
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][object]$Connection,
+        [Parameter(Mandatory)][object]$Transaction,
+        [Parameter(Mandatory)][byte[]]$MasterKey
+    )
+    $rows = @(Invoke-HHSqliteQuery -Connection $Connection -Transaction $Transaction `
+            -Sql 'SELECT generation,current_mission_id FROM visualizer_store_state WHERE singleton_id=1;')
+    if ($rows.Count -ne 1) { throw 'The visualizer state is unavailable during migration.' }
+    $mission = if ($null -eq $rows[0].current_mission_id) { $null } else {
+        [byte[]]$rows[0].current_mission_id
+    }
+    $mac = Get-HHVisualizerStateMac -Connection $Connection -Transaction $Transaction `
+        -Generation ([long]$rows[0].generation) -CurrentMissionId $mission `
+        -MasterKey $MasterKey
+    $affected = Invoke-HHSqliteNonQuery -Connection $Connection -Transaction $Transaction `
+        -Sql 'UPDATE visualizer_store_state SET state_mac=@mac WHERE singleton_id=1;' `
+        -Parameters @{ mac=$mac }
+    if ($affected -ne 1) { throw 'The visualizer state could not be re-authenticated during migration.' }
 }
 
 function Read-HHVisualizerRepositorySnapshot {
@@ -406,8 +477,14 @@ function Resolve-HHVisualizerEndpointIdentity {
         [Parameter(Mandatory)][DateTimeOffset]$ObservedAtUtc
     )
     $nameKey = $TargetName.ToUpperInvariant()
-    $strategy = 'persisted_random'
-    if (-not [string]::IsNullOrWhiteSpace($NativeIdentityDigest)) {
+    $existing = @(Invoke-HHSqliteQuery -Connection $Connection -Transaction $Transaction `
+            -Sql 'SELECT endpoint_id,identity_strategy FROM visualizer_endpoint_identities WHERE target_name_key=@name;' `
+            -Parameters @{ name=$nameKey })
+    $strategy = if ($existing.Count -eq 1) { [string]$existing[0].identity_strategy } else { 'persisted_random' }
+    if ($existing.Count -eq 1) {
+        $endpointId = [string]$existing[0].endpoint_id
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace($NativeIdentityDigest)) {
         $inputBytes = [Text.UTF8Encoding]::new($false).GetBytes("HostHunter/endpoint/v1`n$NativeIdentityDigest")
         $key = Get-HHVisualizerMacKey -MasterKey $MasterKey
         try {
@@ -418,12 +495,9 @@ function Resolve-HHVisualizerEndpointIdentity {
         finally { [Array]::Clear($inputBytes,0,$inputBytes.Length); [Array]::Clear($key,0,$key.Length) }
     }
     else {
-        $existing = @(Invoke-HHSqliteQuery -Connection $Connection -Transaction $Transaction `
-                -Sql 'SELECT endpoint_id FROM visualizer_endpoint_identities WHERE target_name_key=@name;' `
-                -Parameters @{ name=$nameKey })
-        $endpointId = if ($existing.Count -eq 1) { [string]$existing[0].endpoint_id } else {
-            'hh_' + (Get-HHBase32LowerNoPadding -Bytes ([Guid]::NewGuid().ToByteArray() + [Guid]::NewGuid().ToByteArray()))
-        }
+        $endpointId = 'hh_' + (Get-HHBase32LowerNoPadding -Bytes (
+                [Guid]::NewGuid().ToByteArray() + [Guid]::NewGuid().ToByteArray()
+            ))
     }
     $seen = $ObservedAtUtc.UtcDateTime.ToString('o',[Globalization.CultureInfo]::InvariantCulture)
     $null = Invoke-HHSqliteNonQuery -Connection $Connection -Transaction $Transaction -Sql @'
@@ -478,13 +552,17 @@ function Set-HHVisualizerDeliveryResult {
         [Parameter(Mandatory)][object]$Transaction,
         [Parameter(Mandatory)][byte[]]$MasterKey,
         [Parameter(Mandatory)][object]$CurrentSnapshot,
-        [Parameter(Mandatory)][ValidateSet('Mission','Observation')][string]$Kind,
+        [Parameter(Mandatory)][ValidateSet('Mission','Observation','Forensic')][string]$Kind,
         [Parameter(Mandatory)][byte[]]$Id,
         [Parameter(Mandatory)][bool]$Delivered,
         [AllowNull()][Nullable[int]]$StatusCode,
         [Parameter(Mandatory)][DateTimeOffset]$AttemptedAtUtc
     )
-    $table = if ($Kind -ceq 'Mission') { 'visualizer_missions' } else { 'visualizer_host_observations' }
+    $table = switch ($Kind) {
+        'Mission' { 'visualizer_missions' }
+        'Observation' { 'visualizer_host_observations' }
+        'Forensic' { 'visualizer_forensic_events' }
+    }
     $column = if ($Kind -ceq 'Mission') { 'mission_id' } else { 'event_id' }
     # A failed bounded attempt remains pending for explicit operator/release
     # reconciliation. There is deliberately no automatic retry worker.

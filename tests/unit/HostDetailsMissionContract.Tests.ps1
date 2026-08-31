@@ -56,7 +56,7 @@ Describe 'host details and mission public contract' -Tag Unit {
                     status='ready'; service='hosthunter-visualizer'; api_version='2.0.0'
                     collection_run_schema_version='1.0.0'
                     host_observation_schema_version='1.0.0'; active_collection_run_id=$null
-                    process_event_schema_version=$null
+                    process_event_schema_version='1.0.0'
                 } }
             { Invoke-HHVisualizerStatus -Sender $requestSender } | Should -Throw '*incompatible*'
         }
@@ -65,16 +65,50 @@ Describe 'host details and mission public contract' -Tag Unit {
     It 'accepts only a versioned producer status and parses its active mission id' {
         InModuleScope HostHunterNextGeneration {
             $id = [Guid]::NewGuid()
+            $capabilities = @($script:HHForensicEventSchemas | ForEach-Object {
+                    $parts = $_ -split '/', 2
+                    [pscustomobject]@{
+                        name=$parts[0]
+                        version=$parts[1]
+                        kind=$script:HHForensicEventSchemaKinds[$_]
+                    }
+                })
             $requestSender = { [pscustomobject]@{
                     status='ready'; service='hosthunter-visualizer'; api_version='1.0.0'
                     collection_run_schema_version='1.0.0'
                     host_observation_schema_version='1.0.0'
-                    process_event_schema_version=$null
+                    process_event_schema_version='1.0.0'
+                    registered_forensic_schemas=$capabilities
                     active_collection_run_id=$id.ToString('D')
                 } }.GetNewClosure()
             $result = Invoke-HHVisualizerStatus -Sender $requestSender
             $result.Status | Should -BeExactly ready
             $result.ActiveMissionId | Should -Be $id
+        }
+    }
+
+    It 'requires the shared event or state kind for every advertised forensic schema' {
+        InModuleScope HostHunterNextGeneration {
+            $capabilities = @($script:HHForensicEventSchemas | ForEach-Object {
+                    $parts = $_ -split '/', 2
+                    [pscustomobject]@{
+                        name=$parts[0]
+                        version=$parts[1]
+                        kind=$script:HHForensicEventSchemaKinds[$_]
+                    }
+                })
+            $processEnd = @($capabilities | Where-Object name -CEQ 'process.end')[0]
+            $processEnd.kind = 'state'
+            $requestSender = { [pscustomobject]@{
+                    status='ready'; service='hosthunter-visualizer'; api_version='1.0.0'
+                    collection_run_schema_version='1.0.0'
+                    host_observation_schema_version='1.0.0'
+                    process_event_schema_version='1.0.0'
+                    registered_forensic_schemas=$capabilities
+                    active_collection_run_id=$null
+                } }.GetNewClosure()
+            { Invoke-HHVisualizerStatus -Sender $requestSender } |
+                Should -Throw '*process.end/1.0.0*'
         }
     }
 
@@ -344,7 +378,17 @@ Describe 'host details and mission public contract' -Tag Unit {
                     status='ready';service='hosthunter-visualizer';api_version='1.0.0'
                     collection_run_schema_version='1.0.0'
                     host_observation_schema_version='1.0.0'
-                    process_event_schema_version=$null
+                    process_event_schema_version='1.0.0'
+                    registered_forensic_schemas=@(
+                        $script:HHForensicEventSchemas | ForEach-Object {
+                            $parts=$_ -split '/',2
+                            [pscustomobject]@{
+                                name=$parts[0]
+                                version=$parts[1]
+                                kind=$script:HHForensicEventSchemaKinds[$_]
+                            }
+                        }
+                    )
                     active_collection_run_id='not-a-guid'
                 }
             }

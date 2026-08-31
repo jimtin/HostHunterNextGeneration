@@ -10,6 +10,11 @@ function Invoke-HHManagedHostOperation {
             'TestTarget',
             'InvokeCommand',
             'GetHostDetails',
+            'GetProcessStartEvents',
+            'GetProcessEndEvents',
+            'GetAuthenticationEvents',
+            'GetProcessAccessToken',
+            'GetUserEffectiveRights',
             'EnableSshKeyAuthentication',
             'SetWindowsProcessAuditPolicy'
         )]
@@ -31,6 +36,21 @@ function Invoke-HHManagedHostOperation {
         }
         'GetHostDetails' {
             return Invoke-HHManagedHostGetHostDetailsOperation @Arguments
+        }
+        'GetProcessStartEvents' {
+            return Invoke-HHManagedHostGetProcessStartEventsOperation @Arguments
+        }
+        'GetProcessEndEvents' {
+            return Invoke-HHManagedHostGetProcessEndEventsOperation @Arguments
+        }
+        'GetAuthenticationEvents' {
+            return Invoke-HHManagedHostGetAuthenticationEventsOperation @Arguments
+        }
+        'GetProcessAccessToken' {
+            return Invoke-HHManagedHostGetProcessAccessTokenOperation @Arguments
+        }
+        'GetUserEffectiveRights' {
+            return Invoke-HHManagedHostGetUserEffectiveRightsOperation @Arguments
         }
         'EnableSshKeyAuthentication' {
             return Invoke-HHManagedHostEnableSshKeyAuthenticationOperation @Arguments
@@ -506,6 +526,45 @@ function Invoke-HHManagedHostValidateTargetOperation {
             catch {
                 Write-Warning "Target saved, but initial host-details collection was incomplete: $($_.Exception.Message)"
             }
+            $missionState=Get-HHLocalMissionState
+            if($null -ne $missionState.LatestMissionId){
+                foreach($initialCollection in @(
+                        [pscustomobject]@{
+                            Label='process-start'
+                            Action={
+                                Invoke-HHManagedHostGetProcessStartEventsOperation `
+                                    -Name @($onboardedTargets.Name) -First 100 `
+                                    -Reason $Reason -CaseId $CaseId
+                            }
+                        },
+                        [pscustomobject]@{
+                            Label='process-end'
+                            Action={
+                                Invoke-HHManagedHostGetProcessEndEventsOperation `
+                                    -Name @($onboardedTargets.Name) -First 100 `
+                                    -Reason $Reason -CaseId $CaseId
+                            }
+                        },
+                        [pscustomobject]@{
+                            Label='authentication'
+                            Action={
+                                Invoke-HHManagedHostGetAuthenticationEventsOperation `
+                                    -Name @($onboardedTargets.Name) -First 100 `
+                                    -Reason $Reason -CaseId $CaseId
+                            }
+                        }
+                    )){
+                    try {
+                        & $initialCollection.Action | Out-Null
+                    }
+                    catch {
+                        Write-Warning (
+                            "Target saved, but initial $($initialCollection.Label) " +
+                            "collection was incomplete: $($_.Exception.Message)"
+                        )
+                    }
+                }
+            }
             @($onboardedTargets)
         }
         finally {
@@ -632,6 +691,11 @@ function Invoke-HHManagedHostCommandCoordinator {
         [ValidateSet(
             'InvokeCommand',
             'GetHostDetails',
+            'GetProcessStartEvents',
+            'GetProcessEndEvents',
+            'GetAuthenticationEvents',
+            'GetProcessAccessToken',
+            'GetUserEffectiveRights',
             'EnableSshKeyAuthentication',
             'SetWindowsProcessAuditPolicy'
         )]
@@ -1041,6 +1105,11 @@ function Invoke-HHManagedHostCommandCoordinator {
             if ($null -ne $hostDetailsProperty) {
                 $publicResult | Add-Member -NotePropertyName HostDetailsRaw `
                     -NotePropertyValue $hostDetailsProperty.Value
+            }
+            $forensicProperty = $transportResult.PSObject.Properties['ForensicRaw']
+            if ($null -ne $forensicProperty) {
+                $publicResult | Add-Member -NotePropertyName ForensicRaw `
+                    -NotePropertyValue $forensicProperty.Value
             }
             $recovery = Get-HHStoredCredentialRecoveryAction -Target $selectedTarget `
                 -FailureKind $transportResult.FailureKind

@@ -12,6 +12,11 @@ function Get-HHAuditRecord {
             'TestTarget',
             'InvokeCommand',
             'GetHostDetails',
+            'GetProcessStartEvents',
+            'GetProcessEndEvents',
+            'GetAuthenticationEvents',
+            'GetProcessAccessToken',
+            'GetUserEffectiveRights',
             'EnableSshKeyAuthentication',
             'SetWindowsProcessAuditPolicy'
         )]

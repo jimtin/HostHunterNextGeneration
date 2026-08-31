@@ -1,0 +1,67 @@
+{
+  "@timestamp": "2026-08-29T05:45:00.000Z",
+  "ecs": { "version": "9.5.0" },
+  "event": {
+    "id": "833bed18-835c-5a4e-bc86-c4d8ac23a3c1",
+    "kind": "state",
+    "category": ["iam"],
+    "type": ["info"],
+    "action": "user-effective-rights-observed",
+    "dataset": "hosthunter.user_effective_rights",
+    "module": "hosthunter",
+    "provider": "HostHunter",
+    "created": "2026-08-29T05:45:01.000Z",
+    "outcome": "failure"
+  },
+  "agent": {
+    "id": "88888888-8888-4888-8888-888888888888",
+    "name": "hosthunter-controller",
+    "type": "hosthunter",
+    "version": "0.6.0"
+  },
+  "host": {
+    "id": "hh_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "hostname": "LAB-WS01",
+    "name": "lab-ws01.example.test"
+  },
+  "user": {
+    "name": "missing-user",
+    "domain": "LAB"
+  },
+  "hosthunter": {
+    "schema": { "name": "user.effective-rights", "version": "1.0.0" },
+    "collection_run": { "id": "22222222-2222-4222-8222-222222222222" },
+    "source": {
+      "provider": "HostHunter",
+      "channel": "EffectiveUserRights",
+      "event_code": "target-host-policy",
+      "event_version": 1,
+      "record_id": "rights-observation-0002",
+      "computer": "LAB-WS01.example.test"
+    },
+    "user_rights": {
+      "observation": {
+        "status": "failed",
+        "observed_at": "2026-08-29T05:45:00.000Z",
+        "issues": [
+          {
+            "code": "identity_resolution_failed",
+            "scope": "user",
+            "detail": "The requested synthetic principal did not resolve to a SID on the target host."
+          }
+        ]
+      },
+      "evaluation": {
+        "scope": "target_host_effective_policy",
+        "membership_resolution": "failed",
+        "assignment_resolution": "failed",
+        "policy_source_resolution": "not_collected"
+      }
+    },
+    "provenance": {
+      "transport": "powershell7_over_ssh",
+      "collected_at": "2026-08-29T05:45:01.000Z",
+      "normalizer": { "name": "HostHunter.EffectiveUserRights", "version": "1.0.0" }
+    }
+  }
+}

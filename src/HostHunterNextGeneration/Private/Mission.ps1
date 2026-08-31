@@ -187,6 +187,39 @@ function Invoke-HHPendingVisualizerObservationReplay {
     [pscustomobject]@{ Replayed=$replayed; Remaining=($pending.Count-$replayed) }
 }
 
+function Invoke-HHPendingVisualizerForensicEventReplay {
+    [CmdletBinding()]
+    param([scriptblock]$ProducerSender)
+    $runtime=Get-HHRuntimeContext
+    $read=Open-HHAuthenticatedPersistence -PersistenceContext $runtime
+    try{
+        if($null -eq $read.VisualizerSnapshot.CurrentMissionId){return [pscustomobject]@{Replayed=0;Remaining=0}}
+        $mission=[byte[]]$read.VisualizerSnapshot.CurrentMissionId
+        $pending=@(Read-HHPendingVisualizerForensicEvent -Connection $read.Connection `
+            -Transaction $null -MasterKey $read.MasterKey -MissionId $mission -First 100)
+    }finally{Close-HHAuthenticatedPersistence -Context $read}
+    $replayed=0
+    foreach($item in $pending){
+        try{
+            $delivery=Send-HHVisualizerForensicEvent -MissionId ([Guid]::new($mission)) `
+                -EventId $item.EventId -PayloadBytes $item.PayloadBytes -RequestSender $ProducerSender
+            if(-not $delivery.Delivered){continue}
+            $write=Open-HHAuthenticatedPersistence -PersistenceContext $runtime -OperationLock -AllowAnchorAdvance
+            try{
+                $data=[pscustomobject]@{Id=$item.EventId.ToByteArray();At=[DateTimeOffset]::UtcNow}
+                Invoke-HHAnchoredPersistenceTransaction -Context $write -ArgumentList @($data) -Action {
+                    param($Connection,$Transaction,$WriterContext,$ArgumentList);$d=$ArgumentList[0]
+                    Set-HHVisualizerForensicEventReconciled -Connection $Connection -Transaction $Transaction `
+                        -MasterKey $WriterContext.MasterKey -CurrentSnapshot $WriterContext.VisualizerSnapshot `
+                        -EventId $d.Id -ReconciledAtUtc $d.At
+                }|Out-Null
+            }finally{Close-HHAuthenticatedPersistence -Context $write}
+            $replayed++
+        }finally{[Array]::Clear([byte[]]$item.PayloadBytes,0,([byte[]]$item.PayloadBytes).Length)}
+    }
+    [pscustomobject]@{Replayed=$replayed;Remaining=$pending.Count-$replayed}
+}
+
 function New-HHVisualizationStartReceipt {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
         'PSUseShouldProcessForStateChangingFunctions',
@@ -201,11 +234,14 @@ function New-HHVisualizationStartReceipt {
         [scriptblock]$ProducerSender
     )
     $replay = Invoke-HHPendingVisualizerObservationReplay -ProducerSender $ProducerSender
+    $forensicReplay = Invoke-HHPendingVisualizerForensicEventReplay -ProducerSender $ProducerSender
     [pscustomobject][ordered]@{
         Status=$Status; PublishingState='Enabled'; MissionId=$MissionId
         Connection='authenticated'; CreatedNewMission=$CreatedNewMission
         ReplayedObservations=[int]$replay.Replayed
         PendingObservations=[int]$replay.Remaining
+        ReplayedForensicEvents=[int]$forensicReplay.Replayed
+        PendingForensicEvents=[int]$forensicReplay.Remaining
     }
 }
 

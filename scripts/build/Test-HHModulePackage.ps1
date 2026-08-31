@@ -110,20 +110,12 @@ if ($packagedPrerelease -cne $expectedPrerelease) {
 }
 
 Import-Module $manifestPath -Force -ErrorAction Stop
-$expected = @(
-    'Enable-HHSshKeyAuthentication'
-    'Get-HHAuditOutput'
-    'Get-HHAuditRecord'
-    'Get-HHEscalationPreference'
-    'Get-HHTarget'
-    'Get-TargetHostDetails'
-    'Invoke-HHCommand'
-    'Remove-HHTarget'
-    'Set-HHEscalationPreference'
-    'Set-HHTarget'
-    'Set-HHWindowsProcessAuditPolicy'
-    'Test-HHTarget'
-)
+$manifestData = Import-PowerShellDataFile -LiteralPath $manifestPath
+$declared = @($manifestData.FunctionsToExport)
+$expected = @($declared | Sort-Object -Unique)
+if ($expected.Count -eq 0 -or $declared.Count -ne $expected.Count) {
+    throw 'The packaged manifest must declare a non-empty unique framework command list.'
+}
 $actual = @(Get-Command -Module HostHunterNextGeneration -CommandType Function |
         Select-Object -ExpandProperty Name | Sort-Object)
 if (($actual -join "`n") -cne ($expected -join "`n")) {

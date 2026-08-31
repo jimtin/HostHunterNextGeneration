@@ -30,4 +30,9 @@ Export-ModuleMember -Function @(
     'Set-HHEscalationPreference'
     'Get-HHEscalationPreference'
     'Get-TargetHostDetails'
+    'Get-TargetProcessStartEvents'
+    'Get-TargetProcessEndEvents'
+    'Get-TargetAuthenticationEvents'
+    'Get-TargetProcessAccessToken'
+    'Get-TargetUserEffectiveRights'
 ) -Alias @('Get-HHTargets')

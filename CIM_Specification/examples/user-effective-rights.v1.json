@@ -1,0 +1,164 @@
+{
+  "@timestamp": "2026-08-29T05:40:00.000Z",
+  "ecs": { "version": "9.5.0" },
+  "event": {
+    "id": "fbe1f1bc-9bd6-5f2f-bf10-98c7b73a5ed5",
+    "kind": "state",
+    "category": ["iam"],
+    "type": ["info"],
+    "action": "user-effective-rights-observed",
+    "dataset": "hosthunter.user_effective_rights",
+    "module": "hosthunter",
+    "provider": "HostHunter",
+    "created": "2026-08-29T05:40:03.000Z",
+    "outcome": "success"
+  },
+  "agent": {
+    "id": "88888888-8888-4888-8888-888888888888",
+    "name": "hosthunter-controller",
+    "type": "hosthunter",
+    "version": "0.7.0"
+  },
+  "host": {
+    "id": "hh_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "hostname": "LAB-WS01",
+    "boot": { "id": "40000000-0000-4000-8000-000000000001" }
+  },
+  "user": {
+    "id": "S-1-5-21-1000-1000-1000-1101",
+    "name": "alice",
+    "domain": "LAB"
+  },
+  "hosthunter": {
+    "schema": { "name": "user.effective-rights", "version": "1.0.0" },
+    "collection_run": { "id": "77777777-7777-4777-8777-777777777777" },
+    "source": {
+      "provider": "HostHunter",
+      "channel": "EffectiveUserRights",
+      "event_code": "target-host-policy",
+      "event_version": 1,
+      "record_id": "LAB-WS01:S-1-5-21-1000-1000-1000-1101:2026-08-29T05:40:00.000Z",
+      "computer": "LAB-WS01"
+    },
+    "user_rights": {
+      "observation": {
+        "status": "complete",
+        "observed_at": "2026-08-29T05:40:00.000Z"
+      },
+      "evaluation": {
+        "scope": "target_host_effective_policy",
+        "membership_resolution": "complete",
+        "assignment_resolution": "complete",
+        "policy_source_resolution": "not_collected"
+      },
+      "rights": [
+        {
+          "name": "SeDebugPrivilege",
+          "kind": "privilege",
+          "effect": "grant",
+          "state": "effective",
+          "origins": [
+            {
+              "assigned_to": {
+                "id": "S-1-5-32-544",
+                "name": "Administrators",
+                "domain": "BUILTIN",
+                "type": "well_known_group"
+              },
+              "relationship": "group_membership",
+              "membership_path": [
+                {
+                  "id": "S-1-5-21-1000-1000-1000-1101",
+                  "name": "alice",
+                  "domain": "LAB",
+                  "type": "user"
+                },
+                {
+                  "id": "S-1-5-21-1000-1000-1000-2100",
+                  "name": "IR Analysts",
+                  "domain": "LAB",
+                  "type": "group"
+                },
+                {
+                  "id": "S-1-5-32-544",
+                  "name": "Administrators",
+                  "domain": "BUILTIN",
+                  "type": "well_known_group"
+                }
+              ],
+              "policy_source": {
+                "attribution_status": "unknown",
+                "type": "unknown",
+                "evidence": "unknown"
+              }
+            }
+          ]
+        },
+        {
+          "name": "SeInteractiveLogonRight",
+          "kind": "logon_right",
+          "effect": "allow",
+          "state": "overridden",
+          "origins": [
+            {
+              "assigned_to": {
+                "id": "S-1-5-21-1000-1000-1000-513",
+                "name": "Domain Users",
+                "domain": "LAB",
+                "type": "group"
+              },
+              "relationship": "group_membership",
+              "membership_path": [
+                {
+                  "id": "S-1-5-21-1000-1000-1000-1101",
+                  "name": "alice",
+                  "domain": "LAB",
+                  "type": "user"
+                },
+                {
+                  "id": "S-1-5-21-1000-1000-1000-513",
+                  "name": "Domain Users",
+                  "domain": "LAB",
+                  "type": "group"
+                }
+              ],
+              "policy_source": {
+                "attribution_status": "unknown",
+                "type": "unknown",
+                "evidence": "unknown"
+              }
+            }
+          ],
+          "overridden_by": ["SeDenyInteractiveLogonRight"]
+        },
+        {
+          "name": "SeDenyInteractiveLogonRight",
+          "kind": "logon_right",
+          "effect": "deny",
+          "state": "effective",
+          "origins": [
+            {
+              "assigned_to": {
+                "id": "S-1-5-21-1000-1000-1000-1101",
+                "name": "alice",
+                "domain": "LAB",
+                "type": "user"
+              },
+              "relationship": "direct",
+              "policy_source": {
+                "attribution_status": "unknown",
+                "type": "unknown",
+                "evidence": "unknown"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "provenance": {
+      "transport": "powershell7_over_ssh",
+      "collected_at": "2026-08-29T05:40:03.000Z",
+      "normalizer": { "name": "HostHunter.EffectiveUserRights", "version": "1.0.0" }
+    }
+  }
+}
