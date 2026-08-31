@@ -36,8 +36,10 @@ function Assert-HHForensicPayloadSchema {
     [CmdletBinding()]
     param([Parameter(Mandatory)][byte[]]$PayloadBytes)
     if($PayloadBytes.Length -lt 2 -or $PayloadBytes.Length -gt 262144){throw 'Forensic payload size is invalid.'}
-    $text=[Text.UTF8Encoding]::new($false,$true).GetString($PayloadBytes)
-    try{$payload=$text|ConvertFrom-Json -Depth 30}catch{throw 'Forensic payload is not valid UTF-8 JSON.'}
+    try{
+        $text=[Text.UTF8Encoding]::new($false,$true).GetString($PayloadBytes)
+        $payload=$text|ConvertFrom-Json -Depth 30
+    }catch{throw 'Forensic payload is not valid UTF-8 JSON.'}
     $schemaKey="$([string]$payload.hosthunter.schema.name)/$([string]$payload.hosthunter.schema.version)"
     if($schemaKey -cnotin $script:HHForensicEventSchemas){throw "Forensic schema '$schemaKey' is not registered."}
     $eventId=[Guid]::Empty;$missionId=[Guid]::Empty
@@ -358,7 +360,7 @@ function Invoke-HHManagedHostSecurityEventOperation {
             -Command "Collect bounded $sourceName records" -RemoteScriptBlock $remote `
             -RemoteArgumentList @($filterXPath,$First) `
             -ThrottleLimit $ThrottleLimit -Reason $Reason -CaseId $CaseId
-        $records=if($transport.Succeeded){@($transport.ForensicRaw.Records)}else{@()}
+        $records=@(if($transport.Succeeded){@($transport.ForensicRaw.Records)}else{@()})
         $cursor=if($records.Count -eq 0){$null}else{
             $last=@($records|Sort-Object {[DateTimeOffset]$_.TimeCreated},{[long]$_.RecordId})[-1]
             [pscustomobject]@{SourceName=$sourceName;OccurredAtUtc=[DateTimeOffset]$last.TimeCreated;RecordId=[string]$last.RecordId}

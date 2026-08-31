@@ -66,7 +66,7 @@ write_component_receipt() {
   if [[ "$component" == coverage && -f "$artifact_root/unit/coverage-summary.json" ]]; then
     coverage="$(jq -c '{
       status,minimum,invocationCount,testCount,durationMs,candidateSha,candidateTree,
-      sourceHash,sourceFileCount,sourceInventory,metrics,uncovered
+      sourceHash,sourceFileCount,sourceInventory,metrics,integrationOwnedCoverage,uncovered
     }' "$artifact_root/unit/coverage-summary.json")"
   fi
   jq -n \
@@ -154,7 +154,8 @@ write_receipt() {
   controller_image_id="$(docker image inspect --format '{{.Id}}' "$controller_image" 2>/dev/null || true)"
   if [[ -f "$artifact_root/unit/coverage-summary.json" ]]; then
     coverage="$(jq -c '{status,minimum,invocationCount,testCount,durationMs,
-      candidateSha,candidateTree,sourceHash,sourceFileCount,sourceInventory,metrics,uncovered}' \
+      candidateSha,candidateTree,sourceHash,sourceFileCount,sourceInventory,metrics,
+      integrationOwnedCoverage,uncovered}' \
       "$artifact_root/unit/coverage-summary.json" 2>/dev/null || printf 'null')"
   fi
   jq -n \

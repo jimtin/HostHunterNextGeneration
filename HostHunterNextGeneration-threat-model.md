@@ -138,7 +138,7 @@ Non-capabilities:
 | AP-7 | overwrite/rerun verdict | failed process → B5 → receipts | integrity | low | high | medium | atomic claim; O_EXCL; seal | release scripts |
 | AP-8 | misread Windows policy state | native `AUDIT_NONE` representation → B3 → restoration verdict | integrity | low | high | medium | effective-bit normalization; Event 4688 proof; exact restoration | policy implementation/tests/qualification |
 | AP-9 | forge a coverage pass | candidate collector → B8 → release verdict | integrity / detection-evasion | medium | high | high | external gate recomputes inventory/hash and enforces three native metrics | coverage receipt validator |
-| AP-10 | omit shipped source or weaken a threshold | candidate coverage configuration → B8 → release verdict | integrity / detection-evasion | medium | high | high | exact source inventory/hash and fixed external threshold contract | coverage receipt validator |
+| AP-10 | omit shipped source, expand integration-owned exclusions, or weaken a threshold | candidate coverage configuration → B8 → release verdict | integrity / detection-evasion | medium | high | high | exact source inventory/hash, fixed external threshold contract, and externally validated Windows-only path/range ownership | coverage receipt validator |
 | AP-11 | exhaust or loop the gate | native profiler → B8 → local compute | availability | medium | medium | medium | one root timeout; terminal receipt; no retry or diagnostic rerun | coverage runner; verify-local.sh |
 | AP-12 | execute injected local proxy code | forged metadata → B0 → macOS session | execution | low | high | medium | exact image fingerprint; unique names; declaration AST allows parameter metadata only; size caps | client metadata synchronization |
 | AP-13 | disclose or replay a password | malicious frame/process → B0 → credential | access / exfiltration | medium | high | high | local secure prompt; one request; stdin; random broker token; loopback only; no args/env/files/logs; buffer clearing | client protocol qualification |
@@ -196,10 +196,12 @@ Impact is high where privilege or release integrity is at stake.
 - user-confirmed: authentication, encryption, anchors, rollback protection, and recovery remain.
 - user-confirmed: internal Docker traffic is outside the host boundary.
 - user-corrected: all controller-to-host behavior uses the audited engine.
-- user-confirmed: coverage includes every shipped source file, remains unit-only,
-  and preserves independent 90-percent statement, executable-line, and invoked-
-  function thresholds; branch confidence is provided by explicit behavioral
-  tests rather than custom AST instrumentation.
+- user-confirmed: coverage inventories and hashes every shipped source file,
+  remains unit-only, and preserves independent 90-percent statement,
+  executable-line, and invoked-function thresholds. The exact remote Windows
+  body ranges are owned by positive Windows qualification and externally
+  constrained in the receipt validator; branch confidence uses explicit
+  behavioral tests rather than custom AST instrumentation.
 - user-confirmed: independent release phases run once, Windows precedes
   coverage, and no failed exact SHA is retried.
 - user-confirmed: macOS PowerShell auto-starts Docker, synchronizes exports, and

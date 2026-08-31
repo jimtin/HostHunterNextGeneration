@@ -14,7 +14,8 @@ function Get-TargetProcessAccessToken {
         [string]$Reason,
         [string]$CaseId
     )
-    foreach ($candidate in @($ProcessName)) {
+    if ($PSCmdlet.ParameterSetName -ceq 'ProcessName') {
+        foreach ($candidate in @($ProcessName)) {
         if ([string]::IsNullOrWhiteSpace($candidate) -or $candidate.Length -gt 255 -or
             $candidate.IndexOfAny([char[]]'*?[]\/') -ge 0) {
             throw (
@@ -22,6 +23,7 @@ function Get-TargetProcessAccessToken {
                 'or path characters.'
             )
         }
+    }
     }
     $arguments = @{}
     foreach ($entry in $PSBoundParameters.GetEnumerator()) { $arguments[$entry.Key] = $entry.Value }

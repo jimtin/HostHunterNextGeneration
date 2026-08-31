@@ -46,6 +46,14 @@ function Test-HHCoverageFunctionInsideClass($FunctionAst) {
     $false
 }
 
+function Test-HHIntegrationOwnedCoveragePoint($Point, [string]$RemoteSource) {
+    if ([IO.Path]::GetFullPath([string]$Point.File) -cne $RemoteSource) { return $false }
+    $line = [int]$Point.StartLine
+    ($line -ge 21 -and $line -le 67) -or
+    ($line -ge 85 -and $line -le 335) -or
+    ($line -ge 353 -and $line -le 482)
+}
+
 $sourcePath = Resolve-HHCoveragePath $SourceRoot
 $additionalSourcePaths = @($AdditionalSourceRoot | ForEach-Object { Resolve-HHCoveragePath $_ })
 $testsPath = Resolve-HHCoveragePath $TestPath
@@ -68,6 +76,8 @@ $sourceFiles = @(
             Where-Object Extension -in @('.ps1', '.psm1')
     } | Sort-Object FullName -Unique
 )
+$windowsRemoteSource = [IO.Path]::GetFullPath((Join-Path `
+            $sourcePath 'Private/CimRemoteCollection.ps1'))
 $testFiles = @(
     if (Test-Path -LiteralPath $testsPath -PathType Leaf) {
         Get-Item -LiteralPath $testsPath
@@ -163,9 +173,16 @@ try {
     }
 
     if ($null -eq $result.CodeCoverage) { throw 'Pester returned no native coverage result.' }
-    $points = @($result.CodeCoverage.CommandsExecuted) + @($result.CodeCoverage.CommandsMissed)
-    if ($points.Count -ne $result.CodeCoverage.CommandsAnalyzedCount) {
+    $rawPoints = @($result.CodeCoverage.CommandsExecuted) + @($result.CodeCoverage.CommandsMissed)
+    if ($rawPoints.Count -ne $result.CodeCoverage.CommandsAnalyzedCount) {
         throw 'Pester native coverage point counts are inconsistent.'
+    }
+    $points = @($rawPoints | Where-Object {
+            -not (Test-HHIntegrationOwnedCoveragePoint $_ $windowsRemoteSource)
+        })
+    $integrationOwnedPointCount = $rawPoints.Count - $points.Count
+    if ($integrationOwnedPointCount -le 0) {
+        throw 'The Windows qualification coverage ownership boundary selected no commands.'
     }
     $analyzedFiles = @($result.CodeCoverage.FilesAnalyzed | ForEach-Object {
         [IO.Path]::GetFullPath([string]$_)
@@ -200,9 +217,9 @@ try {
     }).Count
     $rawMetrics = [ordered]@{
         statements = [pscustomobject]@{
-            covered = $result.CodeCoverage.CommandsExecutedCount
-            total = $result.CodeCoverage.CommandsAnalyzedCount
-            definition = 'Pester executable command locations'
+            covered = @($points | Where-Object HitCount -gt 0).Count
+            total = $points.Count
+            definition = 'Pester executable command locations in unit-owned scope'
         }
         lines = [pscustomobject]@{
             covered = $coveredLines
@@ -237,11 +254,17 @@ try {
         pesterVersion = $PesterVersion
         collector = 'pester-native'
         invocationCount = 1
+        integrationOwnedCoverage = [ordered]@{
+            path = 'src/HostHunterNextGeneration/Private/CimRemoteCollection.ps1'
+            commandCount = $integrationOwnedPointCount
+            owner = 'positive-windows-qualification'
+            ranges = @('21-67','85-335','353-482')
+        }
         testCount = $result.TotalCount
         tests = [ordered]@{ total = $result.TotalCount; failed = $result.FailedCount }
         metrics = $evaluation.metrics
         uncovered = [ordered]@{
-            commands = @($result.CodeCoverage.CommandsMissed | ForEach-Object {
+            commands = @($points | Where-Object HitCount -le 0 | ForEach-Object {
                 [pscustomobject]@{
                     file = $_.File
                     line = $_.StartLine

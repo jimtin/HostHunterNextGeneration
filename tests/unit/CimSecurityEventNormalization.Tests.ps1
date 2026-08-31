@@ -262,5 +262,83 @@ Describe 'CIM Windows Security-event normalization' -Tag Unit {
             { ConvertTo-HHSecurityEventRecord -Context $script:cimContext -InputObject $base } |
                 Should -Throw '*process*'
         }
+
+        It 'rejects unsupported codes and incomplete process start and end evidence' {
+            $sourceEvent = [pscustomobject]@{
+                EventId=9999;Version=0;RecordId=1L
+                TimeCreated='2026-08-29T05:00:00Z';Computer='LAB-WS01';Data=[ordered]@{}
+            }
+            { ConvertTo-HHSecurityEventRecord -Context $script:cimContext -InputObject $sourceEvent } |
+                Should -Throw '*code*unsupported*'
+
+            $sourceEvent.EventId=4688
+            { ConvertTo-HHSecurityEventRecord -Context $script:cimContext -InputObject $sourceEvent } |
+                Should -Throw '*missing a process identifier*'
+            $sourceEvent.Data=[ordered]@{NewProcessId='1';ProcessId='2'}
+            { ConvertTo-HHSecurityEventRecord -Context $script:cimContext -InputObject $sourceEvent } |
+                Should -Throw '*missing a process executable*'
+
+            $sourceEvent.EventId=4689
+            $sourceEvent.Data=[ordered]@{}
+            { ConvertTo-HHSecurityEventRecord -Context $script:cimContext -InputObject $sourceEvent } |
+                Should -Throw '*missing a process identifier*'
+            $sourceEvent.Data=[ordered]@{ProcessId='1'}
+            { ConvertTo-HHSecurityEventRecord -Context $script:cimContext -InputObject $sourceEvent } |
+                Should -Throw '*missing a process executable*'
+            $sourceEvent.Data=[ordered]@{ProcessId='1';ProcessName='C:\x.exe'}
+            { ConvertTo-HHSecurityEventRecord -Context $script:cimContext -InputObject $sourceEvent } |
+                Should -Throw '*missing an exit status*'
+        }
+
+        It 'covers all declared elevation, integrity, and logon-type labels' {
+            foreach ($elevation in @('%%1936','%%1937','%%1938','other')) {
+                foreach ($integrity in @(
+                        'S-1-16-0','S-1-16-4096','S-1-16-8192','S-1-16-8448',
+                        'S-1-16-12288','S-1-16-16384','S-1-16-20480','S-1-16-28672','other'
+                    )) {
+                    $record = ConvertTo-HHSecurityEventRecord -Context $script:cimContext `
+                        -InputObject ([pscustomobject]@{
+                            EventId=4688;Version=2;RecordId=1L
+                            TimeCreated='2026-08-29T05:00:00Z';Computer='LAB-WS01'
+                            Data=[ordered]@{
+                                NewProcessId='1';ProcessId='2';NewProcessName='C:\x.exe'
+                                TokenElevationType=$elevation;MandatoryLabel=$integrity
+                            }
+                        })
+                    $record.process.token_elevation | Should -Not -BeNullOrEmpty
+                }
+            }
+            foreach ($id in @(2,3,4,5,7,8,9,10,11,99)) {
+                Get-HHLogonTypeName $id | Should -Not -BeNullOrEmpty
+            }
+        }
+
+        It 'retains optional authentication identifiers and normalized issue detail' {
+            $record = ConvertTo-HHSecurityEventRecord -Context $script:cimContext `
+                -InputObject ([pscustomobject]@{
+                    EventId=4648;Version=0;RecordId=1L
+                    TimeCreated='2026-08-29T05:00:00Z';Computer='LAB-WS01'
+                    Data=[ordered]@{
+                        SubjectUserSid='S-1-5-18';TargetUserName='alice'
+                        ProcessId='1';ProcessName='C:\pwsh.exe'
+                        TargetLogonGuid='{33333333-3333-4333-8333-333333333333}'
+                        TargetServerName='server.example'
+                    }
+                })
+            $record.hosthunter.authentication.target_logon_guid |
+                Should -BeExactly '33333333-3333-4333-8333-333333333333'
+
+            $issues = @(ConvertTo-HHObservationIssue @(
+                    [pscustomobject]@{Code='ONE';Scope='host';Detail='detail'}
+                    [pscustomobject]@{Code='TWO';Message='message'}
+                    [pscustomobject]@{Code='THREE'}
+                ))
+            $issues[0].scope | Should -BeExactly host
+            $issues[0].detail | Should -BeExactly detail
+            $issues[1].detail | Should -BeExactly message
+            $issues[2].PSObject.Properties['detail'] | Should -BeNullOrEmpty
+            ConvertTo-HHUInt32 $null | Should -BeNullOrEmpty
+            { ConvertTo-HHUInt32 '4294967296' } | Should -Throw '*outside*range*'
+        }
     }
 }

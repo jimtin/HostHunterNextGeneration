@@ -35,6 +35,11 @@ credential purge after key conversion, and all seventeen public framework cmdlet
 The unit coverage command has one timeout owner and uses only standard native
 coverage evidence. It has no network dependency, integration numerator,
 instrumented source copy, nested runner, worker fanout, shards, retries, or
-per-hit disk writes. All shipped production files are in scope; statements,
-executable lines, and invoked functions must each be at least 90 percent, with a
-92 percent engineering target. Explicit behavioral tests own branch confidence.
+per-hit disk writes. All shipped production files and full source hashes remain
+in its inventory. Commands inside the three Windows-only remote CIM bodies are
+owned by the positive Windows qualification instead of the Linux unit
+denominator; their factories and non-Windows fail-closed branches remain in
+unit scope, and the receipt records the exact owned ranges and command count.
+No other production commands are removed. Statements, executable lines, and
+invoked functions must each be at least 90 percent, with a 92 percent
+engineering target. Explicit behavioral tests own branch confidence.

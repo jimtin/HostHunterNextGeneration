@@ -59,6 +59,12 @@ BeforeAll {
                 sourceHash = $sourceHash
                 sourceFileCount = $inventory.Count
                 sourceInventory = $inventory
+                integrationOwnedCoverage = [pscustomobject][ordered]@{
+                    path = 'src/HostHunterNextGeneration/Private/CimRemoteCollection.ps1'
+                    commandCount = 286
+                    owner = 'positive-windows-qualification'
+                    ranges = @('21-67','85-335','353-482')
+                }
                 metrics = [pscustomobject][ordered]@{
                     statements = [pscustomobject]@{ covered = 90; total = 100 }
                     lines = [pscustomobject]@{ covered = 91; total = 100 }
@@ -367,6 +373,14 @@ Describe 'Immutable exact-SHA release receipt state machine' -Tag Unit {
                     param($v)
                     $v.coverage.sourceHash = ('0' * 64)
                 } }
+            @{ name = 'integration-owner-range'; mutate = {
+                    param($v)
+                    $v.coverage.integrationOwnedCoverage.ranges = @('1-482')
+                } }
+            @{ name = 'integration-owner-count'; mutate = {
+                    param($v)
+                    $v.coverage.integrationOwnedCoverage.commandCount = 0
+                } }
         )
 
         foreach ($case in $cases) {
@@ -631,7 +645,7 @@ Describe 'Immutable exact-SHA release receipt state machine' -Tag Unit {
         $script:heavyRunner | Should -Match 'scripts/lib/prepare-artifacts\.sh "\$repo_root"'
         $script:heavyRunner | Should -Match 'export HH_CANDIDATE_SHA="\$candidate_sha"'
         $script:heavyRunner | Should -Match 'export HH_CANDIDATE_TREE'
-        $script:heavyRunner | Should -Match 'sourceInventory,metrics,uncovered'
+        $script:heavyRunner | Should -Match 'sourceInventory,metrics,integrationOwnedCoverage,uncovered'
         $script:testCompose | Should -Match 'HH_CANDIDATE_SHA: \$\{HH_CANDIDATE_SHA:-\}'
         $script:testCompose | Should -Match 'HH_CANDIDATE_TREE: \$\{HH_CANDIDATE_TREE:-\}'
     }

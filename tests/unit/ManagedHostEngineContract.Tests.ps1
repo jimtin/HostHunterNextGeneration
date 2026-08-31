@@ -156,6 +156,42 @@ Describe 'managed-host engine contract' -Tag Unit {
         }
     }
 
+    It 'delegates the complete CIM public surface with operator filters intact' {
+        InModuleScope HostHunterNextGeneration {
+            Mock Invoke-HHManagedHostOperation { $Operation }
+            $since = [DateTimeOffset]'2026-08-31T00:00:00Z'
+            $until = [DateTimeOffset]'2026-08-31T01:00:00Z'
+
+            Get-TargetProcessStartEvents -Name alpha -Since $since -Until $until `
+                -First 20 -ThrottleLimit 2 -Reason reason -CaseId case |
+                Should -BeExactly GetProcessStartEvents
+            Get-TargetAuthenticationEvents -Name alpha -Since $since -Until $until `
+                -First 21 -ThrottleLimit 3 |
+                Should -BeExactly GetAuthenticationEvents
+            Get-TargetProcessAccessToken -Name alpha -ProcessId 10 -ThrottleLimit 4 |
+                Should -BeExactly GetProcessAccessToken
+            Get-TargetProcessAccessToken -Name alpha -ProcessName pwsh.exe |
+                Should -BeExactly GetProcessAccessToken
+            Get-TargetUserEffectiveRights -Name alpha -Identity 'LAB\alice' |
+                Should -BeExactly GetUserEffectiveRights
+
+            Should -Invoke Invoke-HHManagedHostOperation -Times 5 -Exactly
+            Should -Invoke Invoke-HHManagedHostOperation -Times 1 -Exactly -ParameterFilter {
+                $Operation -ceq 'GetProcessStartEvents' -and
+                $Arguments.Since -eq $since -and $Arguments.Until -eq $until -and
+                $Arguments.First -eq 20 -and $Arguments.ThrottleLimit -eq 2
+            }
+            Should -Invoke Invoke-HHManagedHostOperation -Times 1 -Exactly -ParameterFilter {
+                $Operation -ceq 'GetProcessAccessToken' -and
+                $Arguments.ProcessName -ceq 'pwsh.exe'
+            }
+            Should -Invoke Invoke-HHManagedHostOperation -Times 1 -Exactly -ParameterFilter {
+                $Operation -ceq 'GetUserEffectiveRights' -and
+                $Arguments.Identity -ceq 'LAB\alice'
+            }
+        }
+    }
+
     It 'collects 4689 through the shared bounded Security-event operation and end cursor' {
         InModuleScope HostHunterNextGeneration {
             Mock Get-HHForensicCollectionContext {
@@ -258,7 +294,11 @@ Describe 'managed-host engine contract' -Tag Unit {
             Mock Invoke-HHManagedHostInvokeCommandOperation { 'command' }
             Mock Invoke-HHManagedHostEnableSshKeyAuthenticationOperation { 'key' }
             Mock Invoke-HHManagedHostSetWindowsProcessAuditPolicyOperation { 'policy' }
+            Mock Invoke-HHManagedHostGetProcessStartEventsOperation { 'process-start' }
             Mock Invoke-HHManagedHostGetProcessEndEventsOperation { 'process-end' }
+            Mock Invoke-HHManagedHostGetAuthenticationEventsOperation { 'authentication' }
+            Mock Invoke-HHManagedHostGetProcessAccessTokenOperation { 'process-token' }
+            Mock Invoke-HHManagedHostGetUserEffectiveRightsOperation { 'effective-rights' }
 
             Invoke-HHManagedHostOperation -Operation ValidateTarget -Arguments @{
                 Name = 'alpha'
@@ -281,13 +321,26 @@ Describe 'managed-host engine contract' -Tag Unit {
             } | Should -BeExactly policy
             Invoke-HHManagedHostOperation -Operation GetProcessEndEvents -Arguments @{} |
                 Should -BeExactly process-end
+            Invoke-HHManagedHostOperation -Operation GetProcessStartEvents -Arguments @{} |
+                Should -BeExactly process-start
+            Invoke-HHManagedHostOperation -Operation GetAuthenticationEvents -Arguments @{} |
+                Should -BeExactly authentication
+            Invoke-HHManagedHostOperation -Operation GetProcessAccessToken -Arguments @{
+                ProcessId = @(10)
+            } | Should -BeExactly process-token
+            Invoke-HHManagedHostOperation -Operation GetUserEffectiveRights -Arguments @{} |
+                Should -BeExactly effective-rights
 
             Should -Invoke Invoke-HHManagedHostValidateTargetOperation -Times 1 -Exactly
             Should -Invoke Invoke-HHManagedHostTestTargetOperation -Times 1 -Exactly
             Should -Invoke Invoke-HHManagedHostInvokeCommandOperation -Times 1 -Exactly
             Should -Invoke Invoke-HHManagedHostEnableSshKeyAuthenticationOperation -Times 1 -Exactly
             Should -Invoke Invoke-HHManagedHostSetWindowsProcessAuditPolicyOperation -Times 1 -Exactly
+            Should -Invoke Invoke-HHManagedHostGetProcessStartEventsOperation -Times 1 -Exactly
             Should -Invoke Invoke-HHManagedHostGetProcessEndEventsOperation -Times 1 -Exactly
+            Should -Invoke Invoke-HHManagedHostGetAuthenticationEventsOperation -Times 1 -Exactly
+            Should -Invoke Invoke-HHManagedHostGetProcessAccessTokenOperation -Times 1 -Exactly
+            Should -Invoke Invoke-HHManagedHostGetUserEffectiveRightsOperation -Times 1 -Exactly
         }
     }
 
