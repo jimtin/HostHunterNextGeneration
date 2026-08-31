@@ -101,7 +101,8 @@ try {
         ConvertFrom-Json -Depth 8
     if ($result.Status -cne 'passed' -or
         $result.ClientLoad -cne 'fresh-process-installed-profile' -or
-        [int]$result.InvokedUniqueCommandCount -ne 12) {
+        [int]$result.InvokedUniqueCommandCount -ne
+            [int]$result.ExpectedFrameworkCommandCount) {
         throw 'The installed-client macOS journey returned an invalid terminal result.'
     }
     $result

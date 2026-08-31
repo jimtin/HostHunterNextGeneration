@@ -2,7 +2,7 @@
 
 ## Supported product
 
-HostHunter exports exactly these twelve framework cmdlets:
+HostHunter exports exactly these seventeen framework cmdlets:
 
 - `Get-HHTarget`
 - `Set-HHTarget`
@@ -16,6 +16,11 @@ HostHunter exports exactly these twelve framework cmdlets:
 - `Set-HHEscalationPreference`
 - `Get-HHEscalationPreference`
 - `Get-TargetHostDetails`
+- `Get-TargetProcessStartEvents`
+- `Get-TargetProcessEndEvents`
+- `Get-TargetAuthenticationEvents`
+- `Get-TargetProcessAccessToken`
+- `Get-TargetUserEffectiveRights`
 
 The native macOS client additionally exports `Start-HHVisualization` and
 `Stop-HHVisualization`. Those two commands orchestrate local Docker and mission
@@ -26,7 +31,7 @@ OpenSSH. WinRM, Windows PowerShell 5.1, native macOS/Windows controllers, and th
 Forensics parser/API are not supported product surfaces.
 
 `Invoke-HHManagedHostOperation` is the only production-module gateway for
-controller-to-managed-host communication. The six host-facing public cmdlets
+controller-to-managed-host communication. The eleven host-facing public cmdlets
 must call it exactly once and must retain their semantic operation labels.
 Internal Docker lifecycle, health checks, volumes, local SQLite, and local
 cryptographic files are outside this boundary.
@@ -45,7 +50,7 @@ Development acceptance is exactly one command:
 ```
 
 It runs once, without retries or shards, in a production-derived verifier plus
-one disposable SSH fixture. It must produce exactly twelve unique cmdlet rows
+one disposable SSH fixture. It must produce exactly seventeen unique cmdlet rows
 and verify public behavior plus read-only SQLite state deltas. A Linux run proves
 a finite audited unsupported result for Windows process policy; positive policy
 proof belongs to the bounded live-Windows qualification.

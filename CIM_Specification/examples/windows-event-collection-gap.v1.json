@@ -1,0 +1,42 @@
+{
+  "schema_version": "1.0.0",
+  "receipt_id": "91919191-9191-4191-8191-919191919191",
+  "collection_run_id": "22222222-2222-4222-8222-222222222222",
+  "host_id": "hh_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "record_family": "authentication",
+  "status": "partial",
+  "result": "gap",
+  "requested": {
+    "since": "2026-08-29T04:00:00.000Z",
+    "until": "2026-08-29T05:00:00.000Z",
+    "first": 100,
+    "mode": "cursor"
+  },
+  "counts": {
+    "matched": 2,
+    "normalized": 2,
+    "persisted": 2,
+    "rejected": 0
+  },
+  "has_more": false,
+  "gaps": [
+    {
+      "code": "log_cleared",
+      "detail": "The Security channel epoch changed after the saved cursor; the missing range is unknown."
+    }
+  ],
+  "cursor_before": {
+    "channel": "Security",
+    "epoch_id": "92929292-9292-4292-8292-929292929292",
+    "record_id": "2814",
+    "event_time": "2026-08-29T04:12:31.427Z"
+  },
+  "cursor_after": {
+    "channel": "Security",
+    "epoch_id": "93939393-9393-4393-8393-939393939393",
+    "record_id": "2",
+    "event_time": "2026-08-29T04:59:44.000Z"
+  },
+  "cursor_advanced": true,
+  "completed_at": "2026-08-29T05:00:01.000Z"
+}

@@ -1,0 +1,70 @@
+{
+  "@timestamp": "2026-08-29T05:00:00.000Z",
+  "ecs": { "version": "9.5.0" },
+  "event": {
+    "id": "5be708b6-37e3-5629-a394-3fbda885ad83",
+    "kind": "event",
+    "category": ["authentication"],
+    "type": ["start"],
+    "action": "user-logon-succeeded",
+    "dataset": "hosthunter.authentication_session",
+    "module": "hosthunter",
+    "provider": "HostHunter",
+    "created": "2026-08-29T05:00:02.000Z",
+    "outcome": "success"
+  },
+  "agent": {
+    "id": "88888888-8888-4888-8888-888888888888",
+    "name": "hosthunter-controller",
+    "type": "hosthunter",
+    "version": "0.7.0"
+  },
+  "host": {
+    "id": "hh_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "hostname": "LAB-WS01",
+    "boot": { "id": "40000000-0000-4000-8000-000000000001" }
+  },
+  "user": {
+    "id": "S-1-5-18",
+    "name": "SYSTEM",
+    "domain": "NT AUTHORITY",
+    "logon_id": "999",
+    "target": {
+      "id": "S-1-5-21-1000-1000-1000-1101",
+      "name": "alice",
+      "domain": "LAB",
+      "logon_id": "4872944"
+    }
+  },
+  "source": { "address": "LAB-WS02", "ip": "192.0.2.25", "port": 51514 },
+  "process": {
+    "pid": 756,
+    "entity_id": "LAB-WS01:756:2026-08-29T04:59:51.000Z",
+    "name": "lsass.exe",
+    "executable": "C:\\Windows\\System32\\lsass.exe"
+  },
+  "hosthunter": {
+    "schema": { "name": "authentication.session.start", "version": "1.0.0" },
+    "collection_run": { "id": "77777777-7777-4777-8777-777777777777" },
+    "source": {
+      "provider": "Microsoft-Windows-Security-Auditing",
+      "channel": "Security",
+      "event_code": "4624",
+      "event_version": 0,
+      "record_id": "4100",
+      "computer": "LAB-WS01"
+    },
+    "authentication": {
+      "logon_type": { "id": 3, "name": "network" },
+      "logon_process": "NtLmSsp",
+      "authentication_package": "NTLM",
+      "ntlm_package": "NTLM V2",
+      "key_length_bits": 128
+    },
+    "provenance": {
+      "transport": "powershell7_over_ssh",
+      "collected_at": "2026-08-29T05:00:02.000Z",
+      "normalizer": { "name": "HostHunter.Security4624", "version": "1.0.0" }
+    }
+  }
+}

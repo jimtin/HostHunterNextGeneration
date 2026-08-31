@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hosthunter.dev/schemas/authentication-session-logoff-initiated.v1.schema.json",
+  "title": "HostHunter canonical user-initiated logoff v1",
+  "allOf": [
+    { "$ref": "forensic-event-envelope.v1.schema.json" },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["@timestamp", "ecs", "event", "agent", "host", "user", "hosthunter"],
+      "properties": {
+        "@timestamp": true,
+        "ecs": true,
+        "event": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": true,
+            "kind": { "const": "event" },
+            "category": { "const": ["authentication"] },
+            "type": { "const": ["info"] },
+            "action": { "const": "user-logoff-initiated" },
+            "dataset": { "const": "hosthunter.authentication_session" },
+            "module": true,
+            "provider": true,
+            "created": true
+          }
+        },
+        "agent": true,
+        "host": true,
+        "user": {
+          "allOf": [
+            { "$ref": "authentication-common.v1.schema.json#/$defs/principal" },
+            { "required": ["id", "logon_id"] }
+          ]
+        },
+        "hosthunter": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schema", "collection_run", "source", "provenance"],
+          "properties": {
+            "schema": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "version"],
+              "properties": {
+                "name": { "const": "authentication.session.logoff-initiated" },
+                "version": { "const": "1.0.0" }
+              }
+            },
+            "collection_run": true,
+            "source": {
+              "allOf": [
+                { "$ref": "authentication-common.v1.schema.json#/$defs/securityEventSource" },
+                {
+                  "properties": {
+                    "event_code": { "const": "4647" },
+                    "event_version": { "const": 0 }
+                  }
+                }
+              ]
+            },
+            "provenance": true
+          }
+        }
+      }
+    }
+  ]
+}

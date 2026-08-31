@@ -1,0 +1,51 @@
+{
+  "@timestamp": "2026-08-29T05:20:00.000Z",
+  "ecs": { "version": "9.5.0" },
+  "event": {
+    "id": "989ae7ee-762f-5706-8cac-f1b61aa4d471",
+    "kind": "event",
+    "category": ["authentication"],
+    "type": ["end"],
+    "action": "user-logon-session-ended",
+    "dataset": "hosthunter.authentication_session",
+    "module": "hosthunter",
+    "provider": "HostHunter",
+    "created": "2026-08-29T05:20:02.000Z",
+    "outcome": "success"
+  },
+  "agent": {
+    "id": "88888888-8888-4888-8888-888888888888",
+    "name": "hosthunter-controller",
+    "type": "hosthunter",
+    "version": "0.7.0"
+  },
+  "host": {
+    "id": "hh_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "hostname": "LAB-WS01",
+    "boot": { "id": "40000000-0000-4000-8000-000000000001" }
+  },
+  "user": {
+    "id": "S-1-5-21-1000-1000-1000-1101",
+    "name": "alice",
+    "domain": "LAB",
+    "logon_id": "4872960"
+  },
+  "hosthunter": {
+    "schema": { "name": "authentication.session.end", "version": "1.0.0" },
+    "collection_run": { "id": "77777777-7777-4777-8777-777777777777" },
+    "source": {
+      "provider": "Microsoft-Windows-Security-Auditing",
+      "channel": "Security",
+      "event_code": "4634",
+      "event_version": 0,
+      "record_id": "4300",
+      "computer": "LAB-WS01"
+    },
+    "authentication": { "logon_type": { "id": 10, "name": "remote_interactive" } },
+    "provenance": {
+      "transport": "powershell7_over_ssh",
+      "collected_at": "2026-08-29T05:20:02.000Z",
+      "normalizer": { "name": "HostHunter.Security4634", "version": "1.0.0" }
+    }
+  }
+}

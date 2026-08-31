@@ -94,7 +94,12 @@ try {
     }
     $exports = @(Get-Command -Module HostHunter.Client -CommandType Function |
             Where-Object Name -ne Repair-HHClientRuntime)
-    if ($exports.Count -ne 14) { throw "Native client exported $($exports.Count) commands; expected 14." }
+    $frameworkCommands = @($exports.Name | Where-Object {
+            $_ -notin @('Start-HHVisualization', 'Stop-HHVisualization')
+        } | Sort-Object -Unique)
+    if ($frameworkCommands.Count -eq 0) {
+        throw 'Native client returned no generated framework commands.'
+    }
     $observedCommands = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     [void]$observedCommands.Add('Get-HHTarget')
     $emptyTargetInformation = @()
@@ -133,6 +138,19 @@ try {
     [void]$observedCommands.Add('Get-TargetHostDetails')
     if ($hostDetails.Count -ne 1) {
         throw "The native host-details collection returned $($hostDetails.Count) results; expected one."
+    }
+    foreach($entry in @(
+            [pscustomobject]@{Name='Get-TargetProcessStartEvents';Action={Get-TargetProcessStartEvents -Name $targetName}},
+            [pscustomobject]@{Name='Get-TargetProcessEndEvents';Action={Get-TargetProcessEndEvents -Name $targetName}},
+            [pscustomobject]@{Name='Get-TargetAuthenticationEvents';Action={Get-TargetAuthenticationEvents -Name $targetName}},
+            [pscustomobject]@{Name='Get-TargetProcessAccessToken';Action={Get-TargetProcessAccessToken -Name $targetName -ProcessName pwsh.exe}},
+            [pscustomobject]@{Name='Get-TargetUserEffectiveRights';Action={Get-TargetUserEffectiveRights -Name $targetName}}
+        )){
+        try { $null=& $entry.Action; throw "$($entry.Name) unexpectedly collected without a mission." }
+        catch {
+            if($_.Exception.Message -notmatch 'Start a HostHunter mission'){throw}
+            [void]$observedCommands.Add($entry.Name)
+        }
     }
     $hostDetailsProperties = @($hostDetails[0].PSObject.Properties.Name)
     if ('Hostname' -cnotin $hostDetailsProperties -or
@@ -256,8 +274,9 @@ try {
     }
     Remove-HHTarget -Name $targetName -Confirm:$false | Out-Null
     $targetRemoved = $true
-    if ($observedCommands.Count -ne 12) {
-        throw "Native qualification observed $($observedCommands.Count) unique framework cmdlets; expected 12."
+    if (@(Compare-Object -ReferenceObject $frameworkCommands `
+                -DifferenceObject @($observedCommands | Sort-Object)).Count -ne 0) {
+        throw 'Native qualification did not invoke the complete generated framework command surface.'
     }
     if ($script:HHNativeClientPromptCount -ne 2) {
         throw "Expected two onboarding secure prompts; observed $script:HHNativeClientPromptCount."
@@ -273,6 +292,7 @@ try {
         } else { 'source-manifest' }
         ClientModulePath = [string]$loadedClient.Path
         ExportCount = $exports.Count
+        ExpectedFrameworkCommandCount = $frameworkCommands.Count
         InvokedUniqueCommandCount = $observedCommands.Count
         AuthenticationConfirmationCount = $script:HHNativeClientConfirmationCount
         SecurePromptCount = $script:HHNativeClientPromptCount

@@ -1,0 +1,303 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hosthunter.dev/schemas/authentication-common.v1.schema.json",
+  "title": "HostHunter canonical authentication and privilege definitions v1",
+  "$defs": {
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 256
+    },
+    "shortText": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "detailText": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 1024
+    },
+    "pathText": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096
+    },
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "dateTime": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "uint32": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 4294967295
+    },
+    "uint64Decimal": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]{0,19})$"
+    },
+    "principal": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "name": { "$ref": "#/$defs/shortText" },
+        "domain": { "$ref": "#/$defs/shortText" },
+        "logon_id": { "$ref": "#/$defs/uint64Decimal" }
+      }
+    },
+    "userWithTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "name": { "$ref": "#/$defs/shortText" },
+        "domain": { "$ref": "#/$defs/shortText" },
+        "logon_id": { "$ref": "#/$defs/uint64Decimal" },
+        "target": { "$ref": "#/$defs/principal" }
+      }
+    },
+    "principalReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type"],
+      "properties": {
+        "id": { "$ref": "#/$defs/identifier" },
+        "name": { "$ref": "#/$defs/shortText" },
+        "domain": { "$ref": "#/$defs/shortText" },
+        "type": {
+          "enum": ["user", "group", "well_known_group"]
+        }
+      }
+    },
+    "process": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["pid"],
+      "properties": {
+        "pid": { "$ref": "#/$defs/uint32" },
+        "entity_id": { "$ref": "#/$defs/identifier" },
+        "name": { "$ref": "#/$defs/shortText" },
+        "executable": { "$ref": "#/$defs/pathText" },
+        "start": { "$ref": "#/$defs/dateTime" }
+      }
+    },
+    "networkEndpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "address": { "$ref": "#/$defs/shortText" },
+        "ip": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 64
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "domain": { "$ref": "#/$defs/shortText" }
+      }
+    },
+    "securityEventSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["provider", "channel", "event_code", "event_version", "record_id", "computer"],
+      "properties": {
+        "provider": { "const": "Microsoft-Windows-Security-Auditing" },
+        "channel": { "const": "Security" },
+        "event_code": { "$ref": "#/$defs/identifier" },
+        "event_version": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "record_id": { "$ref": "#/$defs/identifier" },
+        "computer": { "$ref": "#/$defs/shortText" }
+      }
+    },
+    "logonType": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name"],
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 13
+        },
+        "name": {
+          "enum": [
+            "interactive",
+            "network",
+            "batch",
+            "service",
+            "unlock",
+            "network_cleartext",
+            "new_credentials",
+            "remote_interactive",
+            "cached_interactive",
+            "cached_remote_interactive",
+            "cached_unlock",
+            "unknown"
+          ]
+        }
+      }
+    },
+    "authenticationContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "logon_type": { "$ref": "#/$defs/logonType" },
+        "logon_process": { "$ref": "#/$defs/shortText" },
+        "authentication_package": { "$ref": "#/$defs/shortText" },
+        "logon_guid": { "$ref": "#/$defs/uuid" },
+        "target_logon_guid": { "$ref": "#/$defs/uuid" },
+        "linked_logon_id": { "$ref": "#/$defs/uint64Decimal" },
+        "outbound_user": { "$ref": "#/$defs/principal" },
+        "transmitted_services": {
+          "type": "array",
+          "maxItems": 32,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/shortText" }
+        },
+        "ntlm_package": { "$ref": "#/$defs/shortText" },
+        "key_length_bits": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 65535
+        },
+        "impersonation_level": {
+          "enum": ["anonymous", "identification", "impersonation", "delegation", "unknown"]
+        },
+        "restricted_admin_mode": { "type": "boolean" },
+        "virtual_account": { "type": "boolean" },
+        "elevated_token": { "type": "boolean" },
+        "target_info": { "$ref": "#/$defs/detailText" }
+      }
+    },
+    "authenticationFailure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status_code", "sub_status_code"],
+      "properties": {
+        "status_code": { "$ref": "#/$defs/uint32" },
+        "status_name": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{2,127}$"
+        },
+        "sub_status_code": { "$ref": "#/$defs/uint32" },
+        "sub_status_name": {
+          "type": "string",
+          "pattern": "^[A-Z][A-Z0-9_]{2,127}$"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      }
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "observed_at"],
+      "properties": {
+        "status": {
+          "enum": ["complete", "partial", "unavailable", "failed"]
+        },
+        "observed_at": { "$ref": "#/$defs/dateTime" },
+        "issues": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["code"],
+            "properties": {
+              "code": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]{2,63}$"
+              },
+              "scope": { "$ref": "#/$defs/shortText" },
+              "detail": { "$ref": "#/$defs/detailText" }
+            }
+          }
+        }
+      }
+    },
+    "policySource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["attribution_status", "type", "evidence"],
+      "properties": {
+        "attribution_status": { "enum": ["observed", "unknown"] },
+        "type": {
+          "enum": ["local_security_policy", "group_policy", "mobile_device_management", "unknown"]
+        },
+        "id": { "$ref": "#/$defs/identifier" },
+        "name": { "$ref": "#/$defs/shortText" },
+        "evidence": {
+          "enum": [
+            "local_security_authority",
+            "resultant_set_of_policy",
+            "group_policy_result",
+            "policy_csp",
+            "unknown"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "attribution_status": { "const": "observed" }
+            },
+            "required": ["attribution_status"]
+          },
+          "then": {
+            "properties": {
+              "type": {
+                "enum": ["local_security_policy", "group_policy", "mobile_device_management"]
+              },
+              "evidence": {
+                "enum": [
+                  "local_security_authority",
+                  "resultant_set_of_policy",
+                  "group_policy_result",
+                  "policy_csp"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "attribution_status": { "const": "unknown" }
+            },
+            "required": ["attribution_status"]
+          },
+          "then": {
+            "properties": {
+              "type": { "const": "unknown" },
+              "evidence": { "const": "unknown" }
+            },
+            "not": {
+              "anyOf": [{ "required": ["id"] }, { "required": ["name"] }]
+            }
+          }
+        }
+      ]
+    }
+  }
+}

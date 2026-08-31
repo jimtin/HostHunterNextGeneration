@@ -21,24 +21,46 @@ override this folder.
 - [Collection-run schema](schemas/collection-run.v1.schema.json) defines
   explicit mission activation.
 - [Producer-status schema](schemas/producer-status.v1.schema.json) defines the
-  authenticated compatibility/readiness receipt.
+  authenticated compatibility/readiness receipt and its optional registered
+  forensic-schema capability list.
 - [Host-details schema](schemas/host-details-observation.v1.schema.json) defines
   one immutable Phase 1 endpoint observation.
-- [Process lifecycle schema](schemas/process-lifecycle-event.v1.schema.json)
-  defines one immutable Phase 2 process start or stop event.
+- [Forensic event envelope](schemas/forensic-event-envelope.v1.schema.json)
+  defines the common immutable forensic-event fields.
+- [Process-start schema](schemas/process-start.v1.schema.json) defines the first
+  registered event type: normalized Windows Security Event 4688 versions 0-2.
+- [Process-end schema](schemas/process-end.v1.schema.json) defines normalized
+  Windows Security Event 4689 version 0.
+- [Windows authentication and privilege records](windows-authentication-and-privilege-records-v1.md)
+  defines the canonical Security 4624, 4625, 4634, 4647, 4648, and 4672
+  mappings, primary process-token privileges, and policy-effective user rights
+  with assignment and transitive membership provenance.
+- Authentication schemas define successful logon, failed logon, session end,
+  user-initiated logoff, explicit credential use, and special-privilege events.
+- [Primary process access-token schema](schemas/process-access-token.v1.schema.json)
+  defines point-in-time primary-token privilege state.
+- [Effective user-rights schema](schemas/user-effective-rights.v1.schema.json)
+  defines target-host effective assignments, origin principals, membership
+  paths, deny precedence, and observed or explicitly unknown policy sources.
+- [Windows event collection receipt](schemas/windows-event-collection-receipt.v1.schema.json)
+  defines bounded cmdlet outcomes, cursor continuity, and explicit source gaps.
+- [HostHunter forensic producer contract](hosthunter-forensic-event-producer-v1.md)
+  defines the producer-side decoding and canonicalization obligation.
 - [Producer OpenAPI](openapi/host-details-ingest.v1.openapi.yaml) defines the
   currently frozen Phase 1 status, mission, and host-observation HTTP behavior.
 - [Complete Windows example](examples/windows-complete.v1.json) and
   [partial Linux example](examples/linux-partial.v1.json) are synthetic Phase 1
   fixtures.
-- [Process-start example](examples/process-start.v1.json) and
-  [process-stop example](examples/process-stop.v1.json) are synthetic Phase 2
-  structure examples; they do not claim that Phase 2 ingestion is implemented.
+- Process-start examples for Security Event 4688 versions 0, 1, and 2 and the
+  process-end example for Security Event 4689 version 0 are synthetic
+  normalized Phase 2 fixtures.
+- Authentication and privilege examples are synthetic specification fixtures
+  for each canonical record and every supported 4624 source version.
 
-The Phase 2 process event route is specified in
-`collected-data-structures-v1.md` but must not be described as implemented
-until its OpenAPI operation, receipts, migrations, producer delivery, golden
-fixtures, and tests are accepted together.
+All ten named forensic schemas are registered for validation and immutable
+storage through the single Phase 2 event route. `process.start` additionally
+has its established projection and browser read model; the other records remain
+complete canonical evidence until specialized bounded read models are added.
 
 ## Authority Order
 
@@ -59,10 +81,26 @@ Any disagreement is a blocking contract defect.
 - A restart does not create a mission.
 - A new mission requires explicit operator choice.
 - Stopping visualization pauses publishing and preserves the mission.
-- Process start/stop data is a narrow named contract, not arbitrary log ingest.
+- All forensic information uses one event route with registered named schemas;
+  it is not arbitrary JSON or raw-log ingest.
 - PID alone is not a stable process identity.
-- Missing process stops remain open; unmatched stops remain unmatched.
+- `host.boot.id` and HostHunter-backed `process.entity_id` are the preferred
+  correlation identifiers whenever HostHunter can populate them.
+- Missing correlation identifiers never justify an exact link; every derived
+  relationship is classified as exact, derived, ambiguous, or unresolved.
+- The removed legacy `process-lifecycle-event` schema is non-canonical. Its
+  mixed lifecycle shapes are superseded by the separate canonical
+  `process.start/1.0.0` and `process.end/1.0.0` records.
+- A process-end PID alone is not correlated to a process start. HostHunter may
+  reuse `process.entity_id` only when it has verified the process instance.
 - Process events never populate or alter host membership.
+- A user-right assignment never proves that a process token contains or has
+  enabled that privilege.
+- Unknown policy origin is displayed as unknown and is never guessed.
+- Forensic `event.id` uses the fixed UUIDv5 source-identity algorithm; request
+  integrity uses exact-byte `content_sha256`, not recursive `event.hash`.
+- Complete collected process command lines are retained as accepted sensitive
+  evidence. Dedicated credential fields remain prohibited.
 
 ## Change Control
 

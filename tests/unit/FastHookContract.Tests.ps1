@@ -8,9 +8,12 @@ $script:prePushHook = Get-Content (Join-Path $script:fastHookRepoRoot '.githooks
 $script:preCommit = Get-Content (Join-Path $script:fastHookRepoRoot 'scripts/precommit.sh') -Raw
 $script:prePush = Get-Content (Join-Path $script:fastHookRepoRoot 'scripts/prepush.sh') -Raw
 $script:cmdlets = Get-Content (Join-Path $script:fastHookRepoRoot 'scripts/verify-cmdlets.sh') -Raw
-$script:cmdletCompose = Get-Content (Join-Path $script:fastHookRepoRoot 'compose.cmdlets.yml') -Raw
+$script:cmdletCompose = Get-Content (
+    Join-Path $script:fastHookRepoRoot 'compose.cmdlets.yml') -Raw
 $script:journey = Get-Content (
     Join-Path $script:fastHookRepoRoot 'tests/e2e/TargetAndCommandJourneys.Tests.ps1') -Raw
+$script:journeySupport = Get-Content (
+    Join-Path $script:fastHookRepoRoot 'tests/e2e/HHCmdletVerifierSupport.ps1') -Raw
 
 Describe 'fast hook and cmdlet test contract' -Tag Unit {
     It 'gives pre-commit one 45-second root timeout and no broad test lane' {
@@ -55,16 +58,28 @@ Describe 'fast hook and cmdlet test contract' -Tag Unit {
             Should -Be 1
     }
 
-    It 'gives the non-root verifier write access only through the host artifact group' {
-        $cmdletCompose | Should -Match 'user:\s*"10001:10001"'
-        $cmdletCompose | Should -Match 'group_add:[\s\S]{0,100}\$\{HH_HOST_GID:-1000\}'
-        $cmdletCompose | Should -Match '\$\{HH_CMDLET_ARTIFACT_ROOT:\?[^}]+\}:/artifacts'
+    It 'prepares a host-group-writable receipt directory for the unprivileged verifier' {
+        $cmdlets | Should -Match 'scripts/lib/prepare-artifacts\.sh'
+        $cmdlets | Should -Match 'HH_FIXTURE_SECRET_GID=10002'
+        $cmdlets | Should -Match 'HH_HOST_ARTIFACT_GID="\$\(id -g\)"'
+        $cmdlets | Should -Match 'chmod 2770 "\$\{artifact_root\}" "\$\{artifact_root\}/cmdlets"'
+        $cmdletCompose | Should -Match '\$\{HH_FIXTURE_SECRET_GID:\?HH_FIXTURE_SECRET_GID is required\}'
+        $cmdletCompose | Should -Match '\$\{HH_HOST_ARTIFACT_GID:\?HH_HOST_ARTIFACT_GID is required\}'
+    }
+
+    It 'preserves each development receipt by source fingerprint and run ID' {
+        $cmdlets | Should -Match '\.artifacts/cmdlets/\$\{source_fingerprint\}/\$\{run_id\}'
+        $cmdlets | Should -Match 'HH_CMDLET_RUN_ID'
+        $cmdlets | Should -Match 'sourceFingerprint'
+        $cmdlets | Should -Not -Match '(?m)rowCount:\s*17|rowCount == 17|17-cmdlet'
     }
 
     It 'derives expected commands from the packaged manifest and fails additions closed' {
-        $journey | Should -Match 'Import-PowerShellDataFile -LiteralPath \$modulePath'
-        $journey | Should -Match '\$moduleManifest\.FunctionsToExport \| Sort-Object -Unique'
-        $journey | Should -Match 'Compare-Object -ReferenceObject \$expectedCommands'
+        $journeySupport | Should -Match 'Import-PowerShellDataFile -LiteralPath \$manifestPath'
+        $journeySupport | Should -Match '\$manifest\.FunctionsToExport'
+        $journeySupport | Should -Match 'Compare-Object -ReferenceObject \$expectedCommands'
         $journey | Should -Match '\$rows\.Count -eq \$expectedCommands\.Count'
+        $cmdlets | Should -Match 'expected_commands_json'
+        $cmdlets | Should -Not -Match 'expectedCommands:\s*\['
     }
 }

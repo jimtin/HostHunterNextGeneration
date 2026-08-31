@@ -227,8 +227,9 @@ jq -e --arg sha "$candidate_sha" --arg image "$image_id" '
   .noAutomaticRetries==true and .policyRestored==true and
   .authenticationMode=="existing-public-key" and .operatorStateCloned==true and
   .cloneMissionPaused==true and .windowsAuditEventVerified==true and
-  (.rows|length)==12 and
-  ([.rows[].cmdlet]|unique|length)==12 and ([.rows[].status]|unique)==["passed"]
+  (.rows|length)==(.expectedCommands|length) and
+  ([.rows[].cmdlet]|unique|length)==(.expectedCommands|length) and
+  ([.rows[].status]|unique)==["passed"]
 ' "$receipt.tmp" >/dev/null
 chmod 0400 "$receipt.tmp"
 mv -- "$receipt.tmp" "$receipt"

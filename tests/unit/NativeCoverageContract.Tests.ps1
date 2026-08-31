@@ -46,6 +46,16 @@ Describe 'fast unit and native coverage contract' -Tag Unit {
         $coverageRunner | Should -Not -Match 'Tag\s*=.*Integration|HH_SSH|Invoke-HHManagedHostOperation'
     }
 
+    It 'assigns only the remote Windows bodies to positive Windows qualification' {
+        $coverageRunner | Should -Match 'Test-HHIntegrationOwnedCoveragePoint'
+        $coverageRunner | Should -Match '\$line -ge 21 -and \$line -le 67'
+        $coverageRunner | Should -Match '\$line -ge 85 -and \$line -le 335'
+        $coverageRunner | Should -Match '\$line -ge 353 -and \$line -le 482'
+        $coverageRunner | Should -Match "owner = 'positive-windows-qualification'"
+        $coverageRunner | Should -Match 'commandCount = \$integrationOwnedPointCount'
+        $coverageRunner | Should -Match 'selected no commands'
+    }
+
     It 'has separate smoke and coverage modes with fail-closed terminal receipts' {
         $unitLane | Should -Match 'mode="\$\{1:-smoke\}"'
         $unitLane | Should -Match 'Invoke-HHUnitSmoke\.ps1'

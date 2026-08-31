@@ -90,6 +90,7 @@ FROM runtime-base AS package-builder
 COPY --from=sqlite-dependencies /out /opt/hosthunter-sqlite
 COPY --from=durability-helper /out/HostHunter.Persistence.Durability.dll /opt/hosthunter-durability/HostHunter.Persistence.Durability.dll
 COPY src/HostHunterNextGeneration /build/src/HostHunterNextGeneration
+COPY CIM_Specification/schemas /build/src/HostHunterNextGeneration/Private/Schemas
 COPY eng/sqlite /build/eng/sqlite
 COPY scripts/build/Test-HHModulePackage.ps1 /build/scripts/Test-HHModulePackage.ps1
 RUN pwsh -NoLogo -NoProfile -NonInteractive -File /build/scripts/Test-HHModulePackage.ps1 \

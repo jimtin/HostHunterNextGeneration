@@ -1,0 +1,58 @@
+{
+  "@timestamp": "2026-08-29T04:13:05.125Z",
+  "ecs": { "version": "9.5.0" },
+  "event": {
+    "id": "16462ffd-2d14-5f17-9230-cc272db3c8cd",
+    "kind": "event",
+    "category": ["process"],
+    "type": ["end"],
+    "action": "process-ended",
+    "dataset": "hosthunter.process_end",
+    "module": "hosthunter",
+    "provider": "HostHunter",
+    "created": "2026-08-29T04:13:07.000Z"
+  },
+  "agent": {
+    "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "name": "hosthunter-controller",
+    "type": "hosthunter",
+    "version": "0.7.0"
+  },
+  "host": {
+    "id": "hh_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "hostname": "WIN-CLIENT-01",
+    "name": "win-client-01.lab.example",
+    "boot": { "id": "40000000-0000-4000-8000-000000000001" }
+  },
+  "process": {
+    "pid": 700,
+    "entity_id": "hhproc_v1_0372bdd4ad9bb44cb95b5b7cd430f35095082bb61099088a54da6ab6dfcbbd21",
+    "name": "rundll32.exe",
+    "executable": "C:\\Windows\\System32\\rundll32.exe",
+    "end": "2026-08-29T04:13:05.125Z",
+    "exit_code": 0
+  },
+  "user": {
+    "id": "S-1-5-18",
+    "name": "SYSTEM",
+    "domain": "NT AUTHORITY",
+    "logon_id": "999"
+  },
+  "hosthunter": {
+    "schema": { "name": "process.end", "version": "1.0.0" },
+    "collection_run": { "id": "22222222-2222-4222-8222-222222222222" },
+    "source": {
+      "provider": "Microsoft-Windows-Security-Auditing",
+      "channel": "Security",
+      "event_code": "4689",
+      "event_version": 0,
+      "record_id": "2815",
+      "computer": "WIN-CLIENT-01.lab.example"
+    },
+    "provenance": {
+      "transport": "powershell7_over_ssh",
+      "collected_at": "2026-08-29T04:13:07.000Z",
+      "normalizer": { "name": "HostHunter.Security4689", "version": "1.0.0" }
+    }
+  }
+}

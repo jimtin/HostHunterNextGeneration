@@ -1,0 +1,333 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hosthunter.dev/schemas/user-effective-rights.v1.schema.json",
+  "title": "HostHunter canonical target-host effective user-rights observation v1",
+  "allOf": [
+    { "$ref": "forensic-event-envelope.v1.schema.json" },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["@timestamp", "ecs", "event", "agent", "host", "user", "hosthunter"],
+      "properties": {
+        "@timestamp": true,
+        "ecs": true,
+        "event": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["outcome"],
+          "properties": {
+            "id": true,
+            "kind": { "const": "state" },
+            "category": { "const": ["iam"] },
+            "type": { "const": ["info"] },
+            "action": { "const": "user-effective-rights-observed" },
+            "dataset": { "const": "hosthunter.user_effective_rights" },
+            "module": true,
+            "provider": true,
+            "created": true,
+            "outcome": { "enum": ["success", "failure", "unknown"] }
+          }
+        },
+        "agent": true,
+        "host": true,
+        "user": { "$ref": "authentication-common.v1.schema.json#/$defs/principal" },
+        "hosthunter": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schema", "collection_run", "source", "user_rights", "provenance"],
+          "properties": {
+            "schema": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "version"],
+              "properties": {
+                "name": { "const": "user.effective-rights" },
+                "version": { "const": "1.0.0" }
+              }
+            },
+            "collection_run": true,
+            "source": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "provider",
+                "channel",
+                "event_code",
+                "event_version",
+                "record_id",
+                "computer"
+              ],
+              "properties": {
+                "provider": { "const": "HostHunter" },
+                "channel": { "const": "EffectiveUserRights" },
+                "event_code": { "const": "target-host-policy" },
+                "event_version": { "const": 1 },
+                "record_id": { "$ref": "authentication-common.v1.schema.json#/$defs/identifier" },
+                "computer": { "$ref": "authentication-common.v1.schema.json#/$defs/shortText" }
+              }
+            },
+            "user_rights": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["observation", "evaluation"],
+              "properties": {
+                "observation": {
+                  "$ref": "authentication-common.v1.schema.json#/$defs/observation"
+                },
+                "evaluation": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "scope",
+                    "membership_resolution",
+                    "assignment_resolution",
+                    "policy_source_resolution"
+                  ],
+                  "properties": {
+                    "scope": { "const": "target_host_effective_policy" },
+                    "membership_resolution": { "enum": ["complete", "partial", "failed"] },
+                    "assignment_resolution": { "enum": ["complete", "partial", "failed"] },
+                    "policy_source_resolution": {
+                      "enum": ["complete", "partial", "unavailable", "not_collected"]
+                    }
+                  }
+                },
+                "rights": {
+                  "type": "array",
+                  "maxItems": 512,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["name", "kind", "effect", "state", "origins"],
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "pattern": "^Se[A-Za-z0-9]+(?:Privilege|Right)$"
+                      },
+                      "kind": { "enum": ["privilege", "logon_right"] },
+                      "effect": { "enum": ["grant", "allow", "deny"] },
+                      "state": { "enum": ["effective", "overridden"] },
+                      "origins": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 64,
+                        "items": {
+                          "type": "object",
+                          "additionalProperties": false,
+                          "required": ["assigned_to", "relationship", "policy_source"],
+                          "properties": {
+                            "assigned_to": {
+                              "$ref": "authentication-common.v1.schema.json#/$defs/principalReference"
+                            },
+                            "relationship": { "enum": ["direct", "group_membership"] },
+                            "membership_path": {
+                              "type": "array",
+                              "minItems": 2,
+                              "maxItems": 32,
+                              "items": {
+                                "$ref": "authentication-common.v1.schema.json#/$defs/principalReference"
+                              }
+                            },
+                            "policy_source": {
+                              "$ref": "authentication-common.v1.schema.json#/$defs/policySource"
+                            }
+                          },
+                          "allOf": [
+                            {
+                              "if": {
+                                "properties": { "relationship": { "const": "direct" } },
+                                "required": ["relationship"]
+                              },
+                              "then": { "not": { "required": ["membership_path"] } }
+                            },
+                            {
+                              "if": {
+                                "properties": {
+                                  "relationship": { "const": "group_membership" }
+                                },
+                                "required": ["relationship"]
+                              },
+                              "then": { "required": ["membership_path"] }
+                            }
+                          ]
+                        }
+                      },
+                      "overridden_by": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 16,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "pattern": "^SeDeny[A-Za-z0-9]+Right$"
+                        }
+                      }
+                    },
+                    "allOf": [
+                      {
+                        "if": {
+                          "properties": { "kind": { "const": "privilege" } },
+                          "required": ["kind"]
+                        },
+                        "then": {
+                          "properties": {
+                            "effect": { "const": "grant" },
+                            "state": { "const": "effective" }
+                          },
+                          "not": { "required": ["overridden_by"] }
+                        }
+                      },
+                      {
+                        "if": {
+                          "properties": { "effect": { "const": "deny" } },
+                          "required": ["effect"]
+                        },
+                        "then": {
+                          "properties": { "state": { "const": "effective" } },
+                          "not": { "required": ["overridden_by"] }
+                        }
+                      },
+                      {
+                        "if": {
+                          "properties": { "state": { "const": "overridden" } },
+                          "required": ["state"]
+                        },
+                        "then": {
+                          "required": ["overridden_by"],
+                          "properties": {
+                            "kind": { "const": "logon_right" },
+                            "effect": { "const": "allow" }
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "provenance": true
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "hosthunter": {
+                "properties": {
+                  "user_rights": {
+                    "properties": {
+                      "observation": {
+                        "properties": { "status": { "const": "complete" } },
+                        "required": ["status"]
+                      }
+                    },
+                    "required": ["observation"]
+                  }
+                },
+                "required": ["user_rights"]
+              }
+            },
+            "required": ["hosthunter"]
+          },
+          "then": {
+            "properties": {
+              "user": { "required": ["id"] },
+              "event": { "properties": { "outcome": { "const": "success" } } },
+              "hosthunter": {
+                "properties": {
+                  "user_rights": {
+                    "required": ["rights"],
+                    "properties": {
+                      "evaluation": {
+                        "properties": {
+                          "membership_resolution": { "const": "complete" },
+                          "assignment_resolution": { "const": "complete" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "hosthunter": {
+                "properties": {
+                  "user_rights": {
+                    "properties": {
+                      "observation": {
+                        "properties": { "status": { "const": "partial" } },
+                        "required": ["status"]
+                      }
+                    },
+                    "required": ["observation"]
+                  }
+                },
+                "required": ["user_rights"]
+              }
+            },
+            "required": ["hosthunter"]
+          },
+          "then": {
+            "properties": {
+              "user": { "required": ["id"] },
+              "event": { "properties": { "outcome": { "const": "unknown" } } },
+              "hosthunter": {
+                "properties": {
+                  "user_rights": {
+                    "required": ["rights"],
+                    "properties": {
+                      "observation": { "required": ["issues"] }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "hosthunter": {
+                "properties": {
+                  "user_rights": {
+                    "properties": {
+                      "observation": {
+                        "properties": {
+                          "status": { "enum": ["unavailable", "failed"] }
+                        },
+                        "required": ["status"]
+                      }
+                    },
+                    "required": ["observation"]
+                  }
+                },
+                "required": ["user_rights"]
+              }
+            },
+            "required": ["hosthunter"]
+          },
+          "then": {
+            "properties": {
+              "event": { "properties": { "outcome": { "const": "failure" } } },
+              "hosthunter": {
+                "properties": {
+                  "user_rights": {
+                    "properties": {
+                      "observation": { "required": ["issues"] }
+                    },
+                    "not": { "required": ["rights"] }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

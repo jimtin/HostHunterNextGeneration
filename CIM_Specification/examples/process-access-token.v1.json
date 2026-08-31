@@ -1,0 +1,85 @@
+{
+  "@timestamp": "2026-08-29T05:32:00.000Z",
+  "ecs": { "version": "9.5.0" },
+  "event": {
+    "id": "541a964e-ba2f-58e9-8efe-92e121ee00ca",
+    "kind": "state",
+    "category": ["process", "iam"],
+    "type": ["info"],
+    "action": "primary-process-token-observed",
+    "dataset": "hosthunter.process_access_token",
+    "module": "hosthunter",
+    "provider": "HostHunter",
+    "created": "2026-08-29T05:32:01.000Z",
+    "outcome": "success"
+  },
+  "agent": {
+    "id": "88888888-8888-4888-8888-888888888888",
+    "name": "hosthunter-controller",
+    "type": "hosthunter",
+    "version": "0.7.0"
+  },
+  "host": {
+    "id": "hh_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "hostname": "LAB-WS01",
+    "boot": { "id": "40000000-0000-4000-8000-000000000001" }
+  },
+  "process": {
+    "pid": 3020,
+    "entity_id": "hhproc_v1_51ea72c54a97b85988e50ab84c5ddfb6986a8c5cd117e897427e82e488c8a538",
+    "name": "runas.exe",
+    "executable": "C:\\Windows\\System32\\runas.exe",
+    "start": "2026-08-29T05:29:50.000Z"
+  },
+  "user": {
+    "id": "S-1-5-21-1000-1000-1000-1101",
+    "name": "alice",
+    "domain": "LAB",
+    "logon_id": "4872960"
+  },
+  "hosthunter": {
+    "schema": { "name": "process.access-token", "version": "1.0.0" },
+    "collection_run": { "id": "77777777-7777-4777-8777-777777777777" },
+    "source": {
+      "provider": "Microsoft Windows API",
+      "channel": "AccessToken",
+      "event_code": "primary-process-token",
+      "event_version": 1,
+      "record_id": "LAB-WS01:3020:2026-08-29T05:32:00.000Z",
+      "computer": "LAB-WS01"
+    },
+    "process_token": {
+      "observation": {
+        "status": "complete",
+        "observed_at": "2026-08-29T05:32:00.000Z"
+      },
+      "token": {
+        "type": "primary",
+        "id": "112233445566",
+        "authentication_id": "4872960",
+        "modified_id": "112233445570"
+      },
+      "privileges": [
+        {
+          "name": "SeChangeNotifyPrivilege",
+          "enabled": true,
+          "enabled_by_default": true,
+          "removed": false,
+          "used_for_access": true
+        },
+        {
+          "name": "SeDebugPrivilege",
+          "enabled": false,
+          "enabled_by_default": false,
+          "removed": false,
+          "used_for_access": false
+        }
+      ]
+    },
+    "provenance": {
+      "transport": "powershell7_over_ssh",
+      "collected_at": "2026-08-29T05:32:01.000Z",
+      "normalizer": { "name": "HostHunter.PrimaryToken", "version": "1.0.0" }
+    }
+  }
+}

@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hosthunter.dev/schemas/authentication-logon-failure.v1.schema.json",
+  "title": "HostHunter canonical authentication logon failure v1",
+  "allOf": [
+    { "$ref": "forensic-event-envelope.v1.schema.json" },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["@timestamp", "ecs", "event", "agent", "host", "user", "hosthunter"],
+      "properties": {
+        "@timestamp": true,
+        "ecs": true,
+        "event": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["outcome"],
+          "properties": {
+            "id": true,
+            "kind": { "const": "event" },
+            "category": { "const": ["authentication"] },
+            "type": { "const": ["start"] },
+            "action": { "const": "user-logon-failed" },
+            "dataset": { "const": "hosthunter.authentication_attempt" },
+            "module": true,
+            "provider": true,
+            "created": true,
+            "outcome": { "const": "failure" }
+          }
+        },
+        "agent": true,
+        "host": true,
+        "user": {
+          "allOf": [
+            { "$ref": "authentication-common.v1.schema.json#/$defs/userWithTarget" },
+            { "required": ["target"] }
+          ]
+        },
+        "source": { "$ref": "authentication-common.v1.schema.json#/$defs/networkEndpoint" },
+        "process": { "$ref": "authentication-common.v1.schema.json#/$defs/process" },
+        "hosthunter": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "schema",
+            "collection_run",
+            "source",
+            "authentication",
+            "failure",
+            "provenance"
+          ],
+          "properties": {
+            "schema": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "version"],
+              "properties": {
+                "name": { "const": "authentication.logon.failure" },
+                "version": { "const": "1.0.0" }
+              }
+            },
+            "collection_run": true,
+            "source": {
+              "allOf": [
+                { "$ref": "authentication-common.v1.schema.json#/$defs/securityEventSource" },
+                {
+                  "properties": {
+                    "event_code": { "const": "4625" },
+                    "event_version": { "const": 0 }
+                  }
+                }
+              ]
+            },
+            "authentication": {
+              "allOf": [
+                { "$ref": "authentication-common.v1.schema.json#/$defs/authenticationContext" },
+                {
+                  "required": [
+                    "logon_type",
+                    "logon_process",
+                    "authentication_package",
+                    "key_length_bits"
+                  ]
+                }
+              ]
+            },
+            "failure": {
+              "$ref": "authentication-common.v1.schema.json#/$defs/authenticationFailure"
+            },
+            "provenance": true
+          }
+        }
+      }
+    }
+  ]
+}

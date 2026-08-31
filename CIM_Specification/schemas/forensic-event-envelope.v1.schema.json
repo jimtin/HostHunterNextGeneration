@@ -1,0 +1,145 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://hosthunter.dev/schemas/forensic-event-envelope.v1.schema.json",
+  "title": "HostHunter canonical forensic event envelope v1",
+  "type": "object",
+  "required": ["@timestamp", "ecs", "event", "agent", "host", "hosthunter"],
+  "properties": {
+    "@timestamp": { "$ref": "#/$defs/dateTime" },
+    "ecs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version"],
+      "properties": { "version": { "const": "9.5.0" } }
+    },
+    "event": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "category",
+        "type",
+        "action",
+        "dataset",
+        "module",
+        "provider",
+        "created"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "kind": { "enum": ["event", "state"] },
+        "category": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/shortText" }
+        },
+        "type": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 4,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/shortText" }
+        },
+        "action": { "$ref": "#/$defs/shortText" },
+        "dataset": { "$ref": "#/$defs/shortText" },
+        "module": { "const": "hosthunter" },
+        "provider": { "const": "HostHunter" },
+        "created": { "$ref": "#/$defs/dateTime" },
+        "outcome": { "enum": ["success", "failure", "unknown"] }
+      }
+    },
+    "agent": {
+      "type": "object",
+      "required": ["id", "name", "type", "version"],
+      "properties": {
+        "id": { "$ref": "#/$defs/uuid" },
+        "name": { "$ref": "#/$defs/shortText" },
+        "type": { "const": "hosthunter" },
+        "version": { "type": "string", "minLength": 1, "maxLength": 64 }
+      }
+    },
+    "host": {
+      "type": "object",
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^hh_[a-z2-7]{52}$" },
+        "hostname": { "$ref": "#/$defs/shortText" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "boot": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id"],
+          "properties": { "id": { "$ref": "#/$defs/identifier" } }
+        }
+      }
+    },
+    "hosthunter": {
+      "type": "object",
+      "required": ["schema", "collection_run", "source", "provenance"],
+      "properties": {
+        "schema": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "version"],
+          "properties": {
+            "name": { "type": "string", "pattern": "^[a-z][a-z0-9.-]{2,63}$" },
+            "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" }
+          }
+        },
+        "collection_run": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id"],
+          "properties": { "id": { "$ref": "#/$defs/uuid" } }
+        },
+        "source": {
+          "type": "object",
+          "required": [
+            "provider",
+            "channel",
+            "event_code",
+            "event_version",
+            "record_id",
+            "computer"
+          ],
+          "properties": {
+            "provider": { "$ref": "#/$defs/shortText" },
+            "channel": { "$ref": "#/$defs/shortText" },
+            "event_code": { "$ref": "#/$defs/shortText" },
+            "event_version": { "type": "integer", "minimum": 0, "maximum": 65535 },
+            "record_id": { "$ref": "#/$defs/identifier" },
+            "computer": { "$ref": "#/$defs/shortText" }
+          }
+        },
+        "provenance": {
+          "type": "object",
+          "required": ["transport", "collected_at", "normalizer"],
+          "properties": {
+            "transport": { "$ref": "#/$defs/shortText" },
+            "collected_at": { "$ref": "#/$defs/dateTime" },
+            "normalizer": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["name", "version"],
+              "properties": {
+                "name": { "$ref": "#/$defs/shortText" },
+                "version": { "type": "string", "minLength": 1, "maxLength": 64 }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "dateTime": { "type": "string", "format": "date-time" },
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "identifier": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "shortText": { "type": "string", "minLength": 1, "maxLength": 255 }
+  }
+}

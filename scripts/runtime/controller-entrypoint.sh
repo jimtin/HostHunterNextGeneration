@@ -4,7 +4,6 @@
 set -Eeuo pipefail
 
 readonly expected_provider='DockerVolume'
-readonly expected_exports=12
 readonly dispatcher='/opt/hosthunter/runtime/Invoke-HHCmdlet.ps1'
 readonly client_metadata='/opt/hosthunter/runtime/Get-HHClientCommandMetadata.ps1'
 readonly client_protocol='/opt/hosthunter/runtime/Invoke-HHClientProtocol.ps1'
@@ -53,11 +52,20 @@ done
 
 module_count="$(pwsh -NoLogo -NoProfile -NonInteractive -Command '
   $ErrorActionPreference = "Stop"
+  $manifest = Import-PowerShellDataFile -LiteralPath $env:HH_RUNTIME_MODULE_PATH
+  $declared = @($manifest.FunctionsToExport)
+  $expected = @($declared | Sort-Object -Unique)
+  if ($expected.Count -eq 0 -or $declared.Count -ne $expected.Count) {
+    throw "The packaged manifest command list is empty or ambiguous."
+  }
   Import-Module $env:HH_RUNTIME_MODULE_PATH -Force
-  @(Get-Command -Module HostHunterNextGeneration -CommandType Function).Count
+  $actual = @(Get-Command -Module HostHunterNextGeneration -CommandType Function |
+      Sort-Object Name | ForEach-Object Name)
+  if (@(Compare-Object -ReferenceObject $expected -DifferenceObject $actual).Count -ne 0) {
+    throw "Imported framework commands differ from the packaged manifest."
+  }
+  $actual.Count
 ')" || fail 'The packaged module could not be imported.'
-[[ "$module_count" == "$expected_exports" ]] ||
-  fail "The module exported $module_count commands; expected $expected_exports."
 
 case "${1:-serve}" in
   serve)

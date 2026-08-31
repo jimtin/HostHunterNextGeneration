@@ -13,6 +13,9 @@ x-verifier-environment: &verifier-environment
   HH_SSH_RUNTIME_DIR: /run/hosthunter-ssh-fixture
   HH_CMDLET_RECEIPT: /artifacts/cmdlets/receipt.json
   HH_SOURCE_SHA: ${HH_SOURCE_SHA:?HH_SOURCE_SHA is required}
+  HH_SOURCE_FINGERPRINT: ${HH_SOURCE_FINGERPRINT:?HH_SOURCE_FINGERPRINT is required}
+  HH_CMDLET_RUN_ID: ${HH_CMDLET_RUN_ID:?HH_CMDLET_RUN_ID is required}
+  HH_DIRTY_TREE: ${HH_DIRTY_TREE:?HH_DIRTY_TREE is required}
   HH_VERIFIER_IMAGE_ID: ${HH_VERIFIER_IMAGE_ID:?HH_VERIFIER_IMAGE_ID is required}
   HH_CMDLET_ASKPASS: /workspace/tests/fixtures/ssh/fixture-askpass.sh
 
@@ -31,8 +34,8 @@ services:
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
     group_add:
-      - "10002"
-      - "${HH_HOST_GID:-1000}"
+      - "${HH_FIXTURE_SECRET_GID:?HH_FIXTURE_SECRET_GID is required}"
+      - "${HH_HOST_ARTIFACT_GID:?HH_HOST_ARTIFACT_GID is required}"
     environment: *verifier-environment
     volumes:
       - data:/var/lib/hosthunter-data

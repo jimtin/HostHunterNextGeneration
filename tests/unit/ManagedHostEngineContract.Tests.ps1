@@ -18,7 +18,7 @@ Describe 'managed-host engine contract' -Tag Unit {
         $script:engineGuardPath = Join-Path $script:engineRepoRoot 'scripts/static/Test-HHManagedHostBoundary.ps1'
     }
 
-    It 'accepts the six closed operation values and rejects every other value' {
+    It 'accepts the eleven closed operation values and rejects every other value' {
         InModuleScope HostHunterNextGeneration {
             $command = Get-Command Invoke-HHManagedHostOperation
             $attribute = @($command.Parameters.Operation.Attributes | Where-Object {
@@ -27,7 +27,12 @@ Describe 'managed-host engine contract' -Tag Unit {
             $attribute.Count | Should -Be 1
             @($attribute[0].ValidValues | Sort-Object) | Should -Be @(
                 'EnableSshKeyAuthentication',
+                'GetAuthenticationEvents',
                 'GetHostDetails',
+                'GetProcessAccessToken',
+                'GetProcessEndEvents',
+                'GetProcessStartEvents',
+                'GetUserEffectiveRights',
                 'InvokeCommand',
                 'SetWindowsProcessAuditPolicy',
                 'TestTarget',
@@ -39,41 +44,54 @@ Describe 'managed-host engine contract' -Tag Unit {
         }
     }
 
-    It 'keeps the engine private and exports exactly twelve framework cmdlets' {
+    It 'keeps the engine private and exports exactly the manifest command surface' {
+        $manifest = Import-PowerShellDataFile -LiteralPath (
+            Join-Path $script:engineSourceRoot 'HostHunterNextGeneration.psd1'
+        )
+        $declared = @($manifest.FunctionsToExport | Sort-Object -Unique)
         $exported = @(Get-Command -Module HostHunterNextGeneration -CommandType Function |
                 Select-Object -ExpandProperty Name | Sort-Object)
-        $exported | Should -Be @(
-            'Enable-HHSshKeyAuthentication',
-            'Get-HHAuditOutput',
-            'Get-HHAuditRecord',
-            'Get-HHEscalationPreference',
-            'Get-HHTarget',
-            'Get-TargetHostDetails',
-            'Invoke-HHCommand',
-            'Remove-HHTarget',
-            'Set-HHEscalationPreference',
-            'Set-HHTarget',
-            'Set-HHWindowsProcessAuditPolicy',
-            'Test-HHTarget'
-        )
+        $exported | Should -Be $declared
         (Get-Command Get-HHTargets -Module HostHunterNextGeneration `
                 -CommandType Alias).Definition | Should -BeExactly Get-HHTarget
         Get-Command Invoke-HHManagedHostOperation -ErrorAction SilentlyContinue |
             Should -BeNullOrEmpty
     }
 
-    It 'routes all six public cmdlets through the sole boundary' {
+    It 'routes all eleven public cmdlets through the sole boundary' {
         $result = & $script:engineGuardPath -ModuleRoot $script:engineSourceRoot
         $result.Succeeded | Should -BeTrue
-        $result.ManagedHostCmdletCount | Should -Be 6
+        $result.ManagedHostCmdletCount | Should -Be 11
         @($result.Operations) | Should -Be @(
             'ValidateTarget',
             'TestTarget',
             'InvokeCommand',
             'GetHostDetails',
+            'GetProcessStartEvents',
+            'GetProcessEndEvents',
+            'GetAuthenticationEvents',
+            'GetProcessAccessToken',
+            'GetUserEffectiveRights',
             'EnableSshKeyAuthentication',
             'SetWindowsProcessAuditPolicy'
         )
+    }
+
+    It 'rejects invalid CIM collection input before crossing the boundary' {
+        InModuleScope HostHunterNextGeneration {
+            Mock Invoke-HHManagedHostOperation { throw 'must not reach engine' }
+            {
+                Get-TargetProcessAccessToken -ProcessName 'C:\Tools\pwsh.exe'
+            } | Should -Throw '*exact process basename*'
+            {
+                Get-TargetUserEffectiveRights -Identity '   '
+            } | Should -Throw '*cannot be blank*'
+            {
+                Get-TargetAuthenticationEvents `
+                    -Since '2026-08-29T02:00:00Z' -Until '2026-08-29T01:00:00Z'
+            } | Should -Throw '*greater than or equal*'
+            Should -Invoke Invoke-HHManagedHostOperation -Times 0 -Exactly
+        }
     }
 
     It 'delegates Set-HHTarget once as ValidateTarget' {
@@ -122,6 +140,102 @@ Describe 'managed-host engine contract' -Tag Unit {
                 $Operation -ceq 'InvokeCommand' -and
                 $Arguments.Command -ceq "'ok'" -and
                 $Arguments.Target -ceq 'alpha'
+            }
+        }
+    }
+
+    It 'delegates Get-TargetProcessEndEvents once with its bounded arguments' {
+        InModuleScope HostHunterNextGeneration {
+            Mock Invoke-HHManagedHostOperation { 'delegated' }
+            Get-TargetProcessEndEvents -Name alpha -First 25 |
+                Should -BeExactly delegated
+            Should -Invoke Invoke-HHManagedHostOperation -Times 1 -Exactly -ParameterFilter {
+                $Operation -ceq 'GetProcessEndEvents' -and
+                $Arguments.Name -ceq 'alpha' -and $Arguments.First -eq 25
+            }
+        }
+    }
+
+    It 'delegates the complete CIM public surface with operator filters intact' {
+        InModuleScope HostHunterNextGeneration {
+            Mock Invoke-HHManagedHostOperation { $Operation }
+            $since = [DateTimeOffset]'2026-08-31T00:00:00Z'
+            $until = [DateTimeOffset]'2026-08-31T01:00:00Z'
+
+            Get-TargetProcessStartEvents -Name alpha -Since $since -Until $until `
+                -First 20 -ThrottleLimit 2 -Reason reason -CaseId case |
+                Should -BeExactly GetProcessStartEvents
+            Get-TargetAuthenticationEvents -Name alpha -Since $since -Until $until `
+                -First 21 -ThrottleLimit 3 |
+                Should -BeExactly GetAuthenticationEvents
+            Get-TargetProcessAccessToken -Name alpha -ProcessId 10 -ThrottleLimit 4 |
+                Should -BeExactly GetProcessAccessToken
+            Get-TargetProcessAccessToken -Name alpha -ProcessName pwsh.exe |
+                Should -BeExactly GetProcessAccessToken
+            Get-TargetUserEffectiveRights -Name alpha -Identity 'LAB\alice' |
+                Should -BeExactly GetUserEffectiveRights
+
+            Should -Invoke Invoke-HHManagedHostOperation -Times 5 -Exactly
+            Should -Invoke Invoke-HHManagedHostOperation -Times 1 -Exactly -ParameterFilter {
+                $Operation -ceq 'GetProcessStartEvents' -and
+                $Arguments.Since -eq $since -and $Arguments.Until -eq $until -and
+                $Arguments.First -eq 20 -and $Arguments.ThrottleLimit -eq 2
+            }
+            Should -Invoke Invoke-HHManagedHostOperation -Times 1 -Exactly -ParameterFilter {
+                $Operation -ceq 'GetProcessAccessToken' -and
+                $Arguments.ProcessName -ceq 'pwsh.exe'
+            }
+            Should -Invoke Invoke-HHManagedHostOperation -Times 1 -Exactly -ParameterFilter {
+                $Operation -ceq 'GetUserEffectiveRights' -and
+                $Arguments.Identity -ceq 'LAB\alice'
+            }
+        }
+    }
+
+    It 'collects 4689 through the shared bounded Security-event operation and end cursor' {
+        InModuleScope HostHunterNextGeneration {
+            Mock Get-HHForensicCollectionContext {
+                [pscustomobject]@{
+                    Runtime=[pscustomobject]@{}
+                    Targets=@([pscustomobject]@{Name='alpha';HostName='alpha.example'})
+                    MissionId=[Guid]::NewGuid();PublishingEnabled=$false
+                    AgentId=[Guid]::NewGuid();AgentVersion='0.7.0'
+                }
+            }
+            Mock Assert-HHForensicVisualizerCapability {}
+            Mock Get-HHForensicCursorPosition {
+                [pscustomobject]@{
+                    Since=[DateTimeOffset]'2026-08-31T00:00:00Z'
+                    AfterRecordId=400L
+                }
+            }
+            Mock Get-HHWindowsSecurityEventsRemoteScriptBlock { { 'remote' } }
+            Mock Invoke-HHForensicRemoteCollection {
+                [pscustomobject]@{
+                    Succeeded=$true
+                    ForensicRaw=[pscustomobject]@{
+                        ObservedAtUtc=[DateTimeOffset]'2026-08-31T00:01:00Z'
+                        Records=@([pscustomobject]@{
+                                EventId=4689;Version=0;RecordId=401L
+                                TimeCreated=[DateTimeOffset]'2026-08-31T00:00:30Z'
+                                Data=[ordered]@{}
+                            })
+                    }
+                }
+            }
+            Mock Save-HHForensicTransportResult { $Cursor.SourceName }
+
+            Invoke-HHManagedHostGetProcessEndEventsOperation -Name alpha -First 25 |
+                Should -BeExactly windows.security.process-end
+            Should -Invoke Invoke-HHForensicRemoteCollection -Times 1 -Exactly -ParameterFilter {
+                $Operation -ceq 'GetProcessEndEvents' -and $RemoteArgumentList.Count -eq 2 -and
+                $RemoteArgumentList[0] -match 'EventID=4689' -and
+                $RemoteArgumentList[0] -match 'EventRecordID>400' -and
+                $RemoteArgumentList[1] -eq 25
+            }
+            Should -Invoke Save-HHForensicTransportResult -Times 1 -Exactly -ParameterFilter {
+                $Cursor.SourceName -ceq 'windows.security.process-end' -and
+                $Cursor.RecordId -ceq '401'
             }
         }
     }
@@ -180,6 +294,11 @@ Describe 'managed-host engine contract' -Tag Unit {
             Mock Invoke-HHManagedHostInvokeCommandOperation { 'command' }
             Mock Invoke-HHManagedHostEnableSshKeyAuthenticationOperation { 'key' }
             Mock Invoke-HHManagedHostSetWindowsProcessAuditPolicyOperation { 'policy' }
+            Mock Invoke-HHManagedHostGetProcessStartEventsOperation { 'process-start' }
+            Mock Invoke-HHManagedHostGetProcessEndEventsOperation { 'process-end' }
+            Mock Invoke-HHManagedHostGetAuthenticationEventsOperation { 'authentication' }
+            Mock Invoke-HHManagedHostGetProcessAccessTokenOperation { 'process-token' }
+            Mock Invoke-HHManagedHostGetUserEffectiveRightsOperation { 'effective-rights' }
 
             Invoke-HHManagedHostOperation -Operation ValidateTarget -Arguments @{
                 Name = 'alpha'
@@ -200,12 +319,28 @@ Describe 'managed-host engine contract' -Tag Unit {
                 State = 'Enabled'
                 WhatIf = $true
             } | Should -BeExactly policy
+            Invoke-HHManagedHostOperation -Operation GetProcessEndEvents -Arguments @{} |
+                Should -BeExactly process-end
+            Invoke-HHManagedHostOperation -Operation GetProcessStartEvents -Arguments @{} |
+                Should -BeExactly process-start
+            Invoke-HHManagedHostOperation -Operation GetAuthenticationEvents -Arguments @{} |
+                Should -BeExactly authentication
+            Invoke-HHManagedHostOperation -Operation GetProcessAccessToken -Arguments @{
+                ProcessId = @(10)
+            } | Should -BeExactly process-token
+            Invoke-HHManagedHostOperation -Operation GetUserEffectiveRights -Arguments @{} |
+                Should -BeExactly effective-rights
 
             Should -Invoke Invoke-HHManagedHostValidateTargetOperation -Times 1 -Exactly
             Should -Invoke Invoke-HHManagedHostTestTargetOperation -Times 1 -Exactly
             Should -Invoke Invoke-HHManagedHostInvokeCommandOperation -Times 1 -Exactly
             Should -Invoke Invoke-HHManagedHostEnableSshKeyAuthenticationOperation -Times 1 -Exactly
             Should -Invoke Invoke-HHManagedHostSetWindowsProcessAuditPolicyOperation -Times 1 -Exactly
+            Should -Invoke Invoke-HHManagedHostGetProcessStartEventsOperation -Times 1 -Exactly
+            Should -Invoke Invoke-HHManagedHostGetProcessEndEventsOperation -Times 1 -Exactly
+            Should -Invoke Invoke-HHManagedHostGetAuthenticationEventsOperation -Times 1 -Exactly
+            Should -Invoke Invoke-HHManagedHostGetProcessAccessTokenOperation -Times 1 -Exactly
+            Should -Invoke Invoke-HHManagedHostGetUserEffectiveRightsOperation -Times 1 -Exactly
         }
     }
 

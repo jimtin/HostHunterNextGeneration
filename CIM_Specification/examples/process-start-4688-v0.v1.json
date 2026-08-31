@@ -1,0 +1,52 @@
+{
+  "@timestamp": "2026-08-29T04:10:00.000Z",
+  "ecs": { "version": "9.5.0" },
+  "event": {
+    "id": "eb6c59b3-b54d-5e1c-8561-998e577d5679",
+    "kind": "event",
+    "category": ["process"],
+    "type": ["start"],
+    "action": "process-started",
+    "dataset": "hosthunter.process_start",
+    "module": "hosthunter",
+    "provider": "HostHunter",
+    "created": "2026-08-29T04:10:02.000Z"
+  },
+  "agent": {
+    "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "name": "hosthunter-controller",
+    "type": "hosthunter",
+    "version": "0.6.0"
+  },
+  "host": {
+    "id": "hh_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "hostname": "WIN-CLIENT-01",
+    "boot": { "id": "40000000-0000-4000-8000-000000000001" }
+  },
+  "process": {
+    "pid": 640,
+    "entity_id": "hhproc_v1_7fd66a0e3ab4b955dac77c40db6450f6220aa97b0647e9204e119370bcb481d4",
+    "name": "cmd.exe",
+    "executable": "C:\\Windows\\System32\\cmd.exe",
+    "token_elevation": "full",
+    "parent": { "pid": 512 }
+  },
+  "user": { "id": "S-1-5-18", "name": "SYSTEM", "domain": "NT AUTHORITY", "logon_id": "999" },
+  "hosthunter": {
+    "schema": { "name": "process.start", "version": "1.0.0" },
+    "collection_run": { "id": "22222222-2222-4222-8222-222222222222" },
+    "source": {
+      "provider": "Microsoft-Windows-Security-Auditing",
+      "channel": "Security",
+      "event_code": "4688",
+      "event_version": 0,
+      "record_id": "2812",
+      "computer": "WIN-CLIENT-01"
+    },
+    "provenance": {
+      "transport": "powershell7_over_ssh",
+      "collected_at": "2026-08-29T04:10:02.000Z",
+      "normalizer": { "name": "HostHunter.Security4688", "version": "1.0.0" }
+    }
+  }
+}

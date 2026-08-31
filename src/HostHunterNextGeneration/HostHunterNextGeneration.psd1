@@ -21,6 +21,11 @@
         'Set-HHEscalationPreference'
         'Get-HHEscalationPreference'
         'Get-TargetHostDetails'
+        'Get-TargetProcessStartEvents'
+        'Get-TargetProcessEndEvents'
+        'Get-TargetAuthenticationEvents'
+        'Get-TargetProcessAccessToken'
+        'Get-TargetUserEffectiveRights'
     )
     CmdletsToExport = @()
     VariablesToExport = @()

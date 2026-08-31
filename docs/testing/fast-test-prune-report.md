@@ -1,12 +1,12 @@
 # Fast Test Prune Report
 
-Status: implemented and focused-verified
+Status: implemented and development-verified; exact-SHA release proof pending
 
 ## Summary
 
 - Goal: replace overlapping broad test orchestration with one fast development
   stack and one once-per-SHA release stack.
-- Replacement path: focused tests, one unit smoke, one 12-cmdlet/SQLite journey,
+- Replacement path: focused tests, one unit smoke, one 17-cmdlet/SQLite journey,
   impact-selected native macOS proof, and independent release-only components.
 - Old path: custom AST branch coverage, duplicated hook builds/suites, broad SSH
   integration after cmdlet acceptance, and combined heavy receipts.
@@ -21,7 +21,7 @@ Status: implemented and focused-verified
 | --- | --- | --- | --- | --- | --- |
 | Focused unit iteration | `scripts/lanes/focused-unit.sh` | one test container/Pester selection | test runner | 44/44 in 2.28 seconds | none |
 | Ordinary unit verdict | `scripts/lanes/unit.sh smoke` | one Pester invocation | test runner | 672/672 in 21.48 seconds | none |
-| Cmdlet and SQLite verdict | `scripts/verify-cmdlets.sh` | production-derived verifier + SSH fixture | cmdlet runner | 12/12; SQLite integrity `ok` | exact-SHA reuse at release |
+| Cmdlet and SQLite verdict | `scripts/verify-cmdlets.sh` | production-derived verifier + SSH fixture | cmdlet runner | 17/17; schema v5; integrity `ok` | future clean exact-SHA release receipt |
 | Native coverage | `scripts/lanes/unit.sh coverage` | standard Pester profiler | release proof | collector contracts | future exact-SHA result |
 | Windows proof | `scripts/qualification/windows-cmdlets.sh` | saved-key exact-image journey | release gate | qualification contracts | future exact-SHA live result |
 | SQLite recovery | `scripts/lanes/sqlite-integration.sh` | focused fault tests | release proof | existing integration tests | one future exact-SHA result |
@@ -61,9 +61,14 @@ Status: implemented and focused-verified
   seconds.
 - macOS client synchronization: the normal import path rebuilt and replaced the
   stale controller once; no test runner performed a build.
-- Cmdlet/SQLite acceptance: 12 unique cmdlets passed on the first invocation;
-  SQLite integrity was `ok`, persisted state was read back in fresh processes,
-  and target cleanup retained audit history.
+- Cmdlet/SQLite acceptance: the previous 16-command journey passed. The first
+  replacement 17-command attempt exposed a missing receipt-directory group;
+  the next exposed replacement of the fixture-reader group. Both infrastructure
+  defects are fixed and contract-tested by retaining groups `10002` and the host
+  artifact GID. The repaired verifier was then invoked exactly once after its
+  focused readiness pass: all 17 rows passed against schema v5 with integrity
+  `ok`. Its development receipt is source-fingerprint and run-ID bound; it is
+  not an exact-SHA release receipt.
 - Threat-model report checker: passed.
 - Deleted-surface sweep: remaining custom-AST wording is documentation or an
   explicit negative assertion; no active executable entrypoint remains.

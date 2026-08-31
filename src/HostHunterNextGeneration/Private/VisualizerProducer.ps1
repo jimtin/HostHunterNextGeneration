@@ -1,5 +1,30 @@
 Set-StrictMode -Version Latest
 
+$script:HHForensicEventSchemas = @(
+    'process.start/1.0.0'
+    'process.end/1.0.0'
+    'authentication.session.start/1.0.0'
+    'authentication.logon.failure/1.0.0'
+    'authentication.session.end/1.0.0'
+    'authentication.session.logoff-initiated/1.0.0'
+    'authentication.explicit-credential-use/1.0.0'
+    'authentication.session.special-privileges/1.0.0'
+    'process.access-token/1.0.0'
+    'user.effective-rights/1.0.0'
+)
+$script:HHForensicEventSchemaKinds = @{
+    'process.start/1.0.0' = 'event'
+    'process.end/1.0.0' = 'event'
+    'authentication.session.start/1.0.0' = 'event'
+    'authentication.logon.failure/1.0.0' = 'event'
+    'authentication.session.end/1.0.0' = 'event'
+    'authentication.session.logoff-initiated/1.0.0' = 'event'
+    'authentication.explicit-credential-use/1.0.0' = 'event'
+    'authentication.session.special-privileges/1.0.0' = 'event'
+    'process.access-token/1.0.0' = 'state'
+    'user.effective-rights/1.0.0' = 'state'
+}
+
 function Get-HHVisualizerConnectionSettings {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
         'PSUseSingularNouns',
@@ -66,13 +91,29 @@ function Invoke-HHVisualizerStatus {
     $processSchemaProperty = if ($null -eq $status) { $null } else {
         $status.PSObject.Properties['process_event_schema_version']
     }
+    $forensicSchemaProperty = if ($null -eq $status) { $null } else {
+        $status.PSObject.Properties['registered_forensic_schemas']
+    }
     if ($null -eq $status -or [string]$status.status -cne 'ready' -or
         [string]$status.service -cne 'hosthunter-visualizer' -or
         [string]$status.api_version -cne '1.0.0' -or
         [string]$status.collection_run_schema_version -cne '1.0.0' -or
         [string]$status.host_observation_schema_version -cne '1.0.0' -or
-        $null -eq $processSchemaProperty -or $null -ne $processSchemaProperty.Value) {
+        $null -eq $processSchemaProperty -or
+        [string]$processSchemaProperty.Value -cne '1.0.0' -or
+        $null -eq $forensicSchemaProperty) {
         throw 'Visualizer producer status is incompatible with this HostHunter version.'
+    }
+    $advertised = @($forensicSchemaProperty.Value | ForEach-Object {
+            $key = "$([string]$_.name)/$([string]$_.version)"
+            if ($script:HHForensicEventSchemaKinds.ContainsKey($key) -and
+                [string]$_.kind -ceq [string]$script:HHForensicEventSchemaKinds[$key]) {
+                $key
+            }
+        } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $missing = @($script:HHForensicEventSchemas | Where-Object { $_ -cnotin $advertised })
+    if ($missing.Count -gt 0) {
+        throw "Visualizer producer status is missing forensic schema capability: $($missing -join ', ')."
     }
     $active = $null
     if ($null -ne $status.active_collection_run_id -and
@@ -87,7 +128,8 @@ function Invoke-HHVisualizerStatus {
         Status = 'ready'
         Service = 'hosthunter-visualizer'
         ApiVersion = '1.0.0'
-        ProcessEventSchemaVersion = $null
+        ProcessEventSchemaVersion = '1.0.0'
+        ForensicEventSchemas = $advertised
         ActiveMissionId = $active
     }
 }
@@ -171,5 +213,20 @@ function Send-HHVisualizerObservation {
     $eventIdText = $EventId.ToString('D').ToLowerInvariant()
     Invoke-HHVisualizerPut `
         -RelativePath "/api/v1/collection-runs/$mission/host-observations/$eventIdText" `
+        -PayloadBytes $PayloadBytes -RequestSender $RequestSender
+}
+
+function Send-HHVisualizerForensicEvent {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][Guid]$MissionId,
+        [Parameter(Mandatory)][Guid]$EventId,
+        [Parameter(Mandatory)][byte[]]$PayloadBytes,
+        [Alias('Sender')][scriptblock]$RequestSender
+    )
+    $mission = $MissionId.ToString('D').ToLowerInvariant()
+    $eventIdText = $EventId.ToString('D').ToLowerInvariant()
+    Invoke-HHVisualizerPut `
+        -RelativePath "/api/v1/collection-runs/$mission/events/$eventIdText" `
         -PayloadBytes $PayloadBytes -RequestSender $RequestSender
 }

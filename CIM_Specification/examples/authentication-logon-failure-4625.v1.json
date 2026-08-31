@@ -1,0 +1,72 @@
+{
+  "@timestamp": "2026-08-29T05:10:00.000Z",
+  "ecs": { "version": "9.5.0" },
+  "event": {
+    "id": "016cf981-4794-5473-9ae2-13d2e74af5f3",
+    "kind": "event",
+    "category": ["authentication"],
+    "type": ["start"],
+    "action": "user-logon-failed",
+    "dataset": "hosthunter.authentication_attempt",
+    "module": "hosthunter",
+    "provider": "HostHunter",
+    "created": "2026-08-29T05:10:02.000Z",
+    "outcome": "failure"
+  },
+  "agent": {
+    "id": "88888888-8888-4888-8888-888888888888",
+    "name": "hosthunter-controller",
+    "type": "hosthunter",
+    "version": "0.7.0"
+  },
+  "host": {
+    "id": "hh_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "hostname": "LAB-WS01",
+    "boot": { "id": "40000000-0000-4000-8000-000000000001" }
+  },
+  "user": {
+    "id": "S-1-5-18",
+    "name": "SYSTEM",
+    "domain": "NT AUTHORITY",
+    "logon_id": "999",
+    "target": { "name": "alice", "domain": "LAB" }
+  },
+  "source": { "address": "LAB-WS09", "ip": "192.0.2.90", "port": 60234 },
+  "process": {
+    "pid": 756,
+    "entity_id": "LAB-WS01:756:2026-08-29T04:59:51.000Z",
+    "name": "lsass.exe",
+    "executable": "C:\\Windows\\System32\\lsass.exe"
+  },
+  "hosthunter": {
+    "schema": { "name": "authentication.logon.failure", "version": "1.0.0" },
+    "collection_run": { "id": "77777777-7777-4777-8777-777777777777" },
+    "source": {
+      "provider": "Microsoft-Windows-Security-Auditing",
+      "channel": "Security",
+      "event_code": "4625",
+      "event_version": 0,
+      "record_id": "4200",
+      "computer": "LAB-WS01"
+    },
+    "authentication": {
+      "logon_type": { "id": 3, "name": "network" },
+      "logon_process": "NtLmSsp",
+      "authentication_package": "NTLM",
+      "ntlm_package": "NTLM V2",
+      "key_length_bits": 128
+    },
+    "failure": {
+      "status_code": 3221225581,
+      "status_name": "STATUS_LOGON_FAILURE",
+      "sub_status_code": 3221225578,
+      "sub_status_name": "STATUS_WRONG_PASSWORD",
+      "reason": "Unknown user name or bad password"
+    },
+    "provenance": {
+      "transport": "powershell7_over_ssh",
+      "collected_at": "2026-08-29T05:10:02.000Z",
+      "normalizer": { "name": "HostHunter.Security4625", "version": "1.0.0" }
+    }
+  }
+}

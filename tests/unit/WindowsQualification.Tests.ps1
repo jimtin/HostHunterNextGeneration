@@ -11,6 +11,9 @@ Describe 'Live Windows cmdlet qualification contract' -Tag Unit {
     It 'records exactly one row for every exported cmdlet' {
         foreach ($cmdlet in @(
                 'Get-HHTarget', 'Set-HHTarget', 'Get-TargetHostDetails',
+                'Get-TargetProcessStartEvents', 'Get-TargetProcessEndEvents',
+                'Get-TargetAuthenticationEvents', 'Get-TargetProcessAccessToken',
+                'Get-TargetUserEffectiveRights',
                 'Test-HHTarget', 'Invoke-HHCommand', 'Get-HHAuditRecord',
                 'Get-HHAuditOutput',
                 'Enable-HHSshKeyAuthentication', 'Set-HHWindowsProcessAuditPolicy',
@@ -28,6 +31,9 @@ Describe 'Live Windows cmdlet qualification contract' -Tag Unit {
         $script:source | Should -Match 'policyRestored = -not \$policyChanged'
         $script:source | Should -Match 'policyRestorationOutcome = \$policyRestorationOutcome'
         $script:source | Should -Match 'AuditBefore\.ProcessCreation'
+        $script:source | Should -Match 'AuditBefore\.ProcessTermination'
+        $script:source | Should -Match '-Subcategory ProcessCreation,ProcessTermination'
+        $script:source | Should -Match 'Get-TargetProcessEndEvents'
         $script:source | Should -Match '-band 1'
         $script:source | Should -Match "\) \{ 'Unchanged' \}"
         $script:source | Should -Match 'HostHunter\.WindowsProcessAuditEventProbe\.v1'

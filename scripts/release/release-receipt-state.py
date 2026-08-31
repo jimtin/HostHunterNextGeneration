@@ -183,6 +183,21 @@ def validate_coverage_source(value: dict[str, Any], claim_value: dict[str, Any],
         or source_hash != expected_source_hash
     ):
         raise ReceiptError("Coverage source hash does not match its ordered inventory")
+    integration_owned = coverage.get("integrationOwnedCoverage")
+    if not isinstance(integration_owned, dict) or set(integration_owned) != {
+        "path", "commandCount", "owner", "ranges"
+    }:
+        raise ReceiptError("Coverage integration ownership contract is missing or malformed")
+    if (
+        integration_owned.get("path")
+        != "src/HostHunterNextGeneration/Private/CimRemoteCollection.ps1"
+        or integration_owned.get("owner") != "positive-windows-qualification"
+        or integration_owned.get("ranges") != ["21-67", "85-335", "353-482"]
+        or not isinstance(integration_owned.get("commandCount"), int)
+        or isinstance(integration_owned.get("commandCount"), bool)
+        or integration_owned["commandCount"] <= 0
+    ):
+        raise ReceiptError("Coverage integration ownership contract changed")
 
 
 def discover_coverage_inventory(source_root: pathlib.Path) -> list[dict[str, str]]:
@@ -334,7 +349,7 @@ def record(args: argparse.Namespace) -> int:
                 coverage_allowed = {
                     "status", "minimum", "invocationCount", "testCount", "durationMs",
                     "candidateSha", "candidateTree", "sourceHash", "sourceFileCount",
-                    "sourceInventory", "metrics", "uncovered",
+                    "sourceInventory", "metrics", "integrationOwnedCoverage", "uncovered",
                 }
                 value["coverage"] = {
                     key: item for key, item in value["coverage"].items()

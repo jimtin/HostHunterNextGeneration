@@ -85,6 +85,31 @@ Describe 'SSH host trust' -Tag Unit {
         Should -Invoke Write-Host -Times 0 -Exactly
     }
 
+    It 'does not rescan an exact expected identity that is already pinned' {
+        [IO.File]::WriteAllText($script:knownHosts, "$script:scanLine`n")
+        Mock Invoke-HHNativeProcess { throw 'the pinned identity must not be rescanned' }
+
+        $trusted = Register-HHSshHostTrust -HostName 'example.test' -Port 22 `
+            -ExpectedFingerprint $script:fingerprint -KnownHostsPath $script:knownHosts `
+            -PassThru
+
+        $trusted.Line | Should -BeExactly $script:scanLine
+        $trusted.Fingerprint | Should -BeExactly $script:fingerprint
+        $trusted.NewlyTrusted | Should -BeFalse
+        Should -Invoke Invoke-HHNativeProcess -Times 0 -Exactly
+    }
+
+    It 'matches the OpenSSH host token for a pinned nonstandard port' {
+        $portLine = "[example.test]:2222 ssh-ed25519 $script:keyBase64"
+        [IO.File]::WriteAllText($script:knownHosts, "$portLine`n")
+        Mock Invoke-HHNativeProcess { throw 'the pinned identity must not be rescanned' }
+
+        Register-HHSshHostTrust -HostName 'example.test' -Port 2222 `
+            -ExpectedFingerprint $script:fingerprint -KnownHostsPath $script:knownHosts |
+            Should -BeExactly $portLine
+        Should -Invoke Invoke-HHNativeProcess -Times 0 -Exactly
+    }
+
     It 'preserves separate records when adding a second host to a one-line file' {
         Register-HHSshHostTrust -HostName 'example.test' -Port 22 `
             -ExpectedFingerprint $script:fingerprint -KnownHostsPath $script:knownHosts `

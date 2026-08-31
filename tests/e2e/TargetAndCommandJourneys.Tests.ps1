@@ -4,13 +4,15 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$modulePath = [IO.Path]::GetFullPath($env:HH_RUNTIME_MODULE_PATH)
-$moduleManifest = Import-PowerShellDataFile -LiteralPath $modulePath
-$expectedCommands = @($moduleManifest.FunctionsToExport | Sort-Object -Unique)
 $orderedJourney = @(
     'Get-HHTarget'
     'Set-HHTarget'
     'Get-TargetHostDetails'
+    'Get-TargetProcessStartEvents'
+    'Get-TargetProcessEndEvents'
+    'Get-TargetAuthenticationEvents'
+    'Get-TargetProcessAccessToken'
+    'Get-TargetUserEffectiveRights'
     'Test-HHTarget'
     'Invoke-HHCommand'
     'Get-HHAuditRecord'
@@ -21,22 +23,23 @@ $orderedJourney = @(
     'Get-HHEscalationPreference'
     'Remove-HHTarget'
 )
+$supportPath = Join-Path $PSScriptRoot 'HHCmdletVerifierSupport.ps1'
+. $supportPath
 $receiptPath = if ([string]::IsNullOrWhiteSpace($env:HH_CMDLET_RECEIPT)) {
     '/artifacts/cmdlets/receipt.json'
 }
 else { [IO.Path]::GetFullPath($env:HH_CMDLET_RECEIPT) }
-if (@(Compare-Object -ReferenceObject $expectedCommands `
-            -DifferenceObject @($orderedJourney | Sort-Object -Unique)).Count -ne 0) {
-    throw 'The cmdlet journey must contain exactly one handler for every exported function.'
-}
-$dataRoot = [IO.Path]::GetFullPath($env:HH_DATA_ROOT)
-$databasePath = Join-Path $dataRoot 'hosthunter.db'
-$runtimeDirectory = [IO.Path]::GetFullPath($env:HH_SSH_RUNTIME_DIR)
-$targetHost = $env:HH_SSH_HOST
-$targetPort = [int]$env:HH_SSH_PORT
-$userName = [IO.File]::ReadAllText((Join-Path $runtimeDirectory 'username')).Trim()
-$fingerprint = [IO.File]::ReadAllText((Join-Path $runtimeDirectory 'hostkey.sha256')).Trim()
 $rows = [Collections.Generic.List[object]]::new()
+$modulePath = $null
+$expectedCommands = @()
+$databasePath = $null
+$targetHost = $null
+$targetPort = 0
+$userName = $null
+$fingerprint = $null
+$migrationCount = 0
+$failurePhase = 'preflight'
+$terminalError = $null
 $script:commandResult = $null
 $script:auditCountBeforeRemoval = 0
 
@@ -46,7 +49,6 @@ $env:SSH_ASKPASS = if ([string]::IsNullOrWhiteSpace($env:HH_CMDLET_ASKPASS)) {
 }
 else { $env:HH_CMDLET_ASKPASS }
 $env:SSH_ASKPASS_REQUIRE = 'force'
-$env:HH_SSH_PASSWORD_FILE = Join-Path $runtimeDirectory 'password'
 
 function Assert-HHCondition {
     param(
@@ -192,39 +194,45 @@ function Assert-HHStepDatabaseContract {
                 'Get-TargetHostDetails did not persist one terminal invocation.'
             Assert-HHCondition ($delta.Observations -eq 0) 'Paused visualization unexpectedly queued one observation.'
         }
-        4 {
+        { $_ -in @(4, 5, 6, 7, 8) } {
+            foreach ($property in $delta.PSObject.Properties) {
+                Assert-HHCondition ([long]$property.Value -eq 0) `
+                    "Mission-precondition cmdlet changed database field '$($property.Name)'."
+            }
+        }
+        9 {
             Assert-HHCondition ($delta.TargetGeneration -eq 0) 'Test-HHTarget changed the target generation.'
             Assert-HHCondition ($delta.Invocations -eq 1 -and $delta.Outcomes -eq 1) `
                 'Test-HHTarget did not persist one terminal invocation.'
         }
-        5 {
+        10 {
             Assert-HHCondition ($delta.Invocations -eq 1 -and $delta.Outcomes -eq 1) `
                 'Invoke-HHCommand did not persist one terminal invocation.'
             Assert-HHCondition ($delta.Artifacts -eq 1) 'Invoke-HHCommand did not persist one output artifact.'
         }
-        { $_ -in @(6, 7, 11) } {
+        { $_ -in @(11, 12, 16) } {
             foreach ($property in $delta.PSObject.Properties) {
                 Assert-HHCondition ([long]$property.Value -eq 0) `
                     "Read-only cmdlet changed database field '$($property.Name)'."
             }
         }
-        8 {
+        13 {
             Assert-HHCondition ($delta.TargetGeneration -eq 1 -and $delta.TargetMutations -eq 1) `
                 'Enable-HHSshKeyAuthentication did not commit one target mutation.'
             Assert-HHCondition ($delta.Invocations -eq 1 -and $delta.Outcomes -eq 1) `
                 'Enable-HHSshKeyAuthentication did not persist one terminal invocation.'
         }
-        9 {
+        14 {
             Assert-HHCondition ($delta.Invocations -eq 1 -and $delta.Outcomes -eq 1) `
                 'Set-HHWindowsProcessAuditPolicy did not persist one terminal invocation.'
         }
-        10 {
+        15 {
             Assert-HHCondition ($delta.ConfigurationGeneration -eq 1) `
                 'Set-HHEscalationPreference generation delta was not one.'
             Assert-HHCondition ($delta.ConfigurationMutations -eq 1) `
                 'Set-HHEscalationPreference mutation delta was not one.'
         }
-        12 {
+        17 {
             Assert-HHCondition ($delta.Profiles -eq -1) 'Remove-HHTarget did not remove exactly one profile.'
             Assert-HHCondition ($delta.TargetGeneration -eq 1 -and $delta.TargetMutations -eq 1) `
                 'Remove-HHTarget did not commit one target mutation.'
@@ -279,17 +287,22 @@ function Invoke-HHCmdletStep {
 }
 
 try {
-    Import-Module $modulePath -Force
-    $actualCommands = @(Get-Command -Module HostHunterNextGeneration -CommandType Function |
-            Sort-Object Name | ForEach-Object Name)
-    Assert-HHCondition (($actualCommands -join "`n") -ceq ($expectedCommands -join "`n")) `
-        "Package exports differ from the exact twelve-command contract: $($actualCommands -join ', ')."
-    $unexpectedState = @(
-        Get-ChildItem -LiteralPath $dataRoot -Force -ErrorAction Stop |
-            Where-Object Name -cne 'keys'
-    )
-    Assert-HHCondition (-not [IO.File]::Exists($databasePath) -and $unexpectedState.Count -eq 0) `
-        'The verifier requires a fresh data volume; the separate SSH-key mount is allowed.'
+    $preflight = Invoke-HHCmdletVerifierPreflight `
+        -ModulePath $env:HH_RUNTIME_MODULE_PATH `
+        -OrderedJourney $orderedJourney `
+        -DataRoot $env:HH_DATA_ROOT `
+        -RuntimeDirectory $env:HH_SSH_RUNTIME_DIR `
+        -ReceiptPath $receiptPath
+    $modulePath = $preflight.ModulePath
+    $expectedCommands = @($preflight.ExpectedCommands)
+    $databasePath = $preflight.DatabasePath
+    $targetHost = $env:HH_SSH_HOST
+    $targetPort = [int]$env:HH_SSH_PORT
+    $userName = $preflight.UserName
+    $fingerprint = $preflight.Fingerprint
+    $migrationCount = $preflight.MigrationCount
+    $env:HH_SSH_PASSWORD_FILE = $preflight.PasswordPath
+    $failurePhase = 'journey'
 
     Invoke-HHCmdletStep 1 'Get-HHTarget' 'empty read without state creation' {
         $information = @()
@@ -328,13 +341,68 @@ try {
         Assert-HHCondition ($details[0].VisualizerPublishingState -ceq 'Paused') 'Visualizer publishing was not paused.'
         @{hostname=$details[0].Hostname;visualizerState=$details[0].VisualizerPublishingState}
     }
-    Invoke-HHCmdletStep 4 'Test-HHTarget' 'real identity probe without target mutation' {
+    Invoke-HHCmdletStep 4 'Get-TargetProcessStartEvents' 'clear pre-contact mission requirement' {
+        try {
+            $null=Get-TargetProcessStartEvents -Name alpha
+            throw 'The command unexpectedly collected without a mission.'
+        }
+        catch {
+            Assert-HHCondition ($_.Exception.Message -match 'Start a HostHunter mission') `
+                'The mission precondition was unclear.'
+            @{precondition='mission-required'}
+        }
+    }
+    Invoke-HHCmdletStep 5 'Get-TargetProcessEndEvents' 'clear pre-contact mission requirement' {
+        try {
+            $null=Get-TargetProcessEndEvents -Name alpha
+            throw 'The command unexpectedly collected without a mission.'
+        }
+        catch {
+            Assert-HHCondition ($_.Exception.Message -match 'Start a HostHunter mission') `
+                'The mission precondition was unclear.'
+            @{precondition='mission-required'}
+        }
+    }
+    Invoke-HHCmdletStep 6 'Get-TargetAuthenticationEvents' 'clear pre-contact mission requirement' {
+        try {
+            $null=Get-TargetAuthenticationEvents -Name alpha
+            throw 'The command unexpectedly collected without a mission.'
+        }
+        catch {
+            Assert-HHCondition ($_.Exception.Message -match 'Start a HostHunter mission') `
+                'The mission precondition was unclear.'
+            @{precondition='mission-required'}
+        }
+    }
+    Invoke-HHCmdletStep 7 'Get-TargetProcessAccessToken' 'clear pre-contact mission requirement' {
+        try {
+            $null=Get-TargetProcessAccessToken -Name alpha -ProcessName pwsh.exe
+            throw 'The command unexpectedly collected without a mission.'
+        }
+        catch {
+            Assert-HHCondition ($_.Exception.Message -match 'Start a HostHunter mission') `
+                'The mission precondition was unclear.'
+            @{precondition='mission-required'}
+        }
+    }
+    Invoke-HHCmdletStep 8 'Get-TargetUserEffectiveRights' 'clear pre-contact mission requirement' {
+        try {
+            $null=Get-TargetUserEffectiveRights -Name alpha
+            throw 'The command unexpectedly collected without a mission.'
+        }
+        catch {
+            Assert-HHCondition ($_.Exception.Message -match 'Start a HostHunter mission') `
+                'The mission precondition was unclear.'
+            @{precondition='mission-required'}
+        }
+    }
+    Invoke-HHCmdletStep 9 'Test-HHTarget' 'real identity probe without target mutation' {
         $result = Test-HHTarget -Name alpha -Reason 'focused cmdlet verifier'
         Assert-HHCondition ([bool]$result.Succeeded) 'Target identity probe failed.'
         Assert-HHCondition ($result.RemotePSEdition -ceq 'Core') 'Remote target is not PowerShell Core.'
         @{ succeeded = $result.Succeeded; edition = $result.RemotePSEdition }
     }
-    Invoke-HHCmdletStep 5 'Invoke-HHCommand' 'one command with complete stream evidence' {
+    Invoke-HHCmdletStep 10 'Invoke-HHCommand' 'one command with complete stream evidence' {
         $command = @'
 Write-Output 'output-value'
 Write-Warning 'warning-value'
@@ -352,7 +420,7 @@ Write-Error 'nonterminating-error' -ErrorAction Continue
             "Unexpected stream set: $($streams -join ',')."
         @{ invocationId = $script:commandResult.InvocationId; streams = $streams }
     }
-    Invoke-HHCmdletStep 6 'Get-HHAuditRecord' 'fresh-process exact audit read without DB mutation' {
+    Invoke-HHCmdletStep 11 'Get-HHAuditRecord' 'fresh-process exact audit read without DB mutation' {
         Assert-HHCondition ($null -ne $script:commandResult) 'Command invocation is unavailable.'
         $id = [string]$script:commandResult.InvocationId
         $fresh = Invoke-HHFreshJson "@(Get-HHAuditRecord -InvocationId '$id' -First 1)"
@@ -361,7 +429,7 @@ Write-Error 'nonterminating-error' -ErrorAction Continue
         Assert-HHCondition ($record.CaseId -ceq 'CASE-CMDLETS-001') 'Audit case ID differs.'
         @{ invocationId = $record.InvocationId; operation = $record.Operation; status = $record.Status }
     }
-    Invoke-HHCmdletStep 7 'Get-HHAuditOutput' 'fresh-process ordered output read without DB mutation' {
+    Invoke-HHCmdletStep 12 'Get-HHAuditOutput' 'fresh-process ordered output read without DB mutation' {
         Assert-HHCondition ($null -ne $script:commandResult) 'Command invocation is unavailable.'
         $id = [string]$script:commandResult.InvocationId
         $fresh = Invoke-HHFreshJson "@(Get-HHAuditOutput -InvocationId '$id')"
@@ -371,7 +439,7 @@ Write-Error 'nonterminating-error' -ErrorAction Continue
         Assert-HHCondition ($streams -contains 'Output') 'Fresh output read omitted the Output stream.'
         @{ invocationId = $id; eventCount = $events.Count; streams = $streams }
     }
-    Invoke-HHCmdletStep 8 'Enable-HHSshKeyAuthentication' 'password-to-key proof and persisted transition' {
+    Invoke-HHCmdletStep 13 'Enable-HHSshKeyAuthentication' 'password-to-key proof and persisted transition' {
         $result = Enable-HHSshKeyAuthentication -Name alpha `
             -Reason 'focused cmdlet verifier' -Confirm:$false
         Assert-HHCondition ($result.Authentication -ceq 'PublicKey') 'SSH key transition did not complete.'
@@ -380,7 +448,7 @@ Write-Error 'nonterminating-error' -ErrorAction Continue
             'Fresh process did not reload the public-key profile.'
         @{ authentication = $result.Authentication; keyPath = $result.KeyPath }
     }
-    Invoke-HHCmdletStep 9 'Set-HHWindowsProcessAuditPolicy' 'finite audited Linux unsupported failure' {
+    Invoke-HHCmdletStep 14 'Set-HHWindowsProcessAuditPolicy' 'finite audited Linux unsupported failure' {
         $result = Set-HHWindowsProcessAuditPolicy -State Enabled -Target alpha `
             -Escalate -Reason 'focused Linux failure proof' -Confirm:$false
         Assert-HHCondition (-not [bool]$result.Succeeded) 'Linux policy request unexpectedly succeeded.'
@@ -388,13 +456,13 @@ Write-Error 'nonterminating-error' -ErrorAction Continue
         Assert-HHCondition ($result.OutcomeStatus -ceq 'Failed') 'Linux policy request was not audited failed.'
         @{ succeeded = $result.Succeeded; dispatchState = $result.DispatchState; outcome = $result.OutcomeStatus }
     }
-    Invoke-HHCmdletStep 10 'Set-HHEscalationPreference' 'persist WindowsTokenPrivilege preference' {
+    Invoke-HHCmdletStep 15 'Set-HHEscalationPreference' 'persist WindowsTokenPrivilege preference' {
         $saved = Set-HHEscalationPreference -Method WindowsTokenPrivilege -Confirm:$false
         Assert-HHCondition ($saved.Method -ceq 'WindowsTokenPrivilege') 'Escalation method differs.'
         Assert-HHCondition ($saved.Source -ceq 'Persisted') 'Escalation preference was not persisted.'
         @{ method = $saved.Method; source = $saved.Source }
     }
-    Invoke-HHCmdletStep 11 'Get-HHEscalationPreference' 'fresh-process persisted read without DB mutation' {
+    Invoke-HHCmdletStep 16 'Get-HHEscalationPreference' 'fresh-process persisted read without DB mutation' {
         $fresh = Invoke-HHFreshJson 'Get-HHEscalationPreference'
         Assert-HHCondition ($fresh.Method -ceq 'WindowsTokenPrivilege') `
             'Fresh process did not reload the escalation method.'
@@ -402,7 +470,7 @@ Write-Error 'nonterminating-error' -ErrorAction Continue
             'Fresh process did not report a persisted preference.'
         @{ method = $fresh.Method; source = $fresh.Source }
     }
-    Invoke-HHCmdletStep 12 'Remove-HHTarget' 'remove profile while retaining audit history' {
+    Invoke-HHCmdletStep 17 'Remove-HHTarget' 'remove profile while retaining audit history' {
         $script:auditCountBeforeRemoval = @(Get-HHAuditRecord -TargetName alpha -First 100).Count
         $null = Remove-HHTarget -Name alpha -Confirm:$false
         $fresh = Invoke-HHFreshJson '@(Get-HHTarget)'
@@ -415,17 +483,20 @@ Write-Error 'nonterminating-error' -ErrorAction Continue
     }
 }
 catch {
-    $setupError = $_.Exception.Message
-    while ($rows.Count -lt 12) {
+    $terminalError = $_.Exception.Message
+    while ($rows.Count -lt $orderedJourney.Count) {
         $index = $rows.Count + 1
         $rows.Add([pscustomobject][ordered]@{
                 index = $index
                 cmdlet = $orderedJourney[$index - 1]
-                expected = 'journey setup must succeed'
-                status = 'failed'
+                expected = if ($failurePhase -ceq 'preflight') {
+                    'verifier preflight must succeed before any cmdlet runs'
+                }
+                else { 'journey must reach this ordered cmdlet' }
+                status = 'not-run'
                 durationMs = 0
                 observation = $null
-                error = $setupError
+                error = $terminalError
                 databaseBefore = $null
                 databaseAfter = $null
                 databaseDelta = $null
@@ -433,16 +504,40 @@ catch {
     }
 }
 finally {
-    $failed = @($rows | Where-Object status -ne 'passed')
-    $finalSnapshot = try { Get-HHDatabaseSnapshot } catch { $null }
+    if ($expectedCommands.Count -eq 0 -and
+        -not [string]::IsNullOrWhiteSpace($env:HH_RUNTIME_MODULE_PATH)) {
+        $expectedCommands = @(try {
+                Get-HHCmdletVerifierManifestCommand -ModulePath $env:HH_RUNTIME_MODULE_PATH
+            }
+            catch { @() })
+    }
+    $failed = @($rows | Where-Object status -eq 'failed')
+    $finalSnapshot = if (-not [string]::IsNullOrWhiteSpace([string]$databasePath)) {
+        try { Get-HHDatabaseSnapshot } catch { $null }
+    }
+    else { $null }
+    $databaseValid = $null -ne $finalSnapshot -and $finalSnapshot.Exists -and
+        $finalSnapshot.Integrity -ceq 'ok' -and
+        $migrationCount -gt 0 -and $finalSnapshot.SchemaVersion -eq $migrationCount
+    $passed = $null -eq $terminalError -and $failed.Count -eq 0 -and
+        $rows.Count -eq $expectedCommands.Count -and $databaseValid
+    $terminalPhase = if ($passed) { 'none' } else { $failurePhase }
     $receipt = [pscustomobject][ordered]@{
         schema = 'HostHunter.CmdletVerifierReceipt.v1'
-        status = if ($failed.Count -eq 0 -and $rows.Count -eq $expectedCommands.Count) {
-            'passed'
-        } else { 'failed' }
+        status = if ($passed) { 'passed' } else { 'failed' }
+        failurePhase = $terminalPhase
+        infrastructureFailure = if ($terminalPhase -ceq 'preflight') { $terminalError } else { $null }
+        journeyFailure = if ($terminalPhase -ceq 'journey') { $terminalError } else { $null }
         sourceSha = $env:HH_SOURCE_SHA
+        sourceFingerprint = $env:HH_SOURCE_FINGERPRINT
+        runId = $env:HH_CMDLET_RUN_ID
+        dirtyTree = $env:HH_DIRTY_TREE -ceq 'true'
         verifierImageId = $env:HH_VERIFIER_IMAGE_ID
-        moduleManifestSha256 = (Get-FileHash -LiteralPath $modulePath -Algorithm SHA256).Hash.ToLowerInvariant()
+        moduleManifestSha256 = if (-not [string]::IsNullOrWhiteSpace([string]$modulePath) -and
+            [IO.File]::Exists($modulePath)) {
+            (Get-FileHash -LiteralPath $modulePath -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+        else { $null }
         expectedCommands = $expectedCommands
         observedCommands = if (Get-Module HostHunterNextGeneration) {
             @(Get-Command -Module HostHunterNextGeneration -CommandType Function |
@@ -451,6 +546,7 @@ finally {
         else { @() }
         rowCount = $rows.Count
         failedCount = $failed.Count
+        migrationCount = $migrationCount
         database = $finalSnapshot
         rows = $rows.ToArray()
         completedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
